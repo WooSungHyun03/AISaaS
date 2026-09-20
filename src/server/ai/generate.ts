@@ -1,5 +1,6 @@
 import "server-only";
 import type { ZodType } from "zod";
+import { AIProviderError } from "./errors";
 import { getAIProvider } from "./index";
 import type { GenerateTextParams } from "./provider";
 
@@ -34,6 +35,7 @@ export async function generateStructured<T>({
 }: GenerateStructuredParams<T>): Promise<T> {
   const jsonInstruction =
     "Respond with ONLY valid JSON matching the requested shape. No markdown fences, no commentary.";
+  const providerName = getAIProvider().name;
 
   for (let attempt = 0; attempt < 2; attempt++) {
     const text = await generateText({
@@ -51,10 +53,14 @@ export async function generateStructured<T>({
     }
 
     if (attempt === 1) {
-      throw new Error(`AI response did not match the expected structure after 2 attempts. Raw: ${text.slice(0, 300)}`);
+      throw new AIProviderError(
+        "INVALID_STRUCTURED_RESPONSE",
+        providerName,
+        `AI response did not match the expected structure after 2 attempts. Raw: ${text.slice(0, 300)}`,
+      );
     }
   }
 
   // Unreachable, satisfies TypeScript's control-flow analysis.
-  throw new Error("generateStructured: unreachable");
+  throw new AIProviderError("INVALID_STRUCTURED_RESPONSE", providerName, "generateStructured: unreachable");
 }
