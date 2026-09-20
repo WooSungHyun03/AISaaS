@@ -17,6 +17,11 @@ const serverSchema = z.object({
   AI_PROVIDER: z.enum(["mock", "openai", "gemini"]).default("mock"),
   OPENAI_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
+  // Bounded request timeout + retry count for real AI providers. Retries are
+  // only ever applied to transient failures (timeout/429/5xx/network) — never
+  // to auth or validation errors, and never unbounded.
+  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
 
   BILLING_PROVIDER: z.enum(["mock"]).default("mock"),
 

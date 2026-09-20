@@ -74,6 +74,25 @@ A handler only implements "what does this automation actually do" — loading co
 
 Only `blog-marketing` has a working handler + connector (WordPress) today — the vertical slice used to validate the architecture end to end. The other four templates have handler/connector interfaces in place that throw "not implemented yet"; `AUTOMATION_AVAILABILITY` in `src/types/automation.ts` is the single source of truth the UI reads to show Available/Beta/Coming Soon and to gate what the creation wizard offers.
 
+## AI Provider Reliability
+
+`src/server/ai/` exposes `generateText()` / `generateStructured()` — automation
+handlers never touch a vendor SDK or fetch call directly. The real adapters
+(`providers/openai.ts`, `providers/gemini.ts`) share one HTTP layer
+(`src/server/ai/http.ts`) that:
+
+- enforces a per-request timeout (`AI_REQUEST_TIMEOUT_MS`, default 30s),
+- classifies every failure into `AIErrorCode` (`src/server/ai/errors.ts`):
+  `MISSING_API_KEY`, `TIMEOUT`, `RATE_LIMITED`, `PROVIDER_UNAVAILABLE`,
+  `INVALID_STRUCTURED_RESPONSE`, `NETWORK_FAILURE`,
+- retries only the transient codes (timeout/429/5xx/network) up to
+  `AI_MAX_RETRIES` (default 2) with exponential backoff — auth/validation
+  failures never retry, and retries are always bounded, never infinite.
+
+`generateStructured()` layers JSON-schema (zod) validation on top and retries
+at most once if the model's response doesn't parse or validate, throwing
+`AIProviderError("INVALID_STRUCTURED_RESPONSE", ...)` if it still fails.
+
 ## Billing Flow
 
 ```
