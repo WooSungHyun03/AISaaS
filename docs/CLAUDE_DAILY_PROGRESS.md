@@ -1,10 +1,15 @@
 # Claude Daily Development Progress
 
+The full day-by-day spec (Definition of Done, rules, git procedure) lives in
+[`DAILY_ROUTINE_PLAN.md`](DAILY_ROUTINE_PLAN.md). This file only tracks
+*which* day is current and a dated history. Read both at the start of every
+run.
+
 ## Current Day
-Day 2
+Day 2 — External Platform Connection Management
 
 ## Completed
-- Day 1 — Production AI Provider
+- Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
 
 ## Current
 - (none — Day 2 not started yet)
@@ -17,9 +22,9 @@ Day 2
   the real adapters.
 
 ## Next
-- Day 2 — Blog AI Pipeline (business context → duplicate-topic check →
-  content generation → validation → content_history), building on the
-  provider layer finished today.
+- Day 2 — External Platform Connection Management: `integration_connections`
+  migration, Supabase Vault-backed secret storage, server-only CRUD. See
+  `DAILY_ROUTINE_PLAN.md` Day 2 for the full spec.
 
 ## Daily History
 
@@ -62,4 +67,29 @@ Tests:
 - build: pass (`npm run build`)
 
 Commit:
-- (recorded after this file is committed — see git log)
+- cea124c feat(ai): add bounded timeout/retry and standard error taxonomy to AI provider layer
+- 0a7712b Merge pull request #1 from WooSungHyun03/feature/automation-ai
+
+Push:
+- origin/main (via PR #1, merged 2026-09-20)
+
+### 2026-09-20 (routine setup)
+Completed:
+- Owner requested a daily 00:00 KST scheduled routine going forward, working
+  directly on `main` (superseding the PR-based flow used for Day 1 — see
+  `DAILY_ROUTINE_PLAN.md` header for the explicit scope of that override).
+- Replaced the original 17-day roadmap with a 13-item roadmap the owner
+  provided directly (P0/P1/P2 prioritized), written out in full detail in
+  `docs/DAILY_ROUTINE_PLAN.md` — each Day has its own Definition of Done,
+  scoped implementation steps, and required tests.
+- No feature code changed in this entry; this is routine/process setup only.
+
+Tests:
+- N/A (docs-only change) — verified previous entry's lint/typecheck/test/build
+  results still hold since no source files changed here.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
