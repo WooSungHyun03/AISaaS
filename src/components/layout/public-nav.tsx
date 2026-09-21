@@ -11,23 +11,22 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const NAV_LINKS = [
+  { href: "/#explore", label: "AI 발견" },
+  { href: "/directory", label: "AI 서비스" },
   { href: "/#automations", label: "자동화" },
   { href: "/pricing", label: "요금제" },
-  { href: "/pricing#setup-service", label: "구축 대행" },
-  { href: "/directory", label: "AI 디렉토리" },
-  { href: "/guides", label: "가이드" },
 ];
 
 export function PublicNav({ isAuthenticated }: { isAuthenticated: boolean }) {
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-        <Link href="/" className="text-lg font-semibold tracking-tight">
+    <header className="sticky top-0 z-40 border-b border-stone-200 bg-[#fbfaf7]/95 backdrop-blur">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6">
+        <Link href="/" className="text-lg font-black tracking-[-0.04em] text-stone-950">
           AutoBiz
         </Link>
-        <nav className="hidden items-center gap-5 text-sm text-muted-foreground lg:flex">
+        <nav className="hidden items-center gap-7 text-sm font-medium text-stone-600 lg:flex">
           {NAV_LINKS.map((link) => (
-            <Link key={link.href} href={link.href} className="hover:text-foreground">
+            <Link key={link.href} href={link.href} className="transition-colors hover:text-blue-600">
               {link.label}
             </Link>
           ))}
@@ -53,15 +52,15 @@ export function PublicNav({ isAuthenticated }: { isAuthenticated: boolean }) {
             </DropdownMenuContent>
           </DropdownMenu>
           {isAuthenticated ? (
-            <Button asChild size="sm">
-              <Link href="/dashboard">대시보드</Link>
+              <Button asChild size="sm" className="rounded-lg bg-blue-600 hover:bg-blue-700">
+                <Link href="/dashboard">대시보드</Link>
             </Button>
           ) : (
             <>
               <Button asChild variant="ghost" size="sm" className="hidden sm:inline-flex">
                 <Link href="/login">로그인</Link>
               </Button>
-              <Button asChild size="sm">
+              <Button asChild size="sm" className="hidden rounded-lg bg-blue-600 hover:bg-blue-700 sm:inline-flex">
                 <Link href="/signup">무료로 시작하기</Link>
               </Button>
             </>
