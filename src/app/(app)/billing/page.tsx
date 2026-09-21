@@ -7,7 +7,9 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Progress } from "@/components/ui/progress";
 import { cancelSubscriptionAction, startCheckout } from "./actions";
 
-export default async function BillingPage() {
+export default async function BillingPage({ searchParams }: PageProps<"/billing">) {
+  const { plan: requestedPlan } = await searchParams;
+  const selectedPlan = requestedPlan === "STARTER" || requestedPlan === "PRO" ? requestedPlan : null;
   const supabase = await createClient();
   const {
     data: { user },
@@ -20,10 +22,10 @@ export default async function BillingPage() {
     supabase.from("automations").select("id", { count: "exact", head: true }).eq("user_id", user.id),
   ]);
 
-  const plan = subscription?.plan ?? "FREE";
+  const plan = subscription?.status === "ACTIVE" ? subscription.plan : "FREE";
   const planConfig = getPlanConfig(plan);
   const monthlyRuns = usage?.automation_runs ?? 0;
-  const isPaid = plan !== "FREE" && subscription?.status === "ACTIVE";
+  const isPaid = plan !== "FREE";
 
   return (
     <div className="space-y-8">
@@ -31,6 +33,28 @@ export default async function BillingPage() {
         <h1 className="text-2xl font-bold tracking-tight">Billing</h1>
         <p className="text-sm text-muted-foreground">현재 플랜과 사용량을 확인하고 관리하세요.</p>
       </div>
+
+      {selectedPlan ? (
+        <Card className="border border-blue-200 bg-blue-50/50 ring-0">
+          <CardHeader>
+            <CardTitle className="text-lg font-bold">선택한 {getPlanConfig(selectedPlan).name} 플랜</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              월 ₩{getPlanConfig(selectedPlan).priceMonthlyKrw.toLocaleString()} · 자동화 {getPlanConfig(selectedPlan).automationLimit}개 · 월 {getPlanConfig(selectedPlan).monthlyRunLimit}회 실행
+            </p>
+            {plan === selectedPlan ? (
+              <Badge>현재 이용 중</Badge>
+            ) : (
+              <form action={startCheckout.bind(null, selectedPlan)}>
+                <Button type="submit" className="w-full bg-blue-600 text-white hover:bg-blue-700 sm:w-auto">
+                  {getPlanConfig(selectedPlan).name} 결제 계속하기
+                </Button>
+              </form>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

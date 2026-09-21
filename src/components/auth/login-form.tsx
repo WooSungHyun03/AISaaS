@@ -40,7 +40,7 @@ export function LoginForm() {
         </form>
         <p className="mt-4 text-center text-sm text-muted-foreground">
           계정이 없으신가요?{" "}
-          <Link href="/signup" className="underline underline-offset-4">
+          <Link href={`/signup?redirectTo=${encodeURIComponent(redirectTo)}`} className="underline underline-offset-4">
             회원가입
           </Link>
         </p>

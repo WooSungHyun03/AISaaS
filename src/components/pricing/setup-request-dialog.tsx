@@ -17,11 +17,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { createSetupRequest, type SetupRequestState } from "@/app/(public)/pricing/actions";
 
 const AUTOMATION_TYPES = [
+  { value: "job-postings", label: "채용공고 매일 탐색" },
+  { value: "article-collection", label: "관심주제 기사·글 수집" },
   { value: "blog-marketing", label: "블로그 마케팅" },
-  { value: "instagram-marketing", label: "인스타그램 마케팅" },
-  { value: "newsletter", label: "뉴스레터" },
-  { value: "customer-support", label: "고객 응대" },
-  { value: "shorts", label: "숏폼 콘텐츠" },
+  { value: "shorts", label: "유튜브 쇼츠 제작" },
   { value: "other", label: "기타 / 잘 모르겠음" },
 ];
 
@@ -35,13 +34,13 @@ export function SetupRequestDialog({ isAuthenticated }: { isAuthenticated: boole
   if (!isAuthenticated) {
     return (
       <Button asChild size="lg" className="h-11 rounded-lg bg-blue-600 px-5 text-white hover:bg-blue-700">
-        <a href="/login?redirectTo=/pricing">로그인 후 신청하기</a>
+        <a href="/login?redirectTo=%2Fpricing%23setup-service">로그인 후 신청하기</a>
       </Button>
     );
   }
 
   if (state.success) {
-    return <p className="text-sm text-muted-foreground">요청이 접수되었습니다. 빠른 시일 내에 연락드리겠습니다.</p>;
+    return <p className="text-sm text-slate-200">요청이 접수되었습니다. 빠른 시일 내에 연락드리겠습니다.</p>;
   }
 
   return (

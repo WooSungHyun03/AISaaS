@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { SetupRequestDialog } from "@/components/pricing/setup-request-dialog";
 import { ALL_PLANS } from "@/server/billing/plans";
 import { createClient } from "@/lib/supabase/server";
+import { serverEnv } from "@/lib/env/server";
 import { startCheckout } from "@/app/(app)/billing/actions";
 import type { PlanConfig } from "@/types/billing";
 import type { SubscriptionPlan } from "@/types/domain";
@@ -55,8 +56,8 @@ function PlanAction({
   if (plan.id === "FREE") {
     return (
       <Button asChild variant="outline" className="h-11 w-full rounded-lg border-stone-300 bg-white">
-        <Link href={isAuthenticated ? "/dashboard" : "/signup"}>
-          {isAuthenticated ? "무료 플랜으로 계속하기" : "무료로 시작하기"}
+        <Link href={isAuthenticated && currentPlan !== "FREE" ? "/billing" : isAuthenticated ? "/dashboard" : "/signup"}>
+          {isAuthenticated && currentPlan !== "FREE" ? "현재 플랜 관리" : isAuthenticated ? "무료 플랜으로 계속하기" : "무료로 시작하기"}
           <ArrowRight className="ml-1 h-4 w-4" />
         </Link>
       </Button>
@@ -74,7 +75,7 @@ function PlanAction({
   if (!isAuthenticated) {
     return (
       <Button asChild className="h-11 w-full rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-        <Link href="/login?redirectTo=/billing">
+        <Link href={`/login?redirectTo=${encodeURIComponent(`/billing?plan=${plan.id}`)}`}>
           로그인 후 {plan.name} 선택 <ArrowRight className="ml-1 h-4 w-4" />
         </Link>
       </Button>
@@ -111,7 +112,7 @@ export default async function PricingPage() {
             무료로 시작하고,<br className="sm:hidden" /> 필요한 만큼 자동화하세요.
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-stone-600 sm:text-lg">
-            모든 가격과 사용 한도는 실제 플랜 정책을 그대로 반영합니다. 약정 없이 시작하고 현재 업무량에 맞춰 플랜을 선택하세요.
+            가격과 사용 한도는 실제 플랜 정책을 그대로 반영합니다. 무료로 시작한 뒤 현재 업무량에 맞춰 플랜을 선택하세요.
           </p>
           <div className="mx-auto mt-8 flex max-w-2xl flex-wrap items-center justify-center gap-x-6 gap-y-3 border-y border-stone-200 py-4 text-sm text-stone-600">
             <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-blue-600" /> 무료 플랜 제공</span>
@@ -151,7 +152,7 @@ export default async function PricingPage() {
                   <div className="flex min-h-8 items-start justify-between gap-4">
                     <p className="text-xs font-bold uppercase tracking-[0.12em] text-stone-500">{copy.eyebrow}</p>
                     <div className="flex flex-wrap justify-end gap-1.5">
-                      {recommended ? <span className="rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white">가장 인기</span> : null}
+                      {recommended ? <span className="rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-bold text-white">추천</span> : null}
                       {active ? <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold text-emerald-700">현재 플랜</span> : null}
                     </div>
                   </div>
@@ -194,7 +195,7 @@ export default async function PricingPage() {
           </div>
 
           <div className="mt-5 flex flex-col gap-2 text-xs leading-5 text-stone-500 sm:flex-row sm:items-center sm:justify-between">
-            <p>자동화 수와 월 실행 한도는 생성 및 실행 시 서버에서 다시 확인됩니다.</p>
+            <p>자동화 수와 월 실행 한도는 서버에서 확인됩니다.{serverEnv.BILLING_PROVIDER === "mock" ? " 현재 결제는 테스트용 모의 결제로 실제 요금이 청구되지 않습니다." : ""}</p>
             <Link href="/billing" className="inline-flex items-center font-bold text-blue-600 hover:underline">내 플랜과 사용량 확인 <ArrowRight className="ml-1 h-3.5 w-3.5" /></Link>
           </div>
         </div>

@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 const initialState: AuthActionState = {};
 
-export function SignupForm() {
+export function SignupForm({ redirectTo = "/dashboard" }: { redirectTo?: string }) {
   const [state, formAction, isPending] = useActionState(signUp, initialState);
 
   return (
@@ -21,6 +21,7 @@ export function SignupForm() {
       </CardHeader>
       <CardContent>
         <form action={formAction} className="space-y-4">
+          <input type="hidden" name="redirectTo" value={redirectTo} />
           <div className="space-y-2">
             <Label htmlFor="displayName">이름</Label>
             <Input id="displayName" name="displayName" type="text" autoComplete="name" required />
@@ -40,7 +41,7 @@ export function SignupForm() {
         </form>
         <p className="mt-4 text-center text-sm text-muted-foreground">
           이미 계정이 있으신가요?{" "}
-          <Link href="/login" className="underline underline-offset-4">
+          <Link href={`/login?redirectTo=${encodeURIComponent(redirectTo)}`} className="underline underline-offset-4">
             로그인
           </Link>
         </p>

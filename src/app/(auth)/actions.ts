@@ -7,10 +7,17 @@ export interface AuthActionState {
   error?: string;
 }
 
+function safeRedirectTo(value: string): string {
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+    return "/dashboard";
+  }
+  return value;
+}
+
 export async function signIn(_prevState: AuthActionState, formData: FormData): Promise<AuthActionState> {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
-  const redirectTo = String(formData.get("redirectTo") ?? "/dashboard");
+  const redirectTo = safeRedirectTo(String(formData.get("redirectTo") ?? "/dashboard"));
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -26,13 +33,14 @@ export async function signUp(_prevState: AuthActionState, formData: FormData): P
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const displayName = String(formData.get("displayName") ?? "");
+  const redirectTo = safeRedirectTo(String(formData.get("redirectTo") ?? "/dashboard"));
 
   if (password.length < 8) {
     return { error: "비밀번호는 8자 이상이어야 합니다." };
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: { data: { display_name: displayName } },
@@ -42,7 +50,11 @@ export async function signUp(_prevState: AuthActionState, formData: FormData): P
     return { error: error.message };
   }
 
-  redirect("/dashboard");
+  if (!data.session) {
+    redirect(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
+  }
+
+  redirect(redirectTo);
 }
 
 export async function signOut(): Promise<void> {
