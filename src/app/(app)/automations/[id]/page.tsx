@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
@@ -102,7 +103,13 @@ export default async function AutomationDetailPage({ params }: { params: Promise
                         {RUN_STATUS_LABEL[run.status]}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{run.error_message ?? "-"}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {run.status === "FAILED" ? (
+                        <Link href={`/automations/${automation.id}/runs/${run.id}`} className="text-red-700 underline-offset-2 hover:underline">
+                          오류 상세 보기
+                        </Link>
+                      ) : "-"}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
