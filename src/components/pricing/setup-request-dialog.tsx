@@ -34,7 +34,7 @@ export function SetupRequestDialog({ isAuthenticated }: { isAuthenticated: boole
 
   if (!isAuthenticated) {
     return (
-      <Button asChild variant="outline">
+      <Button asChild size="lg" className="h-11 rounded-lg bg-blue-600 px-5 text-white hover:bg-blue-700">
         <a href="/login?redirectTo=/pricing">로그인 후 신청하기</a>
       </Button>
     );
@@ -47,7 +47,7 @@ export function SetupRequestDialog({ isAuthenticated }: { isAuthenticated: boole
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline">상담 요청하기</Button>
+        <Button size="lg" className="h-11 rounded-lg bg-blue-600 px-5 text-white hover:bg-blue-700">구축 상담 요청하기</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
