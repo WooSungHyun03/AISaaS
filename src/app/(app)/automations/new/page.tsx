@@ -35,7 +35,7 @@ export default async function NewAutomationPage({
         <CardContent className="py-12 text-center space-y-4">
           <p className="text-sm text-muted-foreground">자동화를 만들려면 먼저 사업체를 등록해주세요.</p>
           <Button asChild>
-            <Link href="/business">사업체 등록하기</Link>
+            <Link href="/onboarding">사업체 정보 입력하기</Link>
           </Button>
         </CardContent>
       </Card>

@@ -33,7 +33,10 @@ export async function signUp(_prevState: AuthActionState, formData: FormData): P
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const displayName = String(formData.get("displayName") ?? "");
-  const redirectTo = safeRedirectTo(String(formData.get("redirectTo") ?? "/dashboard"));
+  const redirectTo = safeRedirectTo(String(formData.get("redirectTo") ?? "/onboarding"));
+  const onboardingPath = /^\/billing\?plan=(STARTER|PRO)$/.test(redirectTo)
+    ? `/onboarding?next=${encodeURIComponent(redirectTo)}`
+    : "/onboarding";
 
   if (password.length < 8) {
     return { error: "비밀번호는 8자 이상이어야 합니다." };
@@ -51,10 +54,10 @@ export async function signUp(_prevState: AuthActionState, formData: FormData): P
   }
 
   if (!data.session) {
-    redirect(`/login?redirectTo=${encodeURIComponent(redirectTo)}`);
+    redirect(`/login?redirectTo=${encodeURIComponent(onboardingPath)}&checkEmail=1`);
   }
 
-  redirect(redirectTo);
+  redirect(onboardingPath);
 }
 
 export async function signOut(): Promise<void> {

@@ -45,7 +45,7 @@ export default async function BusinessPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                {business.description ? <p className="text-sm text-muted-foreground">{business.description}</p> : null}
+                {business.description ? <p className="whitespace-pre-line text-sm text-muted-foreground">{business.description}</p> : null}
                 <div className="flex flex-wrap gap-1">
                   {business.keywords.map((keyword) => (
                     <Badge key={keyword} variant="secondary" className="font-normal">

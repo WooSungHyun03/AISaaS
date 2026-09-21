@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export interface BusinessActionState {
   error?: string;
+  success?: boolean;
 }
 
 function parseKeywords(raw: string): string[] {
@@ -15,10 +16,12 @@ function parseKeywords(raw: string): string[] {
 }
 
 function businessFieldsFromForm(formData: FormData) {
+  const description = String(formData.get("description") ?? "").trim();
+  const services = String(formData.get("services") ?? "").trim();
   return {
     name: String(formData.get("name") ?? "").trim(),
     industry: String(formData.get("industry") ?? "").trim() || null,
-    description: String(formData.get("description") ?? "").trim() || null,
+    description: [description, services ? `주요 서비스: ${services}` : ""].filter(Boolean).join("\n\n") || null,
     location: String(formData.get("location") ?? "").trim() || null,
     target_customer: String(formData.get("targetCustomer") ?? "").trim() || null,
     brand_tone: String(formData.get("brandTone") ?? "").trim() || null,
@@ -42,7 +45,7 @@ export async function createBusiness(_prevState: BusinessActionState, formData: 
 
   revalidatePath("/business");
   revalidatePath("/dashboard");
-  return {};
+  return { success: true };
 }
 
 export async function updateBusiness(

@@ -10,14 +10,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 const initialState: AuthActionState = {};
 
-export function SignupForm({ redirectTo = "/dashboard" }: { redirectTo?: string }) {
+export function SignupForm({ redirectTo = "/onboarding" }: { redirectTo?: string }) {
   const [state, formAction, isPending] = useActionState(signUp, initialState);
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>회원가입</CardTitle>
-        <CardDescription>무료로 시작하고 첫 자동화를 만들어보세요.</CardDescription>
+        <CardDescription>무료로 가입하고 사업 정보를 입력해 첫 자동화를 준비하세요.</CardDescription>
       </CardHeader>
       <CardContent>
         <form action={formAction} className="space-y-4">

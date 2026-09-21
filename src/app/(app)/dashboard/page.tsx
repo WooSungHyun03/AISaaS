@@ -55,7 +55,7 @@ export default async function DashboardPage() {
         <h1 className="text-2xl font-bold tracking-tight">환영합니다!</h1>
         <p className="text-muted-foreground">자동화를 시작하려면 먼저 사업체 프로필을 등록해주세요.</p>
         <Button asChild>
-          <Link href="/business">사업체 등록하기</Link>
+          <Link href="/onboarding">사업체 정보 입력하기</Link>
         </Button>
       </div>
     );

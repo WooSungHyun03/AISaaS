@@ -14,6 +14,7 @@ const initialState: AuthActionState = {};
 export function LoginForm() {
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? "/dashboard";
+  const checkEmail = searchParams.get("checkEmail") === "1";
   const [state, formAction, isPending] = useActionState(signIn, initialState);
 
   return (
@@ -23,6 +24,11 @@ export function LoginForm() {
         <CardDescription>계정에 로그인하고 자동화를 관리하세요.</CardDescription>
       </CardHeader>
       <CardContent>
+        {checkEmail ? (
+          <p role="status" className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm leading-5 text-blue-800">
+            가입한 이메일의 인증 링크를 확인해주세요. 인증 후 로그인하면 사업 정보 설정으로 이어집니다.
+          </p>
+        ) : null}
         <form action={formAction} className="space-y-4">
           <input type="hidden" name="redirectTo" value={redirectTo} />
           <div className="space-y-2">
