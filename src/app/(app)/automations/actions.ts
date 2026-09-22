@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { canCreateAutomation, canExecuteAutomation } from "@/server/billing/entitlements";
 import { runAutomationNow } from "@/server/automations/runner";
 import { computeNextRunAt } from "@/server/automations/scheduler";
-import type { AutomationSchedule } from "@/types/automation";
+import { AUTOMATION_AVAILABILITY, type AutomationSchedule } from "@/types/automation";
 import type { Json } from "@/types/domain";
 
 export interface AutomationActionState {
@@ -41,6 +41,20 @@ export async function createAutomation(
 
   if (!businessId || !templateId || !name) {
     return { error: "모든 필수 항목을 입력해주세요." };
+  }
+
+  const [businessResult, templateResult] = await Promise.all([
+    supabase.from("businesses").select("id").eq("id", businessId).eq("owner_id", user.id).maybeSingle(),
+    supabase.from("automation_templates").select("slug, is_active").eq("id", templateId).maybeSingle(),
+  ]);
+  if (businessResult.error || templateResult.error) {
+    return { error: "사업체와 자동화 유형을 확인하는 중 오류가 발생했습니다." };
+  }
+  if (!businessResult.data) return { error: "본인의 사업체를 선택해주세요." };
+  const template = templateResult.data;
+  const availability = template ? AUTOMATION_AVAILABILITY[template.slug as keyof typeof AUTOMATION_AVAILABILITY] : undefined;
+  if (!template?.is_active || (availability !== "AVAILABLE" && availability !== "BETA")) {
+    return { error: "아직 생성할 수 없는 자동화입니다." };
   }
 
   const entitlement = await canCreateAutomation(supabase, user.id);

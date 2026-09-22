@@ -29,6 +29,29 @@ export default async function NewAutomationPage({
 
   const defaultTemplateId = template ? availableTemplates.find((t) => t.slug === template)?.id : undefined;
 
+  if (template && !defaultTemplateId) {
+    return (
+      <Card>
+        <CardContent className="space-y-4 py-12 text-center">
+          <p className="font-medium">이 자동화는 아직 생성할 수 없습니다.</p>
+          <p className="text-sm text-muted-foreground">Marketplace에서 현재 사용 가능한 자동화를 선택해주세요.</p>
+          <Button asChild variant="outline"><Link href="/automations/marketplace">자동화 둘러보기</Link></Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (availableTemplates.length === 0) {
+    return (
+      <Card>
+        <CardContent className="space-y-4 py-12 text-center">
+          <p className="text-sm text-muted-foreground">현재 생성할 수 있는 자동화가 없습니다.</p>
+          <Button asChild variant="outline"><Link href="/automations/marketplace">Marketplace로 돌아가기</Link></Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if ((businesses ?? []).length === 0) {
     return (
       <Card>
