@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { AutomationForm } from "@/components/automations/automation-form";
+import { BlogSetupWizard } from "@/components/automations/blog-setup-wizard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { AUTOMATION_AVAILABILITY } from "@/types/automation";
@@ -28,6 +29,7 @@ export default async function NewAutomationPage({
   });
 
   const defaultTemplateId = template ? availableTemplates.find((t) => t.slug === template)?.id : undefined;
+  const selectedTemplate = availableTemplates.find((t) => t.id === defaultTemplateId) ?? availableTemplates[0];
 
   if (template && !defaultTemplateId) {
     return (
@@ -66,9 +68,13 @@ export default async function NewAutomationPage({
   }
 
   return (
-    <div className="mx-auto max-w-xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">새 자동화 만들기</h1>
-      <AutomationForm businesses={businesses ?? []} templates={availableTemplates} defaultTemplateId={defaultTemplateId} />
+      {selectedTemplate.slug === "blog-marketing" ? (
+        <BlogSetupWizard businesses={businesses ?? []} template={selectedTemplate} />
+      ) : (
+        <AutomationForm businesses={businesses ?? []} templates={availableTemplates} defaultTemplateId={defaultTemplateId} />
+      )}
     </div>
   );
 }

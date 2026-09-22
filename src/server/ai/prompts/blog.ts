@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Business } from "@/types/domain";
+import type { BlogAutomationConfig } from "@/types/blog-automation";
 
 export const blogContentSchema = z.object({
   topic: z.string().min(1),
@@ -9,7 +10,7 @@ export const blogContentSchema = z.object({
 
 export type BlogContent = z.infer<typeof blogContentSchema>;
 
-export function buildBlogPrompt(business: Business, recentTopics: string[]) {
+export function buildBlogPrompt(business: Business, recentTopics: string[], config?: BlogAutomationConfig) {
   const system = [
     "You are a marketing content writer for a small business, writing in Korean.",
     `Business name: ${business.name}`,
@@ -18,6 +19,9 @@ export function buildBlogPrompt(business: Business, recentTopics: string[]) {
     business.target_customer ? `Target customer: ${business.target_customer}` : null,
     business.brand_tone ? `Brand tone: ${business.brand_tone}` : null,
     business.keywords.length ? `Keywords to weave in naturally: ${business.keywords.join(", ")}` : null,
+    config?.objective ? `This post's marketing goal: ${config.objective}` : null,
+    config?.tone ? `Tone for this automation: ${config.tone}` : null,
+    config?.keywords.length ? `Primary keywords for this post: ${config.keywords.join(", ")}` : null,
   ]
     .filter(Boolean)
     .join("\n");

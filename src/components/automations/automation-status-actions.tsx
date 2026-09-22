@@ -1,10 +1,28 @@
 "use client";
 
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { activateAutomation, deleteAutomation, pauseAutomation } from "@/app/(app)/automations/actions";
 import type { AutomationStatus } from "@/types/domain";
 
-export function AutomationStatusActions({ automationId, status }: { automationId: string; status: AutomationStatus }) {
+export function AutomationStatusActions({ automationId, status, primary = false }: { automationId: string; status: AutomationStatus; primary?: boolean }) {
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleActivate() {
+    startTransition(async () => {
+      try {
+        await activateAutomation(automationId);
+        toast.success("자동화가 활성화되었습니다.");
+        router.refresh();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "자동화를 활성화하지 못했습니다.");
+      }
+    });
+  }
+
   return (
     <div className="flex gap-2">
       {status === "ACTIVE" ? (
@@ -14,11 +32,9 @@ export function AutomationStatusActions({ automationId, status }: { automationId
           </Button>
         </form>
       ) : (
-        <form action={activateAutomation.bind(null, automationId)}>
-          <Button type="submit" variant="outline">
-            활성화
-          </Button>
-        </form>
+        <Button type="button" variant={primary ? "default" : "outline"} onClick={handleActivate} disabled={isPending}>
+          {isPending ? "활성화 중..." : "활성화"}
+        </Button>
       )}
       <form
         action={deleteAutomation.bind(null, automationId)}

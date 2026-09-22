@@ -6,22 +6,27 @@ import { createClient } from "@/lib/supabase/server";
 import { canCreateAutomation, canExecuteAutomation } from "@/server/billing/entitlements";
 import { runAutomationNow } from "@/server/automations/runner";
 import { computeNextRunAt } from "@/server/automations/scheduler";
+import { WordPressConnector, normalizeWordPressSiteUrl } from "@/server/connectors/wordpress";
+import { encryptWordPressPassword } from "@/server/connectors/wordpress/credentials";
 import { AUTOMATION_AVAILABILITY, type AutomationSchedule } from "@/types/automation";
+import { blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
 import type { Json } from "@/types/domain";
 
 export interface AutomationActionState {
   error?: string;
 }
 
-function scheduleFromForm(formData: FormData): AutomationSchedule {
-  const frequency = String(formData.get("frequency") ?? "WEEKLY") as AutomationSchedule["frequency"];
+function scheduleFromForm(formData: FormData): AutomationSchedule | null {
+  const frequency = String(formData.get("frequency") ?? "");
   const timeOfDay = String(formData.get("timeOfDay") ?? "09:00");
   const daysOfWeek = formData.getAll("daysOfWeek").map((value) => Number(value));
+  if ((frequency !== "DAILY" && frequency !== "WEEKLY") || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeOfDay)) return null;
+  if (frequency === "WEEKLY" && (daysOfWeek.length === 0 || daysOfWeek.some((day) => !Number.isInteger(day) || day < 0 || day > 6))) return null;
 
   return {
     frequency,
     timeOfDay,
-    ...(frequency === "WEEKLY" ? { daysOfWeek: daysOfWeek.length ? daysOfWeek : [1, 3, 5] } : {}),
+    ...(frequency === "WEEKLY" ? { daysOfWeek: [...new Set(daysOfWeek)] } : {}),
   };
 }
 
@@ -62,6 +67,37 @@ export async function createAutomation(
     return { error: entitlement.reason };
   }
 
+  const schedule = scheduleFromForm(formData);
+  if (!schedule) return { error: "실행 주기, 요일, 시간을 확인해주세요." };
+
+  let config: Json = {};
+  if (template.slug === "blog-marketing") {
+    const parsed = blogSetupSchema.safeParse({
+      objective: String(formData.get("objective") ?? ""),
+      keywords: String(formData.get("keywords") ?? "").split(/[,\n]/).map((keyword) => keyword.trim()).filter(Boolean),
+      tone: String(formData.get("tone") ?? ""),
+      deliveryMode: String(formData.get("deliveryMode") ?? ""),
+    });
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "블로그 설정을 확인해주세요." };
+
+    const blogConfig: BlogAutomationConfig = parsed.data;
+    if (parsed.data.deliveryMode !== "app_draft") {
+      const siteUrlInput = String(formData.get("wordpressSiteUrl") ?? "");
+      const username = String(formData.get("wordpressUsername") ?? "").trim();
+      const appPassword = String(formData.get("wordpressAppPassword") ?? "").trim();
+      if (!siteUrlInput || !username || !appPassword) return { error: "WordPress 사이트 주소, 사용자명, Application Password를 모두 입력해주세요." };
+
+      try {
+        const siteUrl = normalizeWordPressSiteUrl(siteUrlInput);
+        await new WordPressConnector({ siteUrl, username, appPassword }).testConnection();
+        blogConfig.wordpress = { siteUrl, username, encryptedAppPassword: encryptWordPressPassword(appPassword) };
+      } catch (error) {
+        return { error: error instanceof Error ? error.message : "WordPress 연결을 확인할 수 없습니다." };
+      }
+    }
+    config = blogConfig as unknown as Json;
+  }
+
   const { data: automation, error } = await supabase
     .from("automations")
     .insert({
@@ -70,8 +106,8 @@ export async function createAutomation(
       template_id: templateId,
       name,
       status: "DRAFT",
-      schedule: scheduleFromForm(formData) as unknown as Json,
-      config: {},
+      schedule: schedule as unknown as Json,
+      config,
     })
     .select()
     .single();
@@ -86,15 +122,18 @@ export async function createAutomation(
 
 export async function activateAutomation(automationId: string): Promise<void> {
   const supabase = await createClient();
-  const { data: automation } = await supabase.from("automations").select("schedule").eq("id", automationId).single();
-  if (!automation) return;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("로그인이 필요합니다.");
+  const { data: automation } = await supabase.from("automations").select("schedule").eq("id", automationId).eq("user_id", user.id).single();
+  if (!automation) throw new Error("자동화를 찾을 수 없습니다.");
 
   const nextRunAt = computeNextRunAt(automation.schedule as unknown as AutomationSchedule);
 
-  await supabase
+  const { error } = await supabase
     .from("automations")
     .update({ status: "ACTIVE", next_run_at: nextRunAt.toISOString() })
-    .eq("id", automationId);
+    .eq("id", automationId).eq("user_id", user.id);
+  if (error) throw new Error("자동화를 활성화하지 못했습니다.");
 
   revalidatePath(`/automations/${automationId}`);
   revalidatePath("/automations");
@@ -147,7 +186,15 @@ export async function triggerRunNow(automationId: string): Promise<RunNowState> 
     return { error: entitlement.reason };
   }
 
-  const result = await runAutomationNow(automationId);
+  let result;
+  try {
+    result = await runAutomationNow(automationId);
+  } catch (error) {
+    if (error instanceof Error && (error.message.includes("already has a run") || error.message.includes("automation_runs_one_active_run"))) {
+      return { error: "이미 실행 중입니다. 완료 후 다시 시도해주세요." };
+    }
+    return { error: "실행을 시작하지 못했습니다. 잠시 후 다시 시도해주세요." };
+  }
   revalidatePath(`/automations/${automationId}`);
   revalidatePath("/dashboard");
 

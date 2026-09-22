@@ -28,6 +28,7 @@ const serverSchema = z.object({
   WORDPRESS_SITE_URL: z.string().optional(),
   WORDPRESS_USERNAME: z.string().optional(),
   WORDPRESS_APP_PASSWORD: z.string().optional(),
+  WORDPRESS_CREDENTIALS_KEY: z.string().optional(),
 
   META_ACCESS_TOKEN: z.string().optional(),
   META_IG_USER_ID: z.string().optional(),
