@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, CircleX } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { describeAutomationRunError } from "@/lib/utils/automation-run-error";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,7 +70,8 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
         <Card className="border border-red-200 bg-red-50/40 ring-0">
           <CardHeader><CardTitle className="text-base text-red-900">오류 내용</CardTitle></CardHeader>
           <CardContent>
-            <p className="whitespace-pre-wrap break-words text-sm leading-6 text-red-900">{run.error_message || "저장된 오류 메시지가 없습니다. 자동화 설정을 확인한 뒤 다시 실행해주세요."}</p>
+            <p className="whitespace-pre-wrap break-words text-sm leading-6 text-red-900">{describeAutomationRunError(run.error_message)}</p>
+            <p className="mt-3 text-xs text-red-800">문제가 반복되면 실행 ID와 함께 관리자에게 문의해주세요.</p>
           </CardContent>
         </Card>
       ) : null}

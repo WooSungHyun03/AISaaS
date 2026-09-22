@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,12 @@ import { triggerRunNow } from "@/app/(app)/automations/actions";
 export function RunNowButton({ automationId, hasInFlightRun = false }: { automationId: string; hasInFlightRun?: boolean }) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
+
+  useEffect(() => {
+    if (!hasInFlightRun) return;
+    const timer = window.setInterval(() => router.refresh(), 10_000);
+    return () => window.clearInterval(timer);
+  }, [hasInFlightRun, router]);
 
   const handleClick = () => {
     startTransition(async () => {

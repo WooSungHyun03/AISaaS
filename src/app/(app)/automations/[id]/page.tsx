@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { describeAutomationRunError } from "@/lib/utils/automation-run-error";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RunNowButton } from "@/components/automations/run-now-button";
 import { AutomationStatusActions } from "@/components/automations/automation-status-actions";
+import { AutomationSettingsDialog } from "@/components/automations/automation-settings-dialog";
 import type { AutomationSchedule } from "@/types/automation";
 import { BLOG_DELIVERY_LABEL, blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
 import type { Json } from "@/types/domain";
@@ -26,12 +28,17 @@ function resultOutput(value: Json | null): Record<string, Json | undefined> | nu
 export default async function AutomationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
 
-  const { data: automation } = await supabase.from("automations").select("*").eq("id", id).single();
+  const { data: automation, error: automationError } = await supabase.from("automations")
+    .select("*").eq("id", id).eq("user_id", user.id).maybeSingle();
+  if (automationError) throw new Error("자동화 정보를 불러오지 못했습니다.", { cause: automationError });
   if (!automation) notFound();
 
-  const [{ data: business }, { data: template }, { data: runs }, { data: contentHistory }] = await Promise.all([
-    supabase.from("businesses").select("name").eq("id", automation.business_id).single(),
+  const [businessResult, businessesResult, templateResult, runsResult, contentResult, inFlightResult] = await Promise.all([
+    supabase.from("businesses").select("name, keywords, brand_tone").eq("id", automation.business_id).single(),
+    supabase.from("businesses").select("id, name").eq("owner_id", user.id).order("name"),
     supabase.from("automation_templates").select("name, slug").eq("id", automation.template_id).single(),
     supabase
       .from("automation_runs")
@@ -45,14 +52,35 @@ export default async function AutomationDetailPage({ params }: { params: Promise
       .eq("automation_id", id)
       .order("created_at", { ascending: false })
       .limit(10),
+    supabase.from("automation_runs").select("id").eq("automation_id", id)
+      .in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle(),
   ]);
+  if (businessResult.error || businessesResult.error || templateResult.error || runsResult.error || contentResult.error || inFlightResult.error) {
+    throw new Error("자동화 상세 정보를 불러오지 못했습니다.");
+  }
+  const business = businessResult.data;
+  const businesses = businessesResult.data ?? [];
+  const template = templateResult.data;
+  const runs = runsResult.data ?? [];
+  const contentHistory = contentResult.data ?? [];
 
   const schedule = automation.schedule as unknown as AutomationSchedule;
   const parsedBlog = template?.slug === "blog-marketing" ? blogSetupSchema.safeParse(automation.config) : null;
   const blogConfig = parsedBlog?.success ? automation.config as unknown as BlogAutomationConfig : null;
   const latestSuccessfulRun = (runs ?? []).find((run) => run.status === "SUCCESS");
   const latestOutput = latestSuccessfulRun ? resultOutput(latestSuccessfulRun.output) : null;
-  const hasInFlightRun = (runs ?? []).some((run) => run.status === "QUEUED" || run.status === "RUNNING");
+  const hasInFlightRun = Boolean(inFlightResult.data);
+  const latestRun = runs[0];
+  const blogSettings = template?.slug === "blog-marketing" ? {
+    objective: blogConfig?.objective ?? "",
+    keywords: blogConfig?.keywords ?? business?.keywords ?? [],
+    tone: blogConfig?.tone ?? business?.brand_tone ?? "친근하고 전문적인",
+    deliveryMode: blogConfig?.deliveryMode ?? "app_draft" as const,
+    wordpressSiteUrl: blogConfig?.wordpress?.siteUrl,
+    wordpressUsername: blogConfig?.wordpress?.username,
+    hasStoredWordPress: Boolean(blogConfig?.wordpress),
+    legacy: !blogConfig,
+  } : undefined;
 
   return (
     <div className="space-y-6">
@@ -60,17 +88,24 @@ export default async function AutomationDetailPage({ params }: { params: Promise
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight">{automation.name}</h1>
-            <Badge>{STATUS_LABEL[automation.status]}</Badge>
+            <Badge variant={automation.status === "ERROR" ? "destructive" : "secondary"}>{STATUS_LABEL[automation.status]}</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
             {business?.name} · {template?.name}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <AutomationSettingsDialog key={automation.updated_at} automationId={automation.id} name={automation.name} businessId={automation.business_id} businesses={businesses} schedule={schedule} blogSettings={blogSettings} hasInFlightRun={hasInFlightRun} />
           <RunNowButton automationId={automation.id} hasInFlightRun={hasInFlightRun} />
-          <AutomationStatusActions automationId={automation.id} status={automation.status} primary={Boolean(blogConfig)} />
+          <AutomationStatusActions automationId={automation.id} status={automation.status} primary={Boolean(blogConfig)} hasInFlightRun={hasInFlightRun} />
         </div>
       </div>
+
+      {latestRun?.status === "FAILED" && <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+        <p className="font-medium text-destructive">최근 실행이 실패했습니다.</p>
+        <p className="mt-1">{describeAutomationRunError(latestRun.error_message)}</p>
+        <Link href={`/automations/${automation.id}/runs/${latestRun.id}`} className="mt-2 inline-block text-primary underline underline-offset-2">실행 상세 보기</Link>
+      </div>}
 
       {blogConfig && <Card>
         <CardHeader><CardTitle className="text-base">블로그 자동화 설정 요약</CardTitle></CardHeader>
@@ -117,7 +152,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
           <CardTitle className="text-base">실행 히스토리</CardTitle>
         </CardHeader>
         <CardContent>
-          {(runs ?? []).length === 0 ? (
+          {runs.length === 0 ? (
             <p className="text-sm text-muted-foreground">아직 실행 기록이 없습니다. Run Now를 눌러 테스트해보세요.</p>
           ) : (
             <Table>
@@ -125,13 +160,13 @@ export default async function AutomationDetailPage({ params }: { params: Promise
                 <TableRow>
                   <TableHead>시각</TableHead>
                   <TableHead>상태</TableHead>
-                  <TableHead>오류</TableHead>
+                  <TableHead>결과 / 오류</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(runs ?? []).map((run) => (
+                {runs.map((run) => (
                   <TableRow key={run.id}>
-                    <TableCell>{new Date(run.created_at).toLocaleString("ko-KR")}</TableCell>
+                    <TableCell>{new Date(run.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} KST</TableCell>
                     <TableCell>
                       <Badge
                         variant={run.status === "SUCCESS" ? "default" : run.status === "FAILED" ? "destructive" : "secondary"}
@@ -141,10 +176,11 @@ export default async function AutomationDetailPage({ params }: { params: Promise
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {run.status === "FAILED" ? (
-                        <Link href={`/automations/${automation.id}/runs/${run.id}`} className="text-red-700 underline-offset-2 hover:underline">
-                          오류 상세 보기
-                        </Link>
-                      ) : "-"}
+                        <div className="max-w-md space-y-1">
+                          <p>{describeAutomationRunError(run.error_message)}</p>
+                          <Link href={`/automations/${automation.id}/runs/${run.id}`} className="text-primary underline-offset-2 hover:underline">상세 보기</Link>
+                        </div>
+                      ) : run.status === "SUCCESS" ? "완료" : "진행 중"}
                     </TableCell>
                   </TableRow>
                 ))}
