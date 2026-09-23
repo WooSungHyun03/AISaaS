@@ -130,8 +130,30 @@ See `supabase/migrations/` for the authoritative schema (RLS policies in `0012_r
 - `setup_requests` — the "구축 대행" service-request queue.
 - `directory_tools` — AI Tool Directory catalog.
 - `faqs` — Guides/Support content.
+- `integration_connections` — a business's connections to external platforms (WordPress today; Instagram/Resend/YouTube later). See "Integration Connections & Secret Storage" below.
 
 Everything a user can query directly is RLS-scoped to `owner_id`/`user_id`; writes that must bypass RLS (usage counters, subscription updates, cron-driven runs) go through the service-role client in `src/lib/supabase/admin.ts`, which is only ever imported from trusted server code, never from a route a browser can trigger without the secret/entitlement checks in front of it.
+
+## Integration Connections & Secret Storage
+
+`integration_connections` (one row per `(business_id, provider)`) is how an automation handler answers "is this business connected to WordPress/Instagram/etc, and to what" without ever touching a raw credential outside server code:
+
+```
+src/server/connectors/integrations.ts (server-only, service-role client)
+    createConnection()          — upserts the row; stores/rotates the secret in Vault first
+    getConnection()              — user_id + business_id + provider -> row (or null)
+    getConnectionSecret()        — decrypts through Vault; null if the connection has no secret
+    updateConnectionStatus()     — CONNECTED -> EXPIRED/ERROR/DISCONNECTED transitions
+    disconnectConnection()       — deletes the Vault secret, marks DISCONNECTED
+```
+
+The table itself only ever stores a `secret_reference` (a Vault secret id) — never the token/application password. The actual secret lives in Supabase Vault (`vault.secrets`, encrypted at rest with `pgsodium`), reached through four `SECURITY DEFINER` wrapper functions added by `0015_integration_connections.sql` (`integration_secret_create/update/read/delete`), each granted to `service_role` only and revoked from `anon`/`authenticated`/`public`. The wrappers exist because PostgREST doesn't expose the `vault` schema directly, and because only trusted server code (never a client-side Supabase call) should ever be able to read a decrypted secret.
+
+RLS on `integration_connections` allows a user to `select` their own rows (to show "connected to https://..."), and grants no `insert`/`update`/`delete` policy at all — every write goes through `src/server/connectors/integrations.ts`, matching the `subscriptions`/`usage`/`automation_runs` pattern of "read via RLS, write via service role."
+
+**Vault availability.** Vault (the `supabase_vault` extension) is provided by the Supabase platform and is expected to be present on any Supabase-hosted project. The migration attempts `create extension if not exists "supabase_vault"` inside an exception-handling block: if the extension genuinely can't be created in a given Postgres instance (e.g. some local/self-hosted setups), the migration still applies — the table, RLS, and indexes are created either way — but the four wrapper functions will raise a clear Postgres error the first time `integration_secret_create/update/read/delete` is actually called, rather than ever silently storing a secret in a plaintext column. If a target project's tier genuinely lacks Vault, the fix is to enable it (Supabase dashboard → Database → Vault, or `create extension supabase_vault`) — there is intentionally no plaintext fallback path in application code for this table.
+
+Note: WordPress credentials today (as of this Day) still go through a separate, pre-existing path — `src/server/connectors/wordpress/credentials.ts` (AES-256-GCM, keyed by `WORDPRESS_CREDENTIALS_KEY`) encrypts the Application Password and `src/app/(app)/automations/actions.ts` stores it *inside* the owning `automations.config.wordpress.encryptedAppPassword`, one copy per automation rather than one shared row per business. That path is not touched by this Day (it already works end to end, and rewiring it is a UI-adjacent Server Action change outside Dev1's minimal-diff rule for `src/app/`). Migrating WordPress's connect flow onto the shared, Vault-backed `integration_connections` table from this Day — via `createConnection()`/`getConnectionSecret()` in `src/server/connectors/integrations.ts` — is explicit Day 3 scope ("WordPress Production Connector" in `DAILY_ROUTINE_PLAN.md`).
 
 ## Why these choices (Section 3 rationale)
 

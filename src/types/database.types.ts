@@ -12,6 +12,8 @@ export type AutomationRunStatus = "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED";
 export type SubscriptionPlan = "FREE" | "STARTER" | "PRO";
 export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED" | "INCOMPLETE";
 export type SetupRequestStatus = "REQUESTED" | "CONTACTED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+export type IntegrationProvider = "wordpress" | "instagram" | "email" | "youtube";
+export type ConnectionStatus = "CONNECTED" | "EXPIRED" | "ERROR" | "DISCONNECTED";
 
 export interface Database {
   public: {
@@ -310,8 +312,53 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["faqs"]["Insert"]>;
         Relationships: [];
       };
+      integration_connections: {
+        Row: {
+          id: string;
+          user_id: string;
+          business_id: string;
+          provider: IntegrationProvider;
+          account_identifier: string | null;
+          status: ConnectionStatus;
+          secret_reference: string | null;
+          metadata: Json;
+          connected_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          business_id: string;
+          provider: IntegrationProvider;
+          account_identifier?: string | null;
+          status?: ConnectionStatus;
+          secret_reference?: string | null;
+          metadata?: Json;
+          connected_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["integration_connections"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      integration_secret_create: {
+        Args: { p_secret: string; p_name?: string | null };
+        Returns: string;
+      };
+      integration_secret_update: {
+        Args: { p_id: string; p_secret: string };
+        Returns: void;
+      };
+      integration_secret_read: {
+        Args: { p_id: string };
+        Returns: string | null;
+      };
+      integration_secret_delete: {
+        Args: { p_id: string };
+        Returns: void;
+      };
+    };
   };
 }

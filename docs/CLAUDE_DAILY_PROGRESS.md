@@ -6,13 +6,14 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 2 — External Platform Connection Management
+Day 3 — WordPress Production Connector
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
+- Day 2 — External Platform Connection Management (2026-09-23)
 
 ## Current
-- (none — Day 2 not started yet)
+- (none — Day 3 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -20,11 +21,26 @@ Day 2 — External Platform Connection Management
   HTTP behavior (success, 401/429/5xx, network failure, timeout) is verified
   by tests. Set one of these keys and `AI_PROVIDER=openai|gemini` to exercise
   the real adapters.
+- Supabase Vault (`integration_secret_create/update/read/delete` in
+  `0015_integration_connections.sql`): this environment has no live Supabase
+  project, so the Vault-backed RPCs have only been verified against a
+  mocked Supabase client (`src/server/connectors/integrations.test.ts`), not
+  against a real `vault.secrets` table. The migration's `supabase_vault`
+  extension bootstrap is wrapped to fail soft (table/RLS still get created)
+  if Vault genuinely isn't installable in a given Postgres instance, but the
+  actual secret create/read/rotate/delete round-trip needs a real Supabase
+  project to smoke-test end to end.
 
 ## Next
-- Day 2 — External Platform Connection Management: `integration_connections`
-  migration, Supabase Vault-backed secret storage, server-only CRUD. See
-  `DAILY_ROUTINE_PLAN.md` Day 2 for the full spec.
+- Day 3 — WordPress Production Connector: wire the existing
+  `WordPressConnector` (`src/server/connectors/wordpress/`) to Day 2's
+  `integration_connections` foundation — connection verification persists a
+  `CONNECTED` row via `createConnection()`, `publish()` returns
+  `{ externalPostId, externalUrl }`, a `ConnectorError` taxonomy classifies
+  failures. See `DAILY_ROUTINE_PLAN.md` Day 3 for the full spec, and
+  `docs/ARCHITECTURE.md`'s "Integration Connections & Secret Storage"
+  section for why WordPress credentials still take the older
+  per-automation `encryptedAppPassword` path today.
 
 ## Daily History
 
@@ -87,6 +103,78 @@ Completed:
 Tests:
 - N/A (docs-only change) — verified previous entry's lint/typecheck/test/build
   results still hold since no source files changed here.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-23
+Completed Day 2 — External Platform Connection Management:
+- New migration `supabase/migrations/0015_integration_connections.sql`:
+  `integration_connections` table (`user_id`, `business_id`, `provider`
+  check-constrained to `wordpress|instagram|email|youtube`,
+  `account_identifier`, `status` check-constrained to
+  `CONNECTED|EXPIRED|ERROR|DISCONNECTED`, `secret_reference`, `metadata`
+  jsonb, `connected_at`/`updated_at`), unique on `(business_id, provider)`
+  so a reconnect updates the same row instead of duplicating it, RLS with a
+  select-only-your-own-rows policy (no insert/update/delete policy — all
+  writes go through the service-role client, matching the
+  `subscriptions`/`usage`/`automation_runs` pattern).
+- Same migration attempts to enable the `supabase_vault` extension (wrapped
+  in an exception-handling `do $$ ... $$` block so table/RLS creation still
+  succeeds if Vault genuinely can't be installed) and adds four
+  `SECURITY DEFINER` wrapper functions —
+  `integration_secret_create/update/read/delete` — granted to `service_role`
+  only, revoked from `anon`/`authenticated`/`public`. These are the only way
+  application code touches Vault; the `vault` schema itself isn't exposed to
+  PostgREST.
+- `src/server/connectors/integrations.ts` (server-only, `"server-only"`
+  guard): `createConnection()` (stores/rotates the secret in Vault, then
+  upserts the row — reconnecting the same business+provider rotates the
+  existing Vault secret instead of orphaning it), `getConnection()`,
+  `getConnectionSecret()` (decrypts through Vault; null without a Vault call
+  when there's no secret), `updateConnectionStatus()`,
+  `disconnectConnection()` (deletes the Vault secret, marks `DISCONNECTED`,
+  preserves the row for history instead of deleting it).
+- `src/types/database.types.ts` / `src/types/domain.ts`: added the
+  `integration_connections` table Row/Insert/Update types, typed the four
+  new RPC functions (`Database["public"]["Functions"]`, previously an empty
+  placeholder), and `IntegrationProvider`/`ConnectionStatus` union types,
+  following the existing `AutomationStatus`-style pattern.
+- Tests: `src/server/connectors/integrations.test.ts` (10 tests) — Vault
+  secret creation and rotation-on-reconnect, secret material never appearing
+  in the row written to `integration_connections` (asserted against the
+  actual upsert payload, not just the mocked return value), Vault-error
+  propagation, `getConnectionSecret` skipping the Vault RPC entirely when
+  there's no `secret_reference`, status/metadata updates scoped by id, and
+  `disconnectConnection`'s three paths (has a secret / never had one /
+  connection doesn't exist).
+- Documented the design in `docs/ARCHITECTURE.md` (new "Integration
+  Connections & Secret Storage" section): the Vault-wrapper-function
+  approach, the fail-closed behavior if Vault is unavailable (no plaintext
+  fallback), and an explicit note that WordPress's existing credential path
+  (`src/server/connectors/wordpress/credentials.ts`, AES-256-GCM, storing
+  `encryptedAppPassword` inside `automations.config` per-automation) is a
+  separate, already-working mechanism not touched by this Day — migrating
+  it onto this new shared table is Day 3 scope, not Day 2's.
+- Did not touch `src/app/`, `src/components/`, `src/server/directory/`, or
+  `src/server/customer-support/` — this Day's diff is fully contained to
+  `supabase/migrations/`, `src/types/`, and a new
+  `src/server/connectors/integrations.ts` module.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 35/35 (`npm test`, includes 10 new integration-connection tests)
+- build: pass (`npm run build`)
+
+Blocked External:
+- No live Supabase project in this environment, so Vault's real
+  create/read/rotate/delete round-trip is only verified against a mocked
+  Supabase client, not a real `vault.secrets` table. See "Blocked External"
+  above for detail.
 
 Commit:
 - (see git log for this file's commit)
