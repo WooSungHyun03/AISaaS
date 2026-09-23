@@ -6,14 +6,15 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 3 — WordPress Production Connector
+Day 4 — Blog AI Pipeline Upgrade
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
 - Day 2 — External Platform Connection Management (2026-09-23)
+- Day 3 — WordPress Production Connector (2026-09-23)
 
 ## Current
-- (none — Day 3 not started yet)
+- (none — Day 4 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -30,17 +31,24 @@ Day 3 — WordPress Production Connector
   if Vault genuinely isn't installable in a given Postgres instance, but the
   actual secret create/read/rotate/delete round-trip needs a real Supabase
   project to smoke-test end to end.
+- No real WordPress site/Application Password in this environment:
+  `WordPressConnector`'s `testConnection()`/`publish()` and the new
+  `verifyAndConnectWordPress()` bridge are only verified against a mocked
+  `node:https`/`node:dns` layer (`src/server/connectors/wordpress/*.test.ts`),
+  not a live WordPress REST API. Set `WORDPRESS_SITE_URL`/`WORDPRESS_USERNAME`/
+  `WORDPRESS_APP_PASSWORD` to smoke-test the legacy env-based connector path
+  for real.
 
 ## Next
-- Day 3 — WordPress Production Connector: wire the existing
-  `WordPressConnector` (`src/server/connectors/wordpress/`) to Day 2's
-  `integration_connections` foundation — connection verification persists a
-  `CONNECTED` row via `createConnection()`, `publish()` returns
-  `{ externalPostId, externalUrl }`, a `ConnectorError` taxonomy classifies
-  failures. See `DAILY_ROUTINE_PLAN.md` Day 3 for the full spec, and
-  `docs/ARCHITECTURE.md`'s "Integration Connections & Secret Storage"
-  section for why WordPress credentials still take the older
-  per-automation `encryptedAppPassword` path today.
+- Day 4 — Blog AI Pipeline Upgrade: business-context-aware prompt input
+  (`name`/`industry`/`location`/`target_customer`/`brand_tone`/`keywords` +
+  recent `content_history` topics), a two-stage generate-topic-then-body
+  pipeline with a bounded (non-looping) regenerate-once-on-near-duplicate
+  step (normalized string comparison, no embeddings), a unified
+  `{ title, topic, excerpt, bodyHtml, keywords, callToAction }` structured
+  shape reconciling `blogContentSchema`'s current field names, and
+  success-only `content_history` persistence. See `DAILY_ROUTINE_PLAN.md`
+  Day 4 for the full spec.
 
 ## Daily History
 
@@ -175,6 +183,81 @@ Blocked External:
   create/read/rotate/delete round-trip is only verified against a mocked
   Supabase client, not a real `vault.secrets` table. See "Blocked External"
   above for detail.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-23 (Day 3)
+Completed Day 3 — WordPress Production Connector:
+- `src/server/connectors/wordpress/index.ts`: closed two failure-classification
+  gaps found while implementing this Day's mocked-HTTP test suite —
+  (1) a request/response timeout, a raw connection error (e.g. refused/reset),
+  and an oversized response body previously rejected with a bare `Error`
+  instead of a classified `ConnectorError`; now `TIMEOUT` and
+  `NETWORK_FAILURE` are distinguished (a `timedOut` flag set only by the
+  timeout callback) and both are always a `ConnectorError`. (2) a DNS lookup
+  that fails outright (e.g. `ENOTFOUND`) previously threw the raw Node DNS
+  error instead of `ConnectorError` `INVALID_TARGET`; `publicHostAddress()`
+  now catches and reclassifies it. HTTP status classification
+  (401/403/4xx/5xx → `AUTH_FAILED`/`PERMISSION_DENIED`/
+  `UPSTREAM_CLIENT_ERROR`/`UPSTREAM_SERVER_ERROR`) and the SSRF guard
+  (public-HTTPS-only URL validation, private/loopback/link-local/CGNAT
+  address rejection, DNS-rebinding-safe address pinning on the actual
+  request) already existed from earlier work and needed no change — verified
+  against the Day 3 spec rather than rebuilt.
+- New `src/server/connectors/wordpress/connect.ts`: the Day 2 → Day 3 bridge.
+  `verifyAndConnectWordPress()` calls `testConnection()` first and only calls
+  Day 2's `createConnection()` (Vault-backed `CONNECTED` row) on success — a
+  bad credential is never persisted as connected. `loadWordPressConnector()`
+  reads a business's `integration_connections` row + Vault secret back into a
+  ready-to-use `WordPressConnector`, returning `null` for any connection
+  that isn't `CONNECTED` or has no secret/username on record.
+- Did not touch `blog.ts` or `src/app/(app)/automations/actions.ts`: per this
+  Day's own Definition of Done, the handler needs no behavior change beyond
+  what the connector already returns (`publish()` already returned
+  `{ externalUrl, externalId }`, already persisted onto
+  `automation_runs.output` and `content_history.external_url` via the
+  existing runner pipeline from earlier work), and rewiring the connect-flow
+  Server Action in `src/app/` to call the new `connect.ts` bridge instead of
+  the legacy per-automation `encryptedAppPassword` path is UI-adjacent work
+  outside Dev1's minimal-diff rule for that directory (`docs/TEAM_GUIDE.md`
+  file ownership) — left for Dev2 coordination, documented in
+  `docs/ARCHITECTURE.md`.
+- Deliberately did not rename `PublishResult.externalId` to
+  `externalPostId` (as the roadmap's prose names it): it's a shared type
+  used by every connector (WordPress/Instagram/Email/YouTube), the field
+  already carries the right information, and `blog.ts` doesn't read it —
+  renaming would touch every connector for no behavioral gain.
+- Tests: expanded `src/server/connectors/wordpress/index.test.ts` from 2 to
+  19 cases — happy-path verify+publish (draft and default-publish status),
+  every HTTP status classification for both `testConnection()` and
+  `publish()`, timeout, raw connection error, oversized response body, DNS
+  lookup failure, private-address resolution, and the unconfigured
+  (`NOT_CONFIGURED`) case. New `connect.test.ts` (7 cases): persists only
+  after successful verification, never persists on verification failure,
+  and all four `loadWordPressConnector()` branches (no connection / not
+  CONNECTED / secret missing / builds a working connector).
+- Documented the design in `docs/ARCHITECTURE.md`: a new "WordPress
+  Connector" section (SSRF guard, failure classification, verify-then-persist)
+  and an updated "Integration Connections & Secret Storage" note describing
+  the two coexisting WordPress credential paths and why only one was
+  rewired this Day.
+- Did not touch `src/app/`, `src/components/`, `src/server/directory/`, or
+  `src/server/customer-support/`.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 61/61 (`npm test`, includes 26 new/expanded WordPress
+  connector tests)
+- build: pass (`npm run build`)
+
+Blocked External:
+- No real WordPress site/Application Password in this environment — see
+  "Blocked External" above for detail.
 
 Commit:
 - (see git log for this file's commit)

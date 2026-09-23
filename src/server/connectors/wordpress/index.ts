@@ -1,4 +1,5 @@
 import "server-only";
+import type { LookupAddress } from "node:dns";
 import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
@@ -46,7 +47,12 @@ function isPrivateAddress(address: string): boolean {
 }
 
 async function publicHostAddress(siteUrl: string): Promise<{ address: string; family: number }> {
-  const addresses = await lookup(new URL(siteUrl).hostname, { all: true });
+  let addresses: LookupAddress[];
+  try {
+    addresses = await lookup(new URL(siteUrl).hostname, { all: true });
+  } catch (cause) {
+    throw new ConnectorError("wordpress", "INVALID_TARGET", "WordPress 사이트 주소를 확인할 수 없습니다 (DNS 조회 실패).", { cause });
+  }
   if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
     throw new ConnectorError("wordpress", "INVALID_TARGET", "공개 인터넷에서 접속 가능한 WordPress 주소를 입력해주세요.");
   }
@@ -89,6 +95,10 @@ export class WordPressConnector implements PlatformConnector {
     // Pin the validated address for the actual TLS request. A second DNS lookup
     // between validation and connection could otherwise reach a private host.
     return new Promise<Response>((resolve, reject) => {
+      // Distinguishes the timeout case from a generic network failure: both
+      // land on the same `request`/`response` "error" events below, but only
+      // one of them should classify as ConnectorError "TIMEOUT".
+      let timedOut = false;
       const request = httpsRequest(`${baseUrl}${path}`, {
         method: body ? "POST" : "GET",
         headers: {
@@ -107,14 +117,25 @@ export class WordPressConnector implements PlatformConnector {
           }
           chunks.push(chunk);
         });
-        response.on("error", reject);
+        response.on("error", (cause) => {
+          reject(new ConnectorError("wordpress", "NETWORK_FAILURE", "WordPress 응답을 읽는 중 오류가 발생했습니다.", { cause }));
+        });
         response.on("end", () => {
           const status = response.statusCode ?? 500;
           resolve(new Response(status === 204 ? null : Buffer.concat(chunks), { status }));
         });
       });
-      request.setTimeout(12_000, () => request.destroy(new Error("WordPress 요청 시간이 초과되었습니다.")));
-      request.on("error", reject);
+      request.setTimeout(12_000, () => {
+        timedOut = true;
+        request.destroy(new Error("WordPress 요청 시간이 초과되었습니다."));
+      });
+      request.on("error", (cause) => {
+        reject(
+          timedOut
+            ? new ConnectorError("wordpress", "TIMEOUT", "WordPress 요청 시간이 초과되었습니다.", { cause })
+            : new ConnectorError("wordpress", "NETWORK_FAILURE", "WordPress 서버에 연결하지 못했습니다.", { cause }),
+        );
+      });
       if (body) request.write(JSON.stringify(body));
       request.end();
     });

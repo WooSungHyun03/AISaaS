@@ -99,6 +99,37 @@ instead of throwing a bare `Error`:
 logging entry point across the codebase — no domain calls `console.*`
 directly.
 
+## WordPress Connector
+
+`src/server/connectors/wordpress/index.ts`'s `WordPressConnector` talks to a
+site's REST API (`/wp-json/wp/v2/users/me` to verify, `/wp-json/wp/v2/posts`
+to publish) over raw `node:https` rather than `fetch`, so it can pin the TLS
+connection to a DNS-validated address:
+
+- **SSRF guard.** `normalizeWordPressSiteUrl()` rejects anything that isn't a
+  plain `https://host/path` (no port/credentials/query/fragment, no literal
+  IP, no `localhost`/`.local`/`.internal`). `publicHostAddress()` then
+  resolves the hostname and rejects a result with no addresses or any
+  private/link-local/loopback/CGNAT address (`ConnectorError` `INVALID_TARGET`
+  either way — including a DNS lookup that fails outright, e.g. `ENOTFOUND`).
+  The resolved address is pinned into the actual request's `lookup` option so
+  a second DNS answer between validation and connection can't retarget the
+  request to a private host (DNS-rebinding).
+- **Failure classification.** Every failure — HTTP status, timeout, and raw
+  transport error — becomes a `ConnectorError` with one of `NOT_CONFIGURED`,
+  `INVALID_TARGET`, `AUTH_FAILED` (401), `PERMISSION_DENIED` (403),
+  `UPSTREAM_CLIENT_ERROR` (other 4xx), `UPSTREAM_SERVER_ERROR` (5xx),
+  `TIMEOUT` (12s request timeout), or `NETWORK_FAILURE` (connection-level
+  error, or a response body over the 1MB cap) — never a bare `Error`, so
+  `runner.ts`/`describeAutomationRunError()` can classify it precisely
+  instead of string-matching. Publish requests are never retried — retrying
+  a `POST /wp-json/wp/v2/posts` on a timeout risks creating a duplicate post.
+- **Verify-then-persist.** `connect.ts#verifyAndConnectWordPress()` is the
+  Day 2/Day 3 bridge: it calls `testConnection()` first and only calls
+  `createConnection()` (persisting a `CONNECTED` row, Application Password in
+  Vault) once that succeeds — a bad credential never gets written as
+  "connected."
+
 ## AI Provider Reliability
 
 `src/server/ai/` exposes `generateText()` / `generateStructured()` — automation
@@ -178,7 +209,17 @@ RLS on `integration_connections` allows a user to `select` their own rows (to sh
 
 **Vault availability.** Vault (the `supabase_vault` extension) is provided by the Supabase platform and is expected to be present on any Supabase-hosted project. The migration attempts `create extension if not exists "supabase_vault"` inside an exception-handling block: if the extension genuinely can't be created in a given Postgres instance (e.g. some local/self-hosted setups), the migration still applies — the table, RLS, and indexes are created either way — but the four wrapper functions will raise a clear Postgres error the first time `integration_secret_create/update/read/delete` is actually called, rather than ever silently storing a secret in a plaintext column. If a target project's tier genuinely lacks Vault, the fix is to enable it (Supabase dashboard → Database → Vault, or `create extension supabase_vault`) — there is intentionally no plaintext fallback path in application code for this table.
 
-Note: WordPress credentials today (as of this Day) still go through a separate, pre-existing path — `src/server/connectors/wordpress/credentials.ts` (AES-256-GCM, keyed by `WORDPRESS_CREDENTIALS_KEY`) encrypts the Application Password and `src/app/(app)/automations/actions.ts` stores it *inside* the owning `automations.config.wordpress.encryptedAppPassword`, one copy per automation rather than one shared row per business. That path is not touched by this Day (it already works end to end, and rewiring it is a UI-adjacent Server Action change outside Dev1's minimal-diff rule for `src/app/`). Migrating WordPress's connect flow onto the shared, Vault-backed `integration_connections` table from this Day — via `createConnection()`/`getConnectionSecret()` in `src/server/connectors/integrations.ts` — is explicit Day 3 scope ("WordPress Production Connector" in `DAILY_ROUTINE_PLAN.md`).
+Note: WordPress credentials today still go through two coexisting paths. The original, pre-existing one — `src/server/connectors/wordpress/credentials.ts` (AES-256-GCM, keyed by `WORDPRESS_CREDENTIALS_KEY`) — encrypts the Application Password and `src/app/(app)/automations/actions.ts` stores it *inside* the owning `automations.config.wordpress.encryptedAppPassword`, one copy per automation rather than one shared row per business; `blog.ts` still reads from it by default and needed no change for Day 3. Day 3 ("WordPress Production Connector") added the Vault-backed bridge described below (`src/server/connectors/wordpress/connect.ts`), but did not rewire `src/app/(app)/automations/actions.ts` to call it — that's a UI-adjacent Server Action change outside Dev1's minimal-diff rule for `src/app/` (see `docs/TEAM_GUIDE.md` file ownership), left for Dev2 coordination. Both paths ultimately construct the same `WordPressConnector`, so switching the UI's connect flow over later is additive, not a rewrite.
+
+```
+src/server/connectors/wordpress/connect.ts (server-only, service-role client)
+    verifyAndConnectWordPress()  — testConnection() first; only on success calls
+                                    createConnection() to persist a CONNECTED row
+                                    with the Application Password in Vault
+    loadWordPressConnector()     — getConnection() + getConnectionSecret() ->
+                                    a ready-to-use WordPressConnector, or null
+                                    if the business has no CONNECTED row
+```
 
 ## Why these choices (Section 3 rationale)
 
