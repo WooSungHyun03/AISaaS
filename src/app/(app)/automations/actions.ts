@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { describeAutomationRunError } from "@/lib/utils/automation-run-error";
+import { describeAutomationRunError } from "@/server/shared/errors";
 import { canCreateAutomation, canExecuteAutomation } from "@/server/billing/entitlements";
 import { runAutomationNow } from "@/server/automations/runner";
 import { computeNextRunAt } from "@/server/automations/scheduler";

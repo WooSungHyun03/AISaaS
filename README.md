@@ -8,7 +8,9 @@
 - **Backend/DB**: Supabase (PostgreSQL, Auth, RLS, Edge Functions/Cron)
 - **AI**: 벤더 중립 `AIProvider` 인터페이스 (`mock` / `openai` / `gemini`, `AI_PROVIDER` 환경변수로 전환)
 - **Billing**: 벤더 중립 `BillingProvider` 인터페이스 (`mock` 제공, 실제 PG 연동 시 어댑터만 교체)
-- **Hosting**: Netlify Free (`netlify.toml` 포함)
+- **Hosting**: Vercel Free (GitHub 연동, `main` push 시 자동 배포) + Cloudflare (도메인 DNS)
+- **Email**: Resend (뉴스레터 자동화)
+- **Container**: 프로덕션 `Dockerfile`(multi-stage) + 로컬 실행용 `compose.yaml` — Vercel 배포와는 별개로, 이식 가능한 실행 방법을 원할 때 사용
 
 의존성은 의도적으로 최소로 유지했습니다 (ORM 없이 Supabase client + SQL migration, ad-hoc 상태 관리 없이 Server Components/Server Actions 활용).
 
@@ -52,23 +54,46 @@ npm run dev
 
 ## Deployment
 
-### Netlify (프론트엔드)
+### Vercel (프론트엔드)
 
-1. GitHub 저장소를 Netlify에 연결합니다 (`netlify.toml`이 빌드 설정을 포함).
-2. Netlify 환경변수에 `.env.example`의 항목들을 등록합니다.
+1. GitHub 저장소를 Vercel에 연결합니다 — Next.js는 zero-config로 인식되므로 빌드 설정을 따로 건드릴 필요가 없습니다.
+2. Vercel 프로젝트 환경변수(Production/Preview)에 `.env.example`의 항목들을 등록합니다.
 3. `main` 브랜치에 push하면 자동 배포됩니다.
+4. 커스텀 도메인을 쓴다면 Vercel의 안내 레코드를 Cloudflare DNS에 등록합니다 — 처음에는 "DNS only"(회색 구름)로 두어 SSL 발급 충돌을 피하고, 필요할 때만 "Proxied"로 전환하세요 (그 경우 Cloudflare SSL/TLS 모드를 "Full (strict)"로).
 
 ### Supabase (백엔드/스케줄러)
 
-1. 마이그레이션 적용 (위 Database 섹션).
+1. 마이그레이션 적용 (위 Database 섹션). `vault`, `pg_cron`, `pg_net` extension이 필요합니다 (Database → Extensions).
 2. Cron 트리거 배포:
 
    ```bash
    supabase functions deploy run-due-automations
-   supabase secrets set SITE_URL=https://<netlify-site>.netlify.app CRON_SECRET=<CRON_SECRET과 동일한 값>
+   supabase secrets set SITE_URL=https://<your-domain> CRON_SECRET=<CRON_SECRET과 동일한 값>
    ```
 
-3. Supabase Dashboard → Database → Cron Jobs에서 `run-due-automations` 함수를 몇 분 간격으로 호출하도록 등록합니다.
+3. `supabase/migrations/0014_scheduler_cron.sql`이 pg_cron으로 5분마다 이 함수를 호출하도록 이미 등록합니다 — Vercel의 무료 플랜 Cron Jobs는 하루 1회로 제한되어 이 용도에 맞지 않으므로 사용하지 않습니다.
+
+### Resend (뉴스레터 자동화)
+
+1. Resend에서 발신 도메인을 추가하고(루트 도메인에 이미 다른 이메일 라우팅이 있다면 `mail.<domain>` 같은 서브도메인 사용), DKIM/SPF/DMARC 레코드를 DNS에 등록합니다.
+2. Sending 권한만 있는 API 키를 발급해 `RESEND_API_KEY`/`RESEND_FROM_EMAIL`에 등록합니다.
+
+## Docker
+
+Vercel이 실제 배포 대상이지만, 이식 가능한 실행이 필요하면 Docker로도 빌드/실행할 수 있습니다.
+
+```bash
+docker build -t autobiz .
+docker run -p 3000:3000 --env-file .env.local autobiz
+# 또는
+docker compose up --build
+```
+
+`Dockerfile`은 3단계(deps → builder → runner) 빌드로 최종 이미지에 소스/devDependencies가 남지 않고, `next.config.ts`의 `output: "standalone"`이 필요한 `node_modules`만 추립니다. 실제 시크릿은 이미지에 포함되지 않고 컨테이너 실행 시(`--env-file`/`env_file`)에만 주입됩니다. `/api/health`가 헬스체크 엔드포인트입니다.
+
+## CI
+
+`.github/workflows/ci.yml`이 `main` push와 그 대상 PR에서 lint → typecheck → test → build → docker build를 순서대로 실행합니다 (실제 배포는 그대로 Vercel의 git 연동이 담당 — 이 워크플로는 검증 게이트입니다). 불필요한 Actions 사용량을 피하기 위해 다른 브랜치에서는 실행되지 않습니다.
 
 ## Branch Strategy
 
@@ -94,8 +119,10 @@ supabase/
   functions/      # Edge Function (cron 트리거)
   seed.sql        # 초기 데이터
 docs/             # ARCHITECTURE.md, TEAM_GUIDE.md
+.github/workflows/ci.yml   # lint/typecheck/test/build/docker build
+Dockerfile, .dockerignore, compose.yaml   # 컨테이너 빌드/로컬 실행
 ```
 
 ## Free Infrastructure Note
 
-MVP는 Netlify Free + Supabase Free 범위 안에서 동작하도록 설계되었습니다. AI Provider(OpenAI/Gemini)는 사용량에 따라 비용이 발생하므로, 로컬/데모 환경에서는 `AI_PROVIDER=mock`을 기본값으로 사용하세요. 플랜별 실행 한도(`src/server/billing/plans.ts`)가 비용 폭주를 막는 1차 방어선입니다.
+MVP는 Vercel Free + Supabase Free 범위 안에서 동작하도록 설계되었습니다. AI Provider(OpenAI/Gemini)는 사용량에 따라 비용이 발생하므로, 로컬/데모 환경에서는 `AI_PROVIDER=mock`을 기본값으로 사용하세요. 플랜별 실행 한도(`src/server/billing/plans.ts`)가 비용 폭주를 막는 1차 방어선입니다.

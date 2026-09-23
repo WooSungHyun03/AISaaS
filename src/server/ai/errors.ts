@@ -1,3 +1,5 @@
+import { AppError } from "@/server/shared/errors";
+
 /**
  * Standard error taxonomy for AI provider calls. Automation handlers only
  * ever need to branch on `code` — they never need to know whether the
@@ -18,17 +20,15 @@ const RETRYABLE_CODES: ReadonlySet<AIErrorCode> = new Set([
   "NETWORK_FAILURE",
 ]);
 
-export class AIProviderError extends Error {
-  readonly code: AIErrorCode;
+/** AI-domain specialization of the shared `AppError` (src/server/shared/errors.ts). */
+export class AIProviderError extends AppError {
+  declare readonly code: AIErrorCode;
   readonly provider: string;
-  readonly retryable: boolean;
 
   constructor(code: AIErrorCode, provider: string, message: string, options?: { cause?: unknown }) {
-    super(`[${provider}] ${message}`, options?.cause !== undefined ? { cause: options.cause } : undefined);
+    super(provider, code, `[${provider}] ${message}`, { cause: options?.cause, retryable: RETRYABLE_CODES.has(code) });
     this.name = "AIProviderError";
-    this.code = code;
     this.provider = provider;
-    this.retryable = RETRYABLE_CODES.has(code);
   }
 }
 

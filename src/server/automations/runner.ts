@@ -2,6 +2,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
 import { incrementUsage } from "@/server/billing/entitlements";
+import { isAppError } from "@/server/shared/errors";
 import type { AutomationSchedule } from "@/types/automation";
 import { getHandler } from "./handlers";
 import { computeNextRunAt } from "./scheduler";
@@ -130,7 +131,15 @@ async function executeAutomation(automationId: string, options: { advanceSchedul
     // infinite retries (Rule 29).
     await admin.from("automations").update({ status: "ERROR" }).eq("id", automationId);
 
-    logger.error("automation_run_failed", { automationId, runId: run.id, errorMessage });
+    // Any domain's typed error (AIProviderError, ConnectorError, ...) carries
+    // a `code`/`domain` — log it structured instead of only the free-text
+    // message, without changing what gets persisted to automation_runs.
+    logger.error("automation_run_failed", {
+      automationId,
+      runId: run.id,
+      errorMessage,
+      ...(isAppError(err) ? { errorDomain: err.domain, errorCode: err.code, retryable: err.retryable } : {}),
+    });
     return { runId: run.id, status: "FAILED", errorMessage };
   }
 }

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, CircleX } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { describeAutomationRunError } from "@/lib/utils/automation-run-error";
+import { describeAutomationRunError } from "@/server/shared/errors";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

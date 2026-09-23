@@ -1,0 +1,29 @@
+# Local, production-like run of the Docker image. Supabase itself is not
+# containerized here — the app talks to whatever Supabase project
+# NEXT_PUBLIC_SUPABASE_URL in .env.local points to (a real project; use
+# `supabase start` separately if you want a fully local Postgres instead).
+#
+# Usage:
+#   cp .env.example .env.local   # fill in real values
+#   docker compose up --build
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-https://placeholder.supabase.co}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-placeholder-anon-key}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+    ports:
+      - "3000:3000"
+    # Real values (including secrets like SUPABASE_SERVICE_ROLE_KEY) are
+    # injected at container runtime via env_file, never baked into the image.
+    env_file:
+      - .env.local
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

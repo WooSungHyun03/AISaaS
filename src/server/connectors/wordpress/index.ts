@@ -3,6 +3,7 @@ import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { serverEnv } from "@/lib/env/server";
+import { ConnectorError } from "@/server/shared/errors";
 import type { PlatformConnector, PublishContentParams, PublishResult } from "../types";
 
 export interface WordPressConnection {
@@ -16,7 +17,7 @@ export function normalizeWordPressSiteUrl(value: string): string {
   try {
     url = new URL(value.trim());
   } catch {
-    throw new Error("WordPress 사이트 주소가 올바르지 않습니다.");
+    throw new ConnectorError("wordpress", "INVALID_TARGET", "WordPress 사이트 주소가 올바르지 않습니다.");
   }
   const host = url.hostname.toLowerCase();
   if (
@@ -25,7 +26,7 @@ export function normalizeWordPressSiteUrl(value: string): string {
     host === "localhost" || host.endsWith(".localhost") ||
     host.endsWith(".local") || host.endsWith(".internal") || !host.includes(".")
   ) {
-    throw new Error("공개 HTTPS WordPress 사이트의 기본 주소를 입력해주세요. 예: https://example.com");
+    throw new ConnectorError("wordpress", "INVALID_TARGET", "공개 HTTPS WordPress 사이트의 기본 주소를 입력해주세요. 예: https://example.com");
   }
   return `${url.origin}${url.pathname.replace(/\/$/, "")}`;
 }
@@ -47,9 +48,17 @@ function isPrivateAddress(address: string): boolean {
 async function publicHostAddress(siteUrl: string): Promise<{ address: string; family: number }> {
   const addresses = await lookup(new URL(siteUrl).hostname, { all: true });
   if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
-    throw new Error("공개 인터넷에서 접속 가능한 WordPress 주소를 입력해주세요.");
+    throw new ConnectorError("wordpress", "INVALID_TARGET", "공개 인터넷에서 접속 가능한 WordPress 주소를 입력해주세요.");
   }
   return addresses[0];
+}
+
+/** Classifies an HTTP failure into the shared connector error taxonomy. */
+function classifyHttpStatus(status: number): "AUTH_FAILED" | "PERMISSION_DENIED" | "UPSTREAM_SERVER_ERROR" | "UPSTREAM_CLIENT_ERROR" {
+  if (status === 401) return "AUTH_FAILED";
+  if (status === 403) return "PERMISSION_DENIED";
+  if (status >= 500) return "UPSTREAM_SERVER_ERROR";
+  return "UPSTREAM_CLIENT_ERROR";
 }
 
 /** WordPress REST API connector using an Application Password. */
@@ -65,7 +74,7 @@ export class WordPressConnector implements PlatformConnector {
 
   private credentials(): WordPressConnection {
     if (this.connection) return this.connection;
-    if (!this.isConfigured()) throw new Error("WordPress 연결이 설정되지 않았습니다.");
+    if (!this.isConfigured()) throw new ConnectorError("wordpress", "NOT_CONFIGURED", "WordPress 연결이 설정되지 않았습니다.");
     return {
       siteUrl: serverEnv.WORDPRESS_SITE_URL!,
       username: serverEnv.WORDPRESS_USERNAME!,
@@ -114,14 +123,22 @@ export class WordPressConnector implements PlatformConnector {
   async testConnection(): Promise<void> {
     const response = await this.request("/wp-json/wp/v2/users/me");
     if (!response.ok) {
-      throw new Error(`WordPress 연결을 확인할 수 없습니다 (HTTP ${response.status}). 사이트 주소와 Application Password를 확인해주세요.`);
+      throw new ConnectorError(
+        "wordpress",
+        classifyHttpStatus(response.status),
+        `WordPress 연결을 확인할 수 없습니다 (HTTP ${response.status}). 사이트 주소와 Application Password를 확인해주세요.`,
+      );
     }
   }
 
   async publish({ title, content }: PublishContentParams, status: "draft" | "publish" = "publish"): Promise<PublishResult> {
     const response = await this.request("/wp-json/wp/v2/posts", { title, content, status });
     if (!response.ok) {
-      throw new Error(`WordPress에 글을 저장하지 못했습니다 (HTTP ${response.status}). 연결과 글 발행 권한을 확인해주세요.`);
+      throw new ConnectorError(
+        "wordpress",
+        classifyHttpStatus(response.status),
+        `WordPress에 글을 저장하지 못했습니다 (HTTP ${response.status}). 연결과 글 발행 권한을 확인해주세요.`,
+      );
     }
     const data = (await response.json()) as { link?: string; id?: number };
     let externalUrl: string | undefined;

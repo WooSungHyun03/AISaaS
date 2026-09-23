@@ -8,7 +8,7 @@
 Browser
   │
   ▼
-Next.js (Netlify)
+Next.js (Vercel)
   ├─ src/app/(public)   marketing pages, no auth
   ├─ src/app/(auth)     login / signup
   ├─ src/app/(app)      dashboard, automations, business, billing, settings — auth required
@@ -30,7 +30,7 @@ Next.js (Netlify)
 | Automation runner, scheduler, handlers | Dev1 | `src/server/automations/` |
 | Platform connectors (WordPress, Instagram, Email, YouTube) | Dev1 | `src/server/connectors/` |
 | Billing provider, plans, entitlements | Dev1 | `src/server/billing/` |
-| Deployment, env config, Supabase functions | Dev1 | `netlify.toml`, `.env.example`, `supabase/functions/` |
+| Deployment, env config, Supabase functions | Dev1 | `Dockerfile`, `.github/workflows/`, `.env.example`, `supabase/functions/` |
 | Routes, pages, UI components | Dev2 | `src/app/`, `src/components/` |
 | AI Tool Directory, Guides, Customer Support | Dev3 | `src/server/directory/`, `src/server/customer-support/` |
 | Shared types, Supabase clients, migrations | Shared (all) | `src/types/`, `src/lib/`, `supabase/migrations/` |
@@ -73,6 +73,31 @@ Two entry points into the same `executeAutomation()` core:
 A handler only implements "what does this automation actually do" — loading context, persisting results, and duplicate-run protection are the runner's job, shared by every automation type. AI generation (`src/server/ai/`) and platform publishing (`src/server/connectors/`) never call each other directly; a handler orchestrates both.
 
 Only `blog-marketing` has a working handler + connector (WordPress) today — the vertical slice used to validate the architecture end to end. The other four templates have handler/connector interfaces in place that throw "not implemented yet"; `AUTOMATION_AVAILABILITY` in `src/types/automation.ts` is the single source of truth the UI reads to show Available/Beta/Coming Soon and to gate what the creation wizard offers.
+
+## Shared Error Handling & Logging
+
+Every server domain reports failures through `src/server/shared/errors.ts`
+instead of throwing a bare `Error`:
+
+- `AppError(domain, code, message)` — the common base. `.domain` names the
+  subsystem (an AI provider name, a connector name, ...), `.code` is a
+  short machine-readable reason, `.retryable` says whether the runner/caller
+  may safely retry it.
+- `AIProviderError` (`src/server/ai/errors.ts`) and `ConnectorError` (used by
+  platform connectors, e.g. `src/server/connectors/wordpress/`) both extend
+  it — a caller can `isAppError(err)` and log `{ domain, code, retryable }`
+  the same way regardless of which domain failed.
+- `src/server/automations/runner.ts` logs this structured info on every
+  failed run (`logger.error("automation_run_failed", { errorDomain,
+  errorCode, ... })`) in addition to the human-readable message.
+- `describeAutomationRunError()` (same file) is the one place a raw
+  `automation_runs.error_message` string gets turned into a Korean,
+  secret-free explanation for the dashboard — every page that shows a run's
+  failure reason calls this instead of re-implementing its own mapping.
+
+`src/lib/logger` (`info`/`warn`/`error`, structured JSON) is the only
+logging entry point across the codebase — no domain calls `console.*`
+directly.
 
 ## AI Provider Reliability
 
@@ -158,6 +183,7 @@ Note: WordPress credentials today (as of this Day) still go through a separate, 
 ## Why these choices (Section 3 rationale)
 
 - **No ORM**: the schema is small and stable enough that hand-written types (`src/types/database.types.ts`) plus Supabase's PostgREST client cover it without Prisma's extra dependency, codegen step, and migration-format lock-in.
-- **Netlify over Vercel**: explicit product requirement; `@netlify/plugin-nextjs` handles App Router/Server Actions/Route Handlers on Netlify Free.
-- **Supabase Cron + Edge Function calling back into Next.js, not per-automation jobs**: keeps automation logic in one TypeScript codebase instead of duplicating it in Deno; the Edge Function is intentionally ~15 lines.
+- **Vercel over Netlify**: zero-config for Next.js App Router/Server Actions/Route Handlers on the free tier — no build plugin or extra config needed. An earlier iteration targeted Netlify (`@netlify/plugin-nextjs`); that config has been removed now that production runs on Vercel.
+- **Supabase Cron (pg_cron) + Edge Function calling back into Next.js, not per-automation jobs**: keeps automation logic in one TypeScript codebase instead of duplicating it in Deno; the Edge Function is intentionally ~15 lines. Vercel's own free-tier Cron Jobs are limited to once/day, too coarse for this app's few-minutes cadence, so scheduling stays on the Supabase side (`supabase/migrations/0014_scheduler_cron.sql`).
 - **Provider interfaces for AI and Billing**: an env var change, not a code change, when swapping OpenAI↔Gemini or mock↔a real PG — without speculative abstraction beyond what two real implementations each already need.
+- **Docker as a secondary, portable runtime**: production deploys through Vercel's git integration, not the Docker image — the `Dockerfile`/`compose.yaml` exist so the app can be built and run anywhere a container runtime is available (self-hosting, local parity testing) without maintaining a second deployment pipeline.

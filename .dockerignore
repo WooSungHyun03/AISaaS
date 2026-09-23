@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.vercel
+supabase/.temp
+coverage
+*.tsbuildinfo
+next-env.d.ts
+
+# real secrets never go into a build context
+.env
+.env.local
+.env.*.local
+
+npm-debug.log*
+.DS_Store
