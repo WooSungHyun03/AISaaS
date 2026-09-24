@@ -149,6 +149,46 @@ handlers never touch a vendor SDK or fetch call directly. The real adapters
 at most once if the model's response doesn't parse or validate, throwing
 `AIProviderError("INVALID_STRUCTURED_RESPONSE", ...)` if it still fails.
 
+## Blog AI Pipeline (Day 4)
+
+`src/server/automations/handlers/blog.ts` runs a two-stage pipeline instead
+of one single-shot generation:
+
+- **Stage 1 — topic.** `buildBlogTopicPrompt()` (`src/server/ai/prompts/blog.ts`)
+  asks for just `{ topic, title }` (cheap, small `maxTokens`), fed with the
+  business's `name`/`industry`/`location`/`description`/`target_customer`/
+  `brand_tone`/`keywords` plus the automation's own `objective`/`tone`/
+  `keywords` and the last 5 `content_history` topics for this automation
+  (`ctx.recentTopics`, loaded by `runner.ts`).
+- **Near-duplicate check.** `src/server/ai/similarity.ts#isNearDuplicateTopic()`
+  compares the candidate topic against `recentTopics` with character-bigram
+  Jaccard similarity on normalized text (lowercased, NFKC, punctuation/
+  whitespace stripped) — no embeddings/vector infra. Bigrams (not
+  whitespace-tokenized words) were chosen because Korean topic phrases often
+  have no natural word boundaries. Default threshold `0.5`
+  (`NEAR_DUPLICATE_THRESHOLD`). If the candidate is a near-duplicate,
+  `generateTopic()` regenerates **exactly once** (passing the rejected topic
+  back in the prompt's avoid-list) and accepts whatever comes back — bounded,
+  never a loop.
+- **Stage 2 — body.** `buildBlogBodyPrompt()` takes the accepted topic+title
+  and asks for `{ excerpt, bodyHtml, keywords, callToAction }`.
+- **Unified shape.** `blogContentSchema` (`blogTopicSchema.merge(blogBodySchema)`)
+  is `{ topic, title, excerpt, bodyHtml, keywords, callToAction }` — the
+  single source of truth for what "AI blog content" looks like, replacing
+  the old single-stage `{ topic, title, content }` shape. `PublishContentParams`
+  gained an optional `excerpt` field so `WordPressConnector.publish()` can
+  send it through to `/wp-json/wp/v2/posts`; other connectors ignore it.
+  `content_history.content` (a plain-text column, rendered with
+  `whitespace-pre-line` by the automation detail page) stores a tags-stripped
+  rendering of `bodyHtml`, not the raw HTML — `automation_runs.output` keeps
+  the full structured object (including raw `bodyHtml`) for any future
+  consumer that wants it.
+- **Success-only persistence.** Unchanged from before this Day:
+  `runner.ts#executeAutomation()` only inserts into `content_history` after
+  `handler.run()` resolves; any throw from either generation stage (or from
+  a configured WordPress publish) is caught by the runner, marks the run
+  `FAILED`, and never writes a partial/corrupt history row.
+
 ## Billing Flow
 
 ```

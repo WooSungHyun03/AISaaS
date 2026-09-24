@@ -1,6 +1,8 @@
 export interface PublishContentParams {
   title?: string;
   content: string;
+  /** Short summary, when the platform supports one (e.g. WordPress post excerpt). */
+  excerpt?: string;
 }
 
 export interface PublishResult {

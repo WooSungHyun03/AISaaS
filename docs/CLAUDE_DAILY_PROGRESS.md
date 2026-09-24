@@ -6,15 +6,16 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 4 — Blog AI Pipeline Upgrade
+Day 5 — Automation Runner Reliability
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
 - Day 2 — External Platform Connection Management (2026-09-23)
 - Day 3 — WordPress Production Connector (2026-09-23)
+- Day 4 — Blog AI Pipeline Upgrade (2026-09-24)
 
 ## Current
-- (none — Day 4 not started yet)
+- (none — Day 5 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -40,15 +41,16 @@ Day 4 — Blog AI Pipeline Upgrade
   for real.
 
 ## Next
-- Day 4 — Blog AI Pipeline Upgrade: business-context-aware prompt input
-  (`name`/`industry`/`location`/`target_customer`/`brand_tone`/`keywords` +
-  recent `content_history` topics), a two-stage generate-topic-then-body
-  pipeline with a bounded (non-looping) regenerate-once-on-near-duplicate
-  step (normalized string comparison, no embeddings), a unified
-  `{ title, topic, excerpt, bodyHtml, keywords, callToAction }` structured
-  shape reconciling `blogContentSchema`'s current field names, and
-  success-only `content_history` persistence. See `DAILY_ROUTINE_PLAN.md`
-  Day 4 for the full spec.
+- Day 5 — Automation Runner Reliability: verify the duplicate-run guard
+  covers both the "Run Now" double-click case and a concurrent cron tick
+  (app-level check + DB partial unique index as backstop, not either
+  alone), confirm the `QUEUED → RUNNING → SUCCESS|FAILED` lifecycle never
+  leaves a run stuck `RUNNING` on an unanticipated handler exception, add
+  `source: MANUAL | SCHEDULED` on every run, refuse to run a `PAUSED`/
+  `ERROR` automation or one that fails a minimal `canExecuteAutomation()`
+  entitlement check (add a minimal version now if it doesn't exist; Day 11
+  hardens it further), and confirm no code path retries a failed scheduled
+  run automatically. See `DAILY_ROUTINE_PLAN.md` Day 5 for the full spec.
 
 ## Daily History
 
@@ -258,6 +260,99 @@ Tests:
 Blocked External:
 - No real WordPress site/Application Password in this environment — see
   "Blocked External" above for detail.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-24 (Day 4)
+Completed Day 4 — Blog AI Pipeline Upgrade:
+- Checked `businesses` (`supabase/migrations/0003_businesses.sql`) first per
+  this Day's own instruction to verify before adding a migration:
+  `location` already existed as a column and on `Business`/`database.types.ts`
+  — no new migration needed.
+- `src/server/ai/prompts/blog.ts`: split the old single-stage
+  `buildBlogPrompt()`/`blogContentSchema` into `blogTopicSchema`
+  (`{ topic, title }`) + `blogBodySchema`
+  (`{ excerpt, bodyHtml, keywords, callToAction }`), with
+  `blogContentSchema = blogTopicSchema.merge(blogBodySchema)` as the unified
+  `{ topic, title, excerpt, bodyHtml, keywords, callToAction }` shape the
+  spec asked for. `buildBlogTopicPrompt()` and `buildBlogBodyPrompt()` both
+  feed the business's `name`/`industry`/`location`/`description`/
+  `target_customer`/`brand_tone`/`keywords` plus the automation's own
+  `objective`/`tone`/`keywords`; the topic prompt also takes the recent
+  `content_history` topics (already threaded through as `ctx.recentTopics`
+  by `runner.ts`) and an optional `rejectedTopic` to steer a regeneration
+  away from what was just rejected.
+- New `src/server/ai/similarity.ts`: character-bigram Jaccard similarity on
+  normalized text (lowercase, NFKC, `\p{L}\p{N}` filter strips
+  punctuation/whitespace) — deliberately not whitespace/word tokenization,
+  since Korean topic phrases often have no spaces to split on, and
+  deliberately not embeddings (no new vector infra for one similarity
+  check). `isNearDuplicateTopic(candidate, recentTopics, threshold = 0.5)`.
+  Threshold picked empirically: a real near-duplicate pair in the test
+  suite (differently-phrased same idea) scored ~0.58, a genuinely distinct
+  pair scored well under 0.3.
+- `src/server/automations/handlers/blog.ts` rewritten around the two-stage
+  pipeline: `generateTopic()` calls stage 1, checks
+  `isNearDuplicateTopic()`, and — bounded, never a loop — regenerates stage
+  1 **exactly once** if it's a near-duplicate, accepting whatever comes
+  back from that single retry regardless of its own similarity. Stage 2
+  (body) always runs once, against the accepted topic/title. Any throw from
+  either stage (or from a configured WordPress publish) propagates out of
+  `run()` unchanged — `runner.ts`'s existing try/catch (unmodified this
+  Day) already only inserts into `content_history` after `handler.run()`
+  resolves, so a mid-pipeline failure was already guaranteed to leave no
+  partial/corrupt history row; this Day added tests proving both failure
+  points (topic stage, body stage) actually throw instead of silently
+  returning partial content.
+- Reconciled the two parallel content shapes instead of leaving them:
+  `PublishContentParams` (`src/server/connectors/types.ts`) gained an
+  optional `excerpt` field, `WordPressConnector.publish()`
+  (`src/server/connectors/wordpress/index.ts`) now sends it to
+  `/wp-json/wp/v2/posts` when present (other connectors already destructure
+  an unused `_params`, so this is additive/non-breaking for them).
+  `content_history.content` (a plain-text column rendered with
+  `whitespace-pre-line` in `src/app/(app)/automations/[id]/page.tsx`) now
+  gets a small in-handler `stripHtml()` rendering of `bodyHtml` rather than
+  raw HTML tags — `automation_runs.output` still keeps the full structured
+  object with the raw `bodyHtml` for any future consumer. Did not touch
+  `src/app/` itself: the existing detail-page rendering of
+  `output.title`/`output.topic`/`output.externalUrl`/`item.content` all
+  keep working unchanged with the new shape, so per this routine's minimal-
+  diff rule for that directory there was nothing there that needed editing.
+- Tests: `src/server/ai/similarity.test.ts` (9 cases — exact match,
+  punctuation/case/whitespace-only differences, a real near-duplicate pair,
+  genuinely distinct topics, empty-string edge case, and the
+  `isNearDuplicateTopic` wrapper including the empty-recent-topics case).
+  `src/server/automations/handlers/blog.test.ts` (10 cases, `generateStructured`
+  and `WordPressConnector` mocked) — the two-stage pipeline producing the
+  unified shape, the regenerate-once-on-near-duplicate path, no regeneration
+  when the first topic is already distinct, WordPress publish receiving
+  `title`/`bodyHtml`/`excerpt`, both the wizard-configured and legacy
+  env-configured WordPress paths (including the "not configured" skip
+  case), and both failure points propagating instead of returning partial
+  output.
+- Documented the design in `docs/ARCHITECTURE.md` (new "Blog AI Pipeline
+  (Day 4)" section).
+- Did not touch `src/components/`, `src/server/directory/`, or
+  `src/server/customer-support/`.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 78/78 (`npm test`, includes 19 new Day 4 tests)
+- build: pass (`npm run build`) — required a local-only `.env.local` with
+  placeholder Supabase/public values to get past static page collection for
+  `/api/cron/run-automations`; not committed (already gitignored), no real
+  credentials involved.
+
+Blocked External:
+- OPENAI_API_KEY / GEMINI_API_KEY / WordPress credentials: unchanged from
+  above — this Day's new prompts/schemas run through the same mocked
+  provider path as before, no new live-credential surface was added.
 
 Commit:
 - (see git log for this file's commit)
