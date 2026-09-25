@@ -6,16 +6,17 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 5 — Automation Runner Reliability
+Day 6 — Production Scheduler
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
 - Day 2 — External Platform Connection Management (2026-09-23)
 - Day 3 — WordPress Production Connector (2026-09-23)
 - Day 4 — Blog AI Pipeline Upgrade (2026-09-24)
+- Day 5 — Automation Runner Reliability (2026-09-25)
 
 ## Current
-- (none — Day 5 not started yet)
+- (none — Day 6 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -41,16 +42,18 @@ Day 5 — Automation Runner Reliability
   for real.
 
 ## Next
-- Day 5 — Automation Runner Reliability: verify the duplicate-run guard
-  covers both the "Run Now" double-click case and a concurrent cron tick
-  (app-level check + DB partial unique index as backstop, not either
-  alone), confirm the `QUEUED → RUNNING → SUCCESS|FAILED` lifecycle never
-  leaves a run stuck `RUNNING` on an unanticipated handler exception, add
-  `source: MANUAL | SCHEDULED` on every run, refuse to run a `PAUSED`/
-  `ERROR` automation or one that fails a minimal `canExecuteAutomation()`
-  entitlement check (add a minimal version now if it doesn't exist; Day 11
-  hardens it further), and confirm no code path retries a failed scheduled
-  run automatically. See `DAILY_ROUTINE_PLAN.md` Day 5 for the full spec.
+- Day 6 — Production Scheduler: verify `findDueAutomations()` selects only
+  `ACTIVE` automations with `next_run_at <= now()` in UTC consistently
+  (KST conversion only at the user-facing edges), confirm the Supabase Edge
+  Function stays a thin secret-forwarding trigger and the cron route
+  rejects a missing/mismatched `CRON_SECRET` before doing anything else,
+  confirm `next_run_at` is recomputed/persisted at run *start* (not
+  completion) so a slow run isn't picked up twice, add/verify a
+  concurrent-tick test (two near-simultaneous due-automation passes only
+  run the automation once — combines with Day 5's duplicate-run guard),
+  and check `computeNextRunAt`'s existing DST/timezone-boundary coverage in
+  `scheduler.test.ts` for gaps. See `DAILY_ROUTINE_PLAN.md` Day 6 for the
+  full spec.
 
 ## Daily History
 
@@ -353,6 +356,99 @@ Blocked External:
 - OPENAI_API_KEY / GEMINI_API_KEY / WordPress credentials: unchanged from
   above — this Day's new prompts/schemas run through the same mocked
   provider path as before, no new live-credential surface was added.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-25 (Day 5)
+Completed Day 5 — Automation Runner Reliability:
+- New migration `supabase/migrations/0016_automation_run_source.sql`: adds
+  `automation_runs.source text not null default 'SCHEDULED' check (source in
+  ('MANUAL','SCHEDULED'))`. Default backfills existing rows (all
+  cron-triggered in practice before this Day) without a separate UPDATE.
+  `src/types/database.types.ts`/`src/types/domain.ts` gained the matching
+  `AutomationRunSource` type and `Row`/`Insert` field.
+- `src/server/automations/runner.ts` rewritten around a single
+  `executeAutomation(automationId, source)` core (was
+  `executeAutomation(automationId, { advanceSchedule })`) so `source` drives
+  both the stamped column and whether the schedule advances, removing a
+  second implicit parameter that had to stay in sync with it:
+  - **Status gate**: a `PAUSED`/`ERROR` automation is refused before the
+    handler runs — closes a real gap where the existing manual "Run Now"
+    Server Action (`src/app/(app)/automations/actions.ts`, not touched this
+    Day per the minimal-diff rule) checked ownership and entitlement but
+    never re-checked automation status, so a paused automation could still
+    be manually triggered. Verified by re-reading `triggerRunNow()` before
+    writing the fix rather than assuming.
+  - **Entitlement gate**: `canExecuteAutomation()` (already existed from
+    prior work, not reimplemented — checked `src/server/billing/
+    entitlements.ts` first per project rule 9) is now re-checked inside the
+    runner itself, closing the matching gap on the cron path
+    (`runDueAutomation()` had no entitlement check at all before this Day).
+  - **Refused runs are recorded** via a new `recordRefusedRun()` helper — an
+    already-`FAILED` `automation_runs` row with a Korean, secret-free
+    `error_message`, never touching `automations.status` (a refusal isn't a
+    new failure). A refused `SCHEDULED` run advances `next_run_at` when the
+    reason can recur next tick (a plan limit) so the cron loop doesn't
+    re-attempt and re-refuse the same slot every few minutes; a paused/error
+    refusal doesn't need to (already excluded from `findDueAutomations()`).
+  - **Every lifecycle-transition write is now error-checked** — the
+    Supabase client resolves `{ error }` on a failed query rather than
+    throwing, so the pre-existing code silently ignored a failed
+    mark-`SUCCESS`/`content_history`-insert/`next_run_at`-advance write; a
+    run could end up permanently stuck `RUNNING` if the one update meant to
+    close it out failed and nobody noticed. Fixed by checking `error` and
+    throwing into the existing `catch`, which then marks the run `FAILED`
+    and the automation `ERROR` as it already did for handler exceptions.
+    The final catch-block writes are themselves error-checked and logged
+    (`automation_run_terminal_write_failed`) as a last-resort observability
+    measure — there is nothing further to safely retry in the same request.
+  - Confirmed (did not need to change) the pre-existing duplicate-run guard:
+    the app-level in-flight check plus the DB partial unique index
+    (`automation_runs_one_inflight_idx`, `0006_automation_runs.sql`) already
+    cover both the manual double-click case and a concurrent scheduled tick
+    — added tests for both instead of re-implementing.
+  - Confirmed (did not need to change) that a genuine handler failure
+    already flips the automation to `ERROR`, which is a strictly stronger
+    "never retry-storm" guarantee than merely advancing `next_run_at`, since
+    `findDueAutomations()` only ever selects `status = 'ACTIVE'`.
+- `src/server/shared/errors.ts#describeAutomationRunError()`: added a
+  passthrough for the runner's own refusal reasons (already complete,
+  secret-free Korean sentences) instead of flattening them into the generic
+  fallback message.
+- Tests: new `src/server/automations/runner.test.ts` (10 cases) — a
+  table-name-dispatched mock Supabase admin client (queued per-table
+  results, since `automation_runs`/`automations` are each queried multiple
+  times per execution for different purposes) covering: `source` tagging on
+  both entry points, `next_run_at` advancing only for a scheduled success
+  (never manual), refusal on `PAUSED`/`ERROR`/entitlement-denied without
+  ever calling the handler, the duplicate-run guard for both a manual
+  double-click and a concurrent scheduled tick, an unanticipated handler
+  exception being caught and terminating the run as `FAILED`/the automation
+  as `ERROR`, and a DB write failure on the SUCCESS-marking update itself
+  still resulting in `FAILED` rather than a silently stuck `RUNNING` row.
+- Documented the design in `docs/ARCHITECTURE.md` (new "Runner Reliability
+  (Day 5)" subsection under Automation Flow, updated the `automation_runs`
+  DB summary line and the flow diagram).
+- Did not touch `src/app/`, `src/components/`, `src/server/directory/`, or
+  `src/server/customer-support/` — the manual "Run Now" Server Action needed
+  no change since the new guards live in the shared runner core both entry
+  points already call through.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 88/88 (`npm test`, includes 10 new runner-reliability tests)
+- build: pass (`npm run build`) — required the same local-only `.env.local`
+  placeholder values as Day 4 to get past static page collection for
+  `/api/cron/run-automations`; not committed (gitignored).
+
+Blocked External:
+- None new — this Day's work is entirely internal runner logic and a schema
+  addition; no new external credential surface.
 
 Commit:
 - (see git log for this file's commit)

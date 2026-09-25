@@ -9,6 +9,7 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 
 export type AutomationStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "ERROR";
 export type AutomationRunStatus = "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED";
+export type AutomationRunSource = "MANUAL" | "SCHEDULED";
 export type SubscriptionPlan = "FREE" | "STARTER" | "PRO";
 export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED" | "INCOMPLETE";
 export type SetupRequestStatus = "REQUESTED" | "CONTACTED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
@@ -129,6 +130,7 @@ export interface Database {
           id: string;
           automation_id: string;
           status: AutomationRunStatus;
+          source: AutomationRunSource;
           input: Json;
           output: Json;
           error_message: string | null;
@@ -140,6 +142,7 @@ export interface Database {
           id?: string;
           automation_id: string;
           status?: AutomationRunStatus;
+          source?: AutomationRunSource;
           input?: Json;
           output?: Json;
           error_message?: string | null;

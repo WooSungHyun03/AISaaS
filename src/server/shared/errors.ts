@@ -67,6 +67,14 @@ export function isConnectorError(error: unknown): error is ConnectorError {
 export function describeAutomationRunError(message: string | null | undefined): string {
   if (!message) return "실행에 실패했습니다. 자동화 설정을 확인한 뒤 다시 시도해주세요.";
 
+  // The runner's own refusal reasons (paused/error automation, plan limit —
+  // see runner.ts#recordRefusedRun) are already a complete, secret-free
+  // Korean sentence meant for direct display; passing them through beats
+  // flattening them into the generic fallback below.
+  if (/일시정지 상태|오류 상태|플랜에서는|플랜의 이번 달/.test(message)) {
+    return message;
+  }
+
   const error = message.toLowerCase();
   if (error.includes("already has a run") || error.includes("one_active_run")) {
     return "이미 실행 중입니다. 완료된 뒤 다시 시도해주세요.";

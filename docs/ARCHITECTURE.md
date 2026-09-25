@@ -52,6 +52,7 @@ Scheduler (cron, every few minutes)
     ▼
 Automation Runner (src/server/automations/runner.ts)
     │  loads automation + business + template (service-role client)
+    │  refuses a PAUSED/ERROR automation or one over its plan limit
     │  guards against duplicate in-flight runs
     ▼
 Automation Handler (src/server/automations/handlers/<slug>.ts)
@@ -71,6 +72,20 @@ Two entry points into the same `executeAutomation()` core:
 - **Scheduled**: Supabase Edge Function (`supabase/functions/run-due-automations`, thin cron trigger) → `POST /api/cron/run-automations` (secret-protected) → `findDueAutomations()` → `runDueAutomation()` for each. Advances `next_run_at` via `computeNextRunAt()`.
 
 A handler only implements "what does this automation actually do" — loading context, persisting results, and duplicate-run protection are the runner's job, shared by every automation type. AI generation (`src/server/ai/`) and platform publishing (`src/server/connectors/`) never call each other directly; a handler orchestrates both.
+
+### Runner Reliability (Day 5)
+
+`executeAutomation()` is the single internal function both `runAutomationNow()` and `runDueAutomation()` call — every guard below applies identically to a manual click and a cron tick, instead of being re-implemented (and potentially missed) at each entry point:
+
+- **Status gate.** A `PAUSED` or `ERROR` automation is refused before the handler ever runs. `findDueAutomations()` already only selects `ACTIVE` automations, so this mainly protects the manual "Run Now" path and closes a race where an automation flips status between being read and actually executing.
+- **Entitlement gate.** `canExecuteAutomation()` (`src/server/billing/entitlements.ts`) is re-checked inside the runner itself — not only in the `triggerRunNow()` Server Action — so the cron path is covered too, not just manual runs initiated through the UI.
+- **Refused runs are recorded, not silently dropped.** Both gates above insert an already-`FAILED` `automation_runs` row with a human-readable `error_message` (`recordRefusedRun()`), so a refusal shows up in run history like any other outcome instead of vanishing as a no-op. Neither gate touches `automations.status` — being paused or over a plan limit isn't itself a new failure.
+- **No retry-storm on a recurring refusal.** If a `SCHEDULED` run is refused for a reason that can repeat on the very next tick (a plan limit — a paused/error automation is already excluded from the due query), `next_run_at` is advanced immediately so the cron loop waits for the next legitimately due slot instead of re-attempting and re-refusing every few minutes.
+- **Every status-transition write is error-checked.** The Supabase client resolves a failed query with `{ error }` rather than throwing; `executeAutomation()` explicitly checks and re-throws on every write that transitions a run's lifecycle (marking `SUCCESS`, writing `content_history`, advancing `next_run_at`) so a silently swallowed DB error can never leave a run's `automation_runs` row out of sync with reality, and can never leave it stuck `RUNNING` because the one write meant to close it out failed unnoticed. The final `FAILED`/`ERROR` writes inside the `catch` block are themselves error-checked too (logged as `automation_run_terminal_write_failed` if even that fails) — there is nothing further to safely retry inside the same request, so this is best-effort observability, not a guarantee.
+- **`source: "MANUAL" | "SCHEDULED"`** (new column, `0016_automation_run_source.sql`) is stamped on every `automation_runs` row at creation, including refused ones — the one place to answer "was this a dashboard click or a cron tick" without inferring it from `started_at`/`next_run_at` heuristics.
+- **On a genuine handler failure**, the automation still flips to `ERROR` (unchanged from before this Day) — a stronger guarantee against a retry storm than merely advancing `next_run_at`, since `findDueAutomations()` only ever selects `status = 'ACTIVE'` and reactivating always recomputes a fresh `next_run_at` anyway.
+
+Tests: `src/server/automations/runner.test.ts` — source tagging on both entry points, `next_run_at` advancing only for a scheduled success (never for manual), refusal on `PAUSED`/`ERROR`/entitlement-denied without calling the handler, the duplicate-run guard for both a manual double-click and a concurrent scheduled tick, an unanticipated handler exception being caught and terminating the run as `FAILED`/the automation as `ERROR`, and a DB write failure on the SUCCESS-marking update itself still resulting in `FAILED` rather than a stuck `RUNNING` row.
 
 Only `blog-marketing` has a working handler + connector (WordPress) today — the vertical slice used to validate the architecture end to end. The other four templates have handler/connector interfaces in place that throw "not implemented yet"; `AUTOMATION_AVAILABILITY` in `src/types/automation.ts` is the single source of truth the UI reads to show Available/Beta/Coming Soon and to gate what the creation wizard offers.
 
@@ -219,7 +234,7 @@ See `supabase/migrations/` for the authoritative schema (RLS policies in `0012_r
 - `businesses` — owned by a profile; the context AI generation reads from.
 - `automation_templates` — the catalog (seeded in `supabase/seed.sql`).
 - `automations` — a user's configured instance of a template (`schedule`/`config` as jsonb).
-- `automation_runs` — one row per execution; a partial unique index blocks a second QUEUED/RUNNING row per automation.
+- `automation_runs` — one row per execution attempt (including a refused one); a partial unique index blocks a second QUEUED/RUNNING row per automation; `source` (`MANUAL` | `SCHEDULED`, `0016_automation_run_source.sql`) records how it was triggered.
 - `content_history` — generated output, used to avoid repeating topics.
 - `subscriptions` — one per user, drives entitlements.
 - `usage` — one row per user per month (`YYYY-MM`, Asia/Seoul), incremented by the runner.

@@ -21,6 +21,7 @@ export type IntegrationConnection = Database["public"]["Tables"]["integration_co
 export type {
   AutomationStatus,
   AutomationRunStatus,
+  AutomationRunSource,
   SubscriptionPlan,
   SubscriptionStatus,
   SetupRequestStatus,
