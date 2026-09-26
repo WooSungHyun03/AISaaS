@@ -18,15 +18,27 @@ vi.mock("@/server/connectors/wordpress", () => ({ WordPressConnector: WordPressC
 vi.mock("@/server/connectors/wordpress/credentials", () => ({
   decryptWordPressPassword: vi.fn().mockReturnValue("decrypted-app-password"),
 }));
+const { getConnectionMock, loadWordPressConnectorMock, updateConnectionStatusMock } = vi.hoisted(() => ({
+  getConnectionMock: vi.fn(),
+  loadWordPressConnectorMock: vi.fn(),
+  updateConnectionStatusMock: vi.fn(),
+}));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn(() => ({ kind: "admin" })) }));
+vi.mock("@/server/connectors/integrations", () => ({ getConnection: getConnectionMock, updateConnectionStatus: updateConnectionStatusMock }));
+vi.mock("@/server/connectors/wordpress/connect", () => ({ loadWordPressConnector: loadWordPressConnectorMock }));
 
 const { blogAutomationHandler } = await import("./blog");
 
 afterEach(() => {
   vi.resetAllMocks();
+  getConnectionMock.mockResolvedValue(null);
+  loadWordPressConnectorMock.mockResolvedValue(null);
   WordPressConnectorMock.mockImplementation(function () {
     return { publish: publishMock, isConfigured: isConfiguredMock };
   });
 });
+
+getConnectionMock.mockResolvedValue(null);
 
 const business: Business = {
   id: "biz-1",
@@ -140,6 +152,34 @@ describe("blogAutomationHandler", () => {
     );
     expect(result.externalUrl).toBe("https://blog.example.com/post-1");
     expect(result.output).toMatchObject({ published: true, wordpressStatus: "publish" });
+  });
+
+  it("prefers the business-level Settings connection when one exists", async () => {
+    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
+    getConnectionMock.mockResolvedValueOnce({ id: "shared", status: "CONNECTED" });
+    loadWordPressConnectorMock.mockResolvedValueOnce({ publish: publishMock });
+    publishMock.mockResolvedValueOnce({ externalUrl: "https://shared.example.com/post-1" });
+
+    const result = await blogAutomationHandler.run(baseContext({
+      config: { objective: "신메뉴 홍보", keywords: ["소금빵"], tone: "친근하게", deliveryMode: "wordpress_publish" },
+    }));
+
+    expect(loadWordPressConnectorMock).toHaveBeenCalled();
+    expect(WordPressConnectorMock).not.toHaveBeenCalled();
+    expect(result.externalUrl).toBe("https://shared.example.com/post-1");
+  });
+
+  it("marks a shared connection EXPIRED when WordPress rejects its credentials", async () => {
+    const { ConnectorError } = await import("@/server/shared/errors");
+    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
+    getConnectionMock.mockResolvedValueOnce({ id: "shared", status: "CONNECTED" });
+    loadWordPressConnectorMock.mockResolvedValueOnce({ publish: publishMock });
+    publishMock.mockRejectedValueOnce(new ConnectorError("wordpress", "AUTH_FAILED", "authentication rejected"));
+
+    await expect(blogAutomationHandler.run(baseContext({
+      config: { objective: "신메뉴 홍보", keywords: ["소금빵"], tone: "친근하게", deliveryMode: "wordpress_publish" },
+    }))).rejects.toThrow("authentication rejected");
+    expect(updateConnectionStatusMock).toHaveBeenCalledWith(expect.anything(), "shared", "EXPIRED");
   });
 
   it("falls back to the legacy env-configured WordPress connector when there is no setup-wizard config", async () => {

@@ -32,6 +32,8 @@ const serverSchema = z.object({
 
   META_ACCESS_TOKEN: z.string().optional(),
   META_IG_USER_ID: z.string().optional(),
+  INSTAGRAM_APP_ID: z.string().optional(),
+  INSTAGRAM_APP_SECRET: z.string().optional(),
 
   RESEND_API_KEY: z.string().optional(),
   RESEND_FROM_EMAIL: z.string().optional(),

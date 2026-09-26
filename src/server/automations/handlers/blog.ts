@@ -10,6 +10,10 @@ import {
 } from "@/server/ai/prompts/blog";
 import { WordPressConnector } from "@/server/connectors/wordpress";
 import { decryptWordPressPassword } from "@/server/connectors/wordpress/credentials";
+import { loadWordPressConnector } from "@/server/connectors/wordpress/connect";
+import { getConnection, updateConnectionStatus } from "@/server/connectors/integrations";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { isConnectorError } from "@/server/shared/errors";
 import { blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
 import type { AutomationHandler, AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
 
@@ -62,18 +66,35 @@ export const blogAutomationHandler: AutomationHandler = {
     let wordpressStatus: "draft" | "publish" | undefined;
 
     if (config?.deliveryMode === "wordpress_draft" || config?.deliveryMode === "wordpress_publish") {
-      if (!config.wordpress) throw new Error("WordPress 연결 정보가 없습니다.");
-      const connector = new WordPressConnector({
-        siteUrl: config.wordpress.siteUrl,
-        username: config.wordpress.username,
-        appPassword: decryptWordPressPassword(config.wordpress.encryptedAppPassword),
-      });
+      const admin = createAdminClient();
+      const sharedConnection = await getConnection(admin, ctx.automation.user_id, ctx.business.id, "wordpress");
+      const connector = sharedConnection
+        ? await loadWordPressConnector(admin, ctx.automation.user_id, ctx.business.id)
+        : config.wordpress
+          ? new WordPressConnector({
+            siteUrl: config.wordpress.siteUrl,
+            username: config.wordpress.username,
+            appPassword: decryptWordPressPassword(config.wordpress.encryptedAppPassword),
+          })
+          : null;
+      if (!connector) {
+        if (sharedConnection?.status === "CONNECTED") await updateConnectionStatus(admin, sharedConnection.id, "ERROR");
+        throw new Error("WordPress 연결이 해제되었거나 만료되었습니다. 설정에서 다시 연결해주세요.");
+      }
       wordpressStatus = config.deliveryMode === "wordpress_draft" ? "draft" : "publish";
-      const saved = await connector.publish(
-        { title: generated.title, content: generated.bodyHtml, excerpt: generated.excerpt },
-        wordpressStatus,
-      );
-      externalUrl = saved.externalUrl;
+      try {
+        const saved = await connector.publish(
+          { title: generated.title, content: generated.bodyHtml, excerpt: generated.excerpt },
+          wordpressStatus,
+        );
+        externalUrl = saved.externalUrl;
+      } catch (error) {
+        if (sharedConnection) {
+          const status = isConnectorError(error) && (error.code === "AUTH_FAILED" || error.code === "PERMISSION_DENIED") ? "EXPIRED" : "ERROR";
+          await updateConnectionStatus(admin, sharedConnection.id, status);
+        }
+        throw error;
+      }
     } else if (!config) {
       // Existing automations created before the setup wizard use the legacy server connection.
       const connector = new WordPressConnector();
