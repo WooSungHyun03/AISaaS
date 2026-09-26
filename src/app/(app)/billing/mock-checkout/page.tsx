@@ -2,18 +2,24 @@ import { redirect } from "next/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MockCheckoutConfirm } from "@/components/billing/mock-checkout-confirm";
 import { getPlanConfig } from "@/server/billing/plans";
+import { createClient } from "@/lib/supabase/server";
+import { getCheckoutSession } from "@/server/billing/checkout-sessions";
 
 export default async function MockCheckoutPage({
   searchParams,
 }: {
-  searchParams: Promise<{ userId?: string; plan?: string }>;
+  searchParams: Promise<{ session?: string }>;
 }) {
-  const { userId, plan } = await searchParams;
-  if (!userId || (plan !== "STARTER" && plan !== "PRO")) {
-    redirect("/billing");
-  }
+  const { session: sessionId } = await searchParams;
+  if (!sessionId) redirect("/billing");
 
-  const planConfig = getPlanConfig(plan);
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  const checkout = await getCheckoutSession(sessionId, user.id).catch(() => null);
+  if (!checkout || checkout.provider !== "mock") redirect("/billing");
+
+  const planConfig = getPlanConfig(checkout.plan);
 
   return (
     <div className="mx-auto max-w-md py-16">
@@ -27,7 +33,7 @@ export default async function MockCheckoutPage({
             <p className="font-medium">{planConfig.name} 플랜</p>
             <p className="text-sm text-muted-foreground">월 {planConfig.priceMonthlyKrw.toLocaleString()}원</p>
           </div>
-          <MockCheckoutConfirm userId={userId} plan={plan} />
+          <MockCheckoutConfirm sessionId={checkout.id} plan={checkout.plan} />
         </CardContent>
       </Card>
     </div>

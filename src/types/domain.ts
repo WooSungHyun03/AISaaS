@@ -12,6 +12,7 @@ export type Automation = Database["public"]["Tables"]["automations"]["Row"];
 export type AutomationRun = Database["public"]["Tables"]["automation_runs"]["Row"];
 export type ContentHistory = Database["public"]["Tables"]["content_history"]["Row"];
 export type Subscription = Database["public"]["Tables"]["subscriptions"]["Row"];
+export type BillingCheckoutSession = Database["public"]["Tables"]["billing_checkout_sessions"]["Row"];
 export type Usage = Database["public"]["Tables"]["usage"]["Row"];
 export type SetupRequest = Database["public"]["Tables"]["setup_requests"]["Row"];
 export type DirectoryTool = Database["public"]["Tables"]["directory_tools"]["Row"];

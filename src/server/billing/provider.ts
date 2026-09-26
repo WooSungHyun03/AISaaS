@@ -23,6 +23,19 @@ export interface HandleWebhookParams {
   headers: Record<string, string>;
 }
 
+export interface CompleteCheckoutParams {
+  userId: string;
+  sessionId: string;
+  /** Toss sends these after billing-method authentication. Mock omits them. */
+  authKey?: string;
+  customerKey?: string;
+}
+
+export interface CompleteCheckoutResult {
+  plan: Exclude<SubscriptionPlan, "FREE">;
+  provider: string;
+}
+
 /**
  * Abstraction over the payment gateway. Domain logic (entitlements, plan
  * config) never imports a PG SDK directly — it only talks to this
@@ -31,6 +44,7 @@ export interface HandleWebhookParams {
  */
 export interface BillingProvider {
   createCheckout(params: CreateCheckoutParams): Promise<CheckoutSession>;
+  completeCheckout(params: CompleteCheckoutParams): Promise<CompleteCheckoutResult>;
   createPortal(params: CreatePortalParams): Promise<BillingPortalSession>;
   cancelSubscription(params: CancelSubscriptionParams): Promise<void>;
   handleWebhook(params: HandleWebhookParams): Promise<void>;

@@ -15,6 +15,7 @@ export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED"
 export type SetupRequestStatus = "REQUESTED" | "CONTACTED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
 export type IntegrationProvider = "wordpress" | "instagram" | "email" | "youtube";
 export type ConnectionStatus = "CONNECTED" | "EXPIRED" | "ERROR" | "DISCONNECTED";
+export type BillingCheckoutStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "CANCELED";
 
 export interface Database {
   public: {
@@ -207,6 +208,44 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["subscriptions"]["Insert"]>;
+        Relationships: [];
+      };
+      billing_checkout_sessions: {
+        Row: {
+          id: string;
+          user_id: string;
+          plan: Exclude<SubscriptionPlan, "FREE">;
+          provider: "mock" | "toss";
+          status: BillingCheckoutStatus;
+          customer_key: string;
+          order_id: string;
+          provider_billing_key: string | null;
+          provider_payment_key: string | null;
+          error_code: string | null;
+          error_message: string | null;
+          expires_at: string;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          plan: Exclude<SubscriptionPlan, "FREE">;
+          provider: "mock" | "toss";
+          status?: BillingCheckoutStatus;
+          customer_key: string;
+          order_id: string;
+          provider_billing_key?: string | null;
+          provider_payment_key?: string | null;
+          error_code?: string | null;
+          error_message?: string | null;
+          expires_at?: string;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["billing_checkout_sessions"]["Insert"]>;
         Relationships: [];
       };
       usage: {

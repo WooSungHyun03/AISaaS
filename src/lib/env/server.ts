@@ -23,7 +23,8 @@ const serverSchema = z.object({
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
 
-  BILLING_PROVIDER: z.enum(["mock"]).default("mock"),
+  BILLING_PROVIDER: z.enum(["mock", "toss"]).default("mock"),
+  TOSS_SECRET_KEY: z.string().optional(),
 
   WORDPRESS_SITE_URL: z.string().optional(),
   WORDPRESS_USERNAME: z.string().optional(),
