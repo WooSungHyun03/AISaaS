@@ -6,7 +6,7 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 6 — Production Scheduler
+Day 7 — Newsletter Automation + Resend Connector
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
@@ -14,9 +14,10 @@ Day 6 — Production Scheduler
 - Day 3 — WordPress Production Connector (2026-09-23)
 - Day 4 — Blog AI Pipeline Upgrade (2026-09-24)
 - Day 5 — Automation Runner Reliability (2026-09-25)
+- Day 6 — Production Scheduler (2026-09-26)
 
 ## Current
-- (none — Day 6 not started yet)
+- (none — Day 7 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -40,20 +41,22 @@ Day 6 — Production Scheduler
   not a live WordPress REST API. Set `WORDPRESS_SITE_URL`/`WORDPRESS_USERNAME`/
   `WORDPRESS_APP_PASSWORD` to smoke-test the legacy env-based connector path
   for real.
+- No live Supabase project in this environment (unchanged from Day 2): Day
+  6's `0018_scheduler_cron_auth.sql` (pg_cron → Edge Function Authorization
+  header) and the `alter database ... set app.settings.service_role_key`
+  one-time step it depends on have not been smoke-tested against a real
+  `pg_cron`/`pg_net` install — verified by reading Supabase's documented
+  `verify_jwt`/pg_net behavior and by the existing scheduler/runner unit
+  tests, not by an actual cron tick firing. Confirm on first real deploy that
+  `select * from cron.job_run_details order by start_time desc limit 5;`
+  shows successful (200) runs, not 401s.
 
 ## Next
-- Day 6 — Production Scheduler: verify `findDueAutomations()` selects only
-  `ACTIVE` automations with `next_run_at <= now()` in UTC consistently
-  (KST conversion only at the user-facing edges), confirm the Supabase Edge
-  Function stays a thin secret-forwarding trigger and the cron route
-  rejects a missing/mismatched `CRON_SECRET` before doing anything else,
-  confirm `next_run_at` is recomputed/persisted at run *start* (not
-  completion) so a slow run isn't picked up twice, add/verify a
-  concurrent-tick test (two near-simultaneous due-automation passes only
-  run the automation once — combines with Day 5's duplicate-run guard),
-  and check `computeNextRunAt`'s existing DST/timezone-boundary coverage in
-  `scheduler.test.ts` for gaps. See `DAILY_ROUTINE_PLAN.md` Day 6 for the
-  full spec.
+- Day 7 — Newsletter Automation + Resend Connector: see `DAILY_ROUTINE_PLAN.md`
+  Day 7 for the full spec (subscribers migration/RLS, `NewsletterAutomationHandler`,
+  `EmailConnector`/`ResendConnector`, idempotent send keyed off
+  `automation_run.id`, per-run success/failure counts, mocked-HTTP tests since
+  no `RESEND_API_KEY` is available here).
 
 ## Daily History
 
@@ -356,6 +359,105 @@ Blocked External:
 - OPENAI_API_KEY / GEMINI_API_KEY / WordPress credentials: unchanged from
   above — this Day's new prompts/schemas run through the same mocked
   provider path as before, no new live-credential surface was added.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-26 (Day 6)
+Completed Day 6 — Production Scheduler:
+- Verified (no code change needed) `findDueAutomations()`
+  (`src/server/automations/scheduler.ts`): selects only `status = 'ACTIVE'`
+  with `next_run_at <= now()`, both stored/compared as UTC `timestamptz`,
+  backed by the existing `automations_due_idx` partial index. KST conversion
+  happens only inside `computeNextRunAt()`/`zonedTimeToUtc()`
+  (`src/lib/utils/date.ts`) — confirmed nothing else in the scheduler path
+  touches wall-clock time.
+- `src/server/automations/runner.ts`: moved the `next_run_at` advance
+  (`computeNextRunAt()` + write) from *after* the handler completes to
+  *immediately after* the `RUNNING` row is inserted, before the handler is
+  ever called — still inside Day 5's existing `try`, so a write failure here
+  is caught exactly like any other lifecycle-write failure (run `FAILED`,
+  automation `ERROR`). Before this change, a slow run left the automation
+  looking "due" (old, already-past `next_run_at`, still `ACTIVE`) for every
+  cron tick until it finished, relying entirely on the in-flight guard to
+  reject each repeat attempt instead of the automation simply not being
+  selected as due again. The success-path completion write now only touches
+  `last_run_at`; `next_run_at` is never written twice.
+- Found and fixed a real production gap while verifying "the cron route
+  rejects a missing/mismatched CRON_SECRET before doing anything else"
+  (already true) one hop earlier: `0014_scheduler_cron.sql`'s pg_cron job
+  called the Supabase Edge Function via `net.http_post()` with no
+  `Authorization` header at all. Supabase Edge Functions reject
+  unauthenticated requests by default (`verify_jwt`), so on a real
+  deployment the scheduler could never fire a single tick — invisible here
+  since there's no live Supabase project to smoke-test pg_cron against. New
+  migration `supabase/migrations/0018_scheduler_cron_auth.sql` (never edited
+  0014, per the never-edit-a-migration rule) reschedules the same job with
+  `Authorization: Bearer <service_role_key>`, the key read at execution time
+  from `current_setting('app.settings.service_role_key', true)` — a
+  database-level setting configured once directly on the live database, not
+  committed to git (documented as a new required manual step in README.md
+  "Deployment", alongside the existing `supabase secrets set` step). If that
+  setting is never configured, the job keeps failing with 401 exactly as it
+  silently did before — fail-closed, no-worse-than-before, never a silent
+  security downgrade. The Edge Function itself is untouched and stays exactly
+  as thin as before; `CRON_SECRET` (checked by the Next.js route) remains the
+  actual authorization boundary for running automations, not this new header.
+- Verified (no code change) the two-layer concurrent-tick protection: the
+  app-level `SELECT ... WHERE status IN ('QUEUED','RUNNING')` check is a
+  check-then-act race on its own, but the DB partial unique index
+  `automation_runs_one_inflight_idx` (`0006_automation_runs.sql`, existing
+  from before Day 5) is the real backstop — a losing INSERT fails with a
+  unique-violation error that propagates before the handler is ever called.
+  Added a test exercising that DB-level path directly (not just the
+  app-level check a concurrent tick would normally hit first).
+- Checked `computeNextRunAt`'s DST/timezone-boundary coverage
+  (`scheduler.test.ts`) for gaps per this Day's own instruction: found none
+  in the actual product path (Asia/Seoul has no DST, so no gap/ambiguous-time
+  case exists there) but the existing tests had zero year-boundary or
+  month-boundary coverage even for the no-DST case, and zero coverage of
+  `zonedTimeToUtc`'s gap/ambiguous-time resolution for a schedule that *did*
+  specify a DST-observing timezone (the type is a generic IANA string,
+  `types/automation.ts`, even though the product only ever schedules in
+  KST today). Added both: year/month-boundary DAILY+WEEKLY rollovers (all
+  passed unchanged — no bug found, so `computeNextRunAt` itself was not
+  modified, per this Day's own "don't change passing expectations without a
+  demonstrated bug" rule) and two documentation-only tests locking in the
+  current spring-forward-gap and fall-back-ambiguous-hour resolution for
+  `America/New_York` as an explicit, visible contract instead of undefined
+  behavior nobody had actually checked.
+- Documented all of the above in `docs/ARCHITECTURE.md` (new "Production
+  Scheduler (Day 6)" subsection under Automation Flow).
+- Did not touch `src/app/`, `src/components/`, `src/server/directory/`, or
+  `src/server/customer-support/`.
+
+Tests: `src/server/automations/runner.test.ts` (12 cases, 3 new: `next_run_at`
+provably advances before the handler is invoked — asserted from inside the
+mocked handler itself — a DB unique-violation insert error rejecting a
+concurrent tick before the handler runs, and the manual-run assertion updated
+to reflect that a manual completion write no longer touches `next_run_at` at
+all instead of redundantly re-writing its unchanged value).
+`src/server/automations/scheduler.test.ts` (8 cases, 5 new: year-boundary
+DAILY/WEEKLY, a non-leap-February month boundary, and the two DST
+documentation cases above).
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 104/104 (`npm test`)
+- build: pass (`npm run build`) — required the same local-only `.env.local`
+  placeholder values as Days 4/5 to get past static page collection;
+  not committed (gitignored).
+
+Blocked External:
+- No live Supabase project in this environment: `0018_scheduler_cron_auth.sql`
+  and its required `app.settings.service_role_key` one-time setup have not
+  been smoke-tested against a real `pg_cron`/`pg_net` install. See "Blocked
+  External" above for the exact verification step to run on first real
+  deploy.
 
 Commit:
 - (see git log for this file's commit)

@@ -147,6 +147,19 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
   }
 
   try {
+    // Recomputed and persisted at run START, not completion. findDueAutomations()
+    // re-polls on every cron tick independent of how long the handler takes;
+    // leaving next_run_at at its already-past value until the handler finishes
+    // would let every tick during a slow run re-select this automation as due
+    // again, relying entirely on the in-flight guard above (and its DB backstop)
+    // to reject each one. Advancing it now means a slow run simply stops
+    // looking due to the next tick in the first place.
+    if (advanceSchedule) {
+      const nextRunAt = computeNextRunAt(automation.schedule as unknown as AutomationSchedule).toISOString();
+      const { error: advanceScheduleError } = await admin.from("automations").update({ next_run_at: nextRunAt }).eq("id", automationId);
+      if (advanceScheduleError) throw advanceScheduleError;
+    }
+
     const handler = getHandler(template.slug);
 
     const { data: recent } = await admin
@@ -167,9 +180,9 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
     // the catch block on failure: the Supabase client resolves a failed
     // query rather than throwing, so a silently-ignored error here (a
     // dropped connection, a constraint violation) would leave the run
-    // marked SUCCESS while content_history/next_run_at never actually got
-    // written — or worse, leave the row stuck RUNNING when even the status
-    // update itself fails silently.
+    // marked SUCCESS while content_history never actually got written — or
+    // worse, leave the row stuck RUNNING when even the status update itself
+    // fails silently.
     const { error: markSuccessError } = await admin
       .from("automation_runs")
       .update({ status: "SUCCESS", output: result.output ?? {}, completed_at: new Date().toISOString() })
@@ -189,15 +202,11 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
       if (contentHistoryError) throw contentHistoryError;
     }
 
-    const nextRunAt = advanceSchedule
-      ? computeNextRunAt(automation.schedule as unknown as AutomationSchedule).toISOString()
-      : automation.next_run_at;
-
-    const { error: advanceScheduleError } = await admin
+    const { error: lastRunAtError } = await admin
       .from("automations")
-      .update({ last_run_at: new Date().toISOString(), next_run_at: nextRunAt })
+      .update({ last_run_at: new Date().toISOString() })
       .eq("id", automationId);
-    if (advanceScheduleError) throw advanceScheduleError;
+    if (lastRunAtError) throw lastRunAtError;
 
     await incrementUsage(admin, automation.user_id, { automationRuns: 1, aiGenerations: 1 });
 

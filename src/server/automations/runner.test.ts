@@ -130,7 +130,42 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
 
     expect(result.status).toBe("SUCCESS");
     expect(admin.inserts.automation_runs[0]).toMatchObject({ source: "MANUAL" });
-    expect(admin.updates.automations[0]).toMatchObject({ next_run_at: AUTOMATION.next_run_at });
+    // Only one automations write for a manual run — last_run_at at
+    // completion — and it never touches next_run_at at all.
+    expect(admin.updates.automations).toHaveLength(1);
+    expect(admin.updates.automations[0]).not.toHaveProperty("next_run_at");
+    expect(admin.updates.automations[0]).toMatchObject({ last_run_at: expect.any(String) });
+  });
+
+  it("advances next_run_at at run START, before the handler is ever called — not at completion", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }, { data: null, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-5" }, error: null }, { data: null, error: null }],
+      content_history: [{ data: [], error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+
+    let nextRunAtWhenHandlerRan: unknown;
+    const run = vi.fn().mockImplementation(() => {
+      // Capture the automations update recorded so far, from inside the
+      // handler itself — proves the schedule was already advanced before
+      // the (potentially slow) handler work even started.
+      nextRunAtWhenHandlerRan = admin.updates.automations[0];
+      return Promise.resolve({ output: { ok: true } });
+    });
+    getHandlerMock.mockReturnValue({ templateSlug: "blog-marketing", run });
+
+    await runDueAutomation("auto-1");
+
+    const expectedNext = computeNextRunAt(SCHEDULE).toISOString();
+    expect(nextRunAtWhenHandlerRan).toMatchObject({ next_run_at: expectedNext });
+    // Two separate automations writes: next_run_at at start, last_run_at at completion.
+    expect(admin.updates.automations).toHaveLength(2);
+    expect(admin.updates.automations[1]).toMatchObject({ last_run_at: expect.any(String) });
+    expect(admin.updates.automations[1]).not.toHaveProperty("next_run_at");
   });
 });
 
@@ -236,6 +271,30 @@ describe("runDueAutomation / runAutomationNow — duplicate-run guard", () => {
     await expect(runDueAutomation("auto-1")).rejects.toThrow("already has a run in progress");
     expect(getHandlerMock).not.toHaveBeenCalled();
   });
+
+  it("falls back to the DB's one-in-flight-run unique index when two near-simultaneous scheduled ticks both race past the app-level in-flight check", async () => {
+    // Simulates the genuine race the app-level SELECT-then-INSERT check can't
+    // close on its own: both ticks' in-flight SELECT runs before either has
+    // inserted its RUNNING row, so both see "no in-flight run". The second
+    // INSERT is what actually collides — on the real table this is
+    // `automation_runs_one_inflight_idx` (0006_automation_runs.sql), reproduced
+    // here as the Postgres unique-violation error the client resolves with
+    // rather than throws.
+    const admin = makeAdmin({
+      automations: [{ data: AUTOMATION, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [
+        noInFlight(),
+        { data: null, error: { message: 'duplicate key value violates unique constraint "automation_runs_one_inflight_idx"' } },
+      ],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+
+    await expect(runDueAutomation("auto-1")).rejects.toThrow(/automation_runs_one_inflight_idx/);
+    expect(getHandlerMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("runDueAutomation / runAutomationNow — exception isolation", () => {
@@ -256,7 +315,10 @@ describe("runDueAutomation / runAutomationNow — exception isolation", () => {
 
     expect(result).toEqual({ runId: "run-3", status: "FAILED", errorMessage: "AI provider exploded" });
     expect(admin.updates.automation_runs[0]).toMatchObject({ status: "FAILED", error_message: "AI provider exploded" });
-    expect(admin.updates.automations[0]).toMatchObject({ status: "ERROR" });
+    // updates.automations[0] is the next_run_at advance that already happened
+    // at run start (before the handler threw); [1] is the ERROR status write.
+    expect(admin.updates.automations[0]).toMatchObject({ next_run_at: computeNextRunAt(SCHEDULE).toISOString() });
+    expect(admin.updates.automations[1]).toMatchObject({ status: "ERROR" });
     expect(incrementUsageMock).not.toHaveBeenCalled();
   });
 
@@ -281,6 +343,8 @@ describe("runDueAutomation / runAutomationNow — exception isolation", () => {
 
     expect(result.status).toBe("FAILED");
     expect(admin.updates.automation_runs[1]).toMatchObject({ status: "FAILED" });
-    expect(admin.updates.automations[0]).toMatchObject({ status: "ERROR" });
+    // [0] is the run-start next_run_at advance; [1] is the ERROR status write
+    // from the catch block once persisting SUCCESS itself failed.
+    expect(admin.updates.automations[1]).toMatchObject({ status: "ERROR" });
   });
 });
