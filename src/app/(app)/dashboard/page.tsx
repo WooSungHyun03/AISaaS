@@ -139,7 +139,7 @@ export default async function DashboardPage() {
               <CardTitle className="text-base">Recent Activity</CardTitle>
               <p className="mt-1 text-xs text-muted-foreground">최근 실행 6건</p>
             </div>
-            <Link href="/automations" className="text-xs font-medium text-blue-700 hover:underline">자동화 관리 →</Link>
+            <Link href="/automations/history" className="text-xs font-medium text-blue-700 hover:underline">전체 실행 이력 →</Link>
           </CardHeader>
           <CardContent>
             {recentRuns.length === 0 ? (

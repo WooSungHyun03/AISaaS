@@ -16,6 +16,7 @@ const MOBILE_LINKS = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/automations/marketplace", label: "Marketplace" },
   { href: "/automations", label: "My Automations" },
+  { href: "/automations/history", label: "Execution History" },
   { href: "/directory", label: "AI Directory" },
   { href: "/guides", label: "Guides" },
   { href: "/business", label: "Business" },

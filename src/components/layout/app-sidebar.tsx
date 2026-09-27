@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Store,
   ListChecks,
+  History,
   Compass,
   BookOpen,
   Building2,
@@ -38,6 +39,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/automations/marketplace", label: "Marketplace", icon: Store },
       { href: "/automations", label: "My Automations", icon: ListChecks, exact: true },
+      { href: "/automations/history", label: "Execution History", icon: History },
     ],
   },
   {
