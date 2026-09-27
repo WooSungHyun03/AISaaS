@@ -190,6 +190,8 @@ See `supabase/migrations/` for the authoritative schema (RLS policies in `0012_r
 
 Everything a user can query directly is RLS-scoped to `owner_id`/`user_id`; writes that must bypass RLS (usage counters, subscription updates, cron-driven runs) go through the service-role client in `src/lib/supabase/admin.ts`, which is only ever imported from trusted server code, never from a route a browser can trigger without the secret/entitlement checks in front of it.
 
+Automation Guides content (title/description shown on `/guides`) is a static TS array in `src/app/(public)/guides/page.tsx` — not a database table, MDX, or CMS. Only the FAQ accordion on that page comes from `faqs`. Keep this static until the content volume or a non-developer editing need actually justifies a database-backed or CMS approach.
+
 ## Integration Connections & Secret Storage
 
 `integration_connections` (one row per `(business_id, provider)`) is how an automation handler answers "is this business connected to WordPress/Instagram/etc, and to what" without ever touching a raw credential outside server code:
