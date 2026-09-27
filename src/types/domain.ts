@@ -16,6 +16,9 @@ export type Usage = Database["public"]["Tables"]["usage"]["Row"];
 export type SetupRequest = Database["public"]["Tables"]["setup_requests"]["Row"];
 export type DirectoryTool = Database["public"]["Tables"]["directory_tools"]["Row"];
 export type Faq = Database["public"]["Tables"]["faqs"]["Row"];
+export type BusinessFaq = Database["public"]["Tables"]["business_faqs"]["Row"];
+export type SupportWidgetRequest = Database["public"]["Tables"]["support_widget_requests"]["Row"];
+export type SupportConversation = Database["public"]["Tables"]["support_conversations"]["Row"];
 export type IntegrationConnection = Database["public"]["Tables"]["integration_connections"]["Row"];
 
 export type {

@@ -41,6 +41,16 @@ const serverSchema = z.object({
   YOUTUBE_REFRESH_TOKEN: z.string().optional(),
 
   GITHUB_TOKEN: z.string().optional(),
+
+  // Keys the CS widget's requester IP before it's stored for rate limiting
+  // (never the raw IP). Optional locally/in tests so the app can boot
+  // without it configured; hashRequesterIp() itself refuses to silently
+  // degrade in production (see src/server/customer-support/widget.ts) —
+  // checked there, not here, because `next build`'s page-data-collection
+  // step runs with NODE_ENV=production too, and a module-load-time check in
+  // this file would fail every local production build, not just a real
+  // deployment missing the secret.
+  SUPPORT_WIDGET_IP_HASH_SECRET: z.string().min(1).optional(),
 });
 
 function loadServerEnv() {

@@ -48,6 +48,7 @@ export interface Database {
           brand_tone: string | null;
           keywords: string[];
           website: string | null;
+          public_widget_id: string;
           created_at: string;
           updated_at: string;
         };
@@ -62,6 +63,7 @@ export interface Database {
           brand_tone?: string | null;
           keywords?: string[];
           website?: string | null;
+          public_widget_id?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -314,6 +316,66 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["faqs"]["Insert"]>;
+        Relationships: [];
+      };
+      business_faqs: {
+        Row: {
+          id: string;
+          business_id: string;
+          question: string;
+          answer: string;
+          is_enabled: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          question: string;
+          answer: string;
+          is_enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["business_faqs"]["Insert"]>;
+        Relationships: [];
+      };
+      support_widget_requests: {
+        Row: {
+          id: string;
+          business_id: string;
+          requester_hash: string | null;
+          requested_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          requester_hash?: string | null;
+          requested_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["support_widget_requests"]["Insert"]>;
+        Relationships: [];
+      };
+      support_conversations: {
+        Row: {
+          id: string;
+          business_id: string;
+          question: string;
+          answer: string;
+          used_faq_ids: string[];
+          is_fallback: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          question: string;
+          answer: string;
+          used_faq_ids?: string[];
+          is_fallback: boolean;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["support_conversations"]["Insert"]>;
         Relationships: [];
       };
       integration_connections: {
