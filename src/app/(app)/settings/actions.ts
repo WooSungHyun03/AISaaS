@@ -21,6 +21,7 @@ export async function updateProfile(_prevState: SettingsActionState, formData: F
   if (!user) return { error: "로그인이 필요합니다." };
 
   const displayName = String(formData.get("displayName") ?? "").trim();
+  if (displayName.length > 100) return { error: "이름은 100자 이하로 입력해주세요." };
   const { error } = await supabase.from("profiles").update({ display_name: displayName || null }).eq("id", user.id);
 
   if (error) return { error: "프로필 저장 중 오류가 발생했습니다." };

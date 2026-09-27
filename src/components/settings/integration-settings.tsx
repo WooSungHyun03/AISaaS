@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import type { ConnectionStatus, IntegrationProvider, Json } from "@/types/domain";
 
 export interface SafeConnection {
@@ -49,17 +50,30 @@ function StatusBadge({ connection }: { connection?: SafeConnection }) {
 
 function DisconnectButton({ businessId, provider }: { businessId: string; provider: IntegrationProvider }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  return <Button variant="ghost" size="sm" disabled={isPending} onClick={() => startTransition(async () => {
-    try {
-      const result = await disconnectIntegration(businessId, provider);
-      if (result.error) { toast.error(result.error); return; }
-      toast.success("외부 서비스 연결을 해제했습니다.");
-      router.refresh();
-    } catch {
-      toast.error("연결을 해제하지 못했습니다. 잠시 후 다시 시도해주세요.");
-    }
-  })}><Unplug />{isPending ? "해제 중..." : "연결 해제"}</Button>;
+  return <ConfirmationDialog
+    trigger={<Button type="button" variant="ghost" size="sm"><Unplug />연결 해제</Button>}
+    title="외부 서비스 연결을 해제할까요?"
+    description="예약된 자동화가 이 연결을 사용하면 다음 외부 게시가 실패할 수 있습니다. 언제든 다시 연결할 수 있습니다."
+    confirmLabel="연결 해제"
+    pendingLabel="해제 중..."
+    destructive
+    onConfirm={async () => {
+      let errorShown = false;
+      try {
+        const result = await disconnectIntegration(businessId, provider);
+        if (result.error) {
+          toast.error(result.error);
+          errorShown = true;
+          throw new Error(result.error);
+        }
+        toast.success("외부 서비스 연결을 해제했습니다.");
+        router.refresh();
+      } catch (error) {
+        if (!errorShown) toast.error("연결을 해제하지 못했습니다. 잠시 후 다시 시도해주세요.");
+        throw error;
+      }
+    }}
+  />;
 }
 
 function WordPressDialog({ businessId, connection }: { businessId: string; connection?: SafeConnection }) {

@@ -67,7 +67,7 @@ export function AppSidebar() {
           AutoBiz
         </Link>
       </div>
-      <nav className="flex-1 space-y-6 px-3 py-6">
+      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-6" aria-label="앱 주요 메뉴">
         {NAV_SECTIONS.map((section, index) => (
           <div key={section.label ?? index} className="space-y-1">
             {section.label ? (
@@ -80,12 +80,13 @@ export function AppSidebar() {
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={isActive ? "page" : undefined}
                   className={cn(
                     "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                     isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
                   )}
                 >
-                  <Icon className="h-4 w-4" />
+                  <Icon className="h-4 w-4" aria-hidden="true" />
                   {item.label}
                 </Link>
               );
@@ -98,7 +99,7 @@ export function AppSidebar() {
           type="submit"
           className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          <LogOut className="h-4 w-4" />
+          <LogOut className="h-4 w-4" aria-hidden="true" />
           로그아웃
         </button>
       </form>

@@ -48,6 +48,7 @@ export async function createAutomation(
   if (!businessId || !templateId || !name) {
     return { error: "모든 필수 항목을 입력해주세요." };
   }
+  if (name.length > 100) return { error: "자동화 이름은 100자 이하로 입력해주세요." };
 
   const [businessResult, templateResult] = await Promise.all([
     supabase.from("businesses").select("id").eq("id", businessId).eq("owner_id", user.id).maybeSingle(),

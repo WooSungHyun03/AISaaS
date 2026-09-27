@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { IntegrationSettings, type SafeConnection } from "@/components/settings/integration-settings";
 import { ProfileForm } from "@/components/settings/profile-form";
+import { Building2 } from "lucide-react";
+import { EmptyState } from "@/components/ui/page-state";
 
 const INSTAGRAM_MESSAGE: Record<string, { tone: string; text: string }> = {
   connected: { tone: "border-emerald-200 bg-emerald-50 text-emerald-800", text: "Instagram Professional 계정을 연결했습니다." },
@@ -45,7 +47,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
       <section className="space-y-4">
         <div><h2 className="text-lg font-semibold">외부 서비스 연결</h2><p className="text-sm text-muted-foreground">연결은 사업체별로 관리됩니다. 비밀번호와 토큰은 저장 후 다시 표시하지 않습니다.</p></div>
-        {(businesses ?? []).length === 0 ? <Card><CardContent className="space-y-4 py-10 text-center"><p className="text-sm text-muted-foreground">연결을 추가하려면 먼저 사업체를 등록해주세요.</p><Button asChild><Link href="/onboarding">사업체 등록</Link></Button></CardContent></Card> : <>
+        {(businesses ?? []).length === 0 ? <EmptyState icon={<Building2 className="size-5" />} title="연결할 사업체가 없습니다" description="외부 서비스 연결은 사업체별로 관리됩니다. 먼저 사업체 정보를 등록해주세요." action={<Button asChild><Link href="/onboarding">사업체 등록</Link></Button>} /> : <>
           <div className="flex flex-wrap gap-2" aria-label="연결을 관리할 사업체">
             {(businesses ?? []).map((business) => <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness?.id ? "default" : "outline"}><Link href={`/settings?business=${business.id}`}>{business.name}</Link></Button>)}
           </div>

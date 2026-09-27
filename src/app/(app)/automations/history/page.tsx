@@ -8,6 +8,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/page-state";
 
 const FILTERS: Array<{ value: RunHistoryFilter | null; label: string }> = [
   { value: null, label: "전체" },
@@ -89,14 +90,13 @@ export default async function AutomationHistoryPage({ searchParams }: PageProps<
         </CardHeader>
         <CardContent className="px-0">
           {runs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-              <span className="flex size-12 items-center justify-center rounded-full bg-slate-100 text-slate-500"><Clock3 className="size-6" /></span>
-              <div>
-                <p className="font-medium">{status ? "이 상태의 실행 기록이 없습니다" : "아직 실행 기록이 없습니다"}</p>
-                <p className="mt-1 text-sm text-muted-foreground">자동화를 실행하면 시작과 완료 상태가 여기에 기록됩니다.</p>
-              </div>
-              {status ? <Button asChild variant="outline"><Link href="/automations/history">전체 이력 보기</Link></Button> : <Button asChild><Link href="/automations">자동화 관리</Link></Button>}
-            </div>
+            <EmptyState
+              className="border-0 py-16"
+              icon={<Clock3 className="size-5" />}
+              title={status ? "이 상태의 실행 기록이 없습니다" : "아직 실행 기록이 없습니다"}
+              description="자동화를 실행하면 시작과 완료 상태가 여기에 기록됩니다."
+              action={status ? <Button asChild variant="outline"><Link href="/automations/history">전체 이력 보기</Link></Button> : <Button asChild><Link href="/automations">자동화 관리</Link></Button>}
+            />
           ) : (
             <Table className="min-w-[900px]">
               <TableHeader>
@@ -134,7 +134,7 @@ export default async function AutomationHistoryPage({ searchParams }: PageProps<
       </Card>
 
       {totalPages > 1 ? (
-        <nav className="flex items-center justify-between" aria-label="실행 이력 페이지">
+        <nav className="flex flex-wrap items-center justify-between gap-3" aria-label="실행 이력 페이지">
           {page <= 1 ? <Button variant="outline" disabled><ChevronLeft /> 이전</Button> : (
             <Button asChild variant="outline"><Link href={historyHref(status, page - 1)}><ChevronLeft /> 이전</Link></Button>
           )}

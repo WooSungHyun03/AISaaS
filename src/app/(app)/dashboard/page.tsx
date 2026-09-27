@@ -13,6 +13,7 @@ import type { AutomationRun } from "@/types/domain";
 import { getRecentSetupRequests } from "@/server/setup-requests";
 import { SetupRequestStatusBadge } from "@/components/setup-requests/setup-request-status";
 import { SETUP_REQUEST_STATUS, setupAutomationTypeLabel, setupRequestNumber } from "@/types/setup-request";
+import { EmptyState } from "@/components/ui/page-state";
 
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
@@ -144,10 +145,7 @@ export default async function DashboardPage() {
         </CardHeader>
         <CardContent>
           {setupRequests.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-7 text-center">
-              <p className="text-sm font-medium">아직 구축 요청이 없습니다</p>
-              <p className="text-xs text-muted-foreground">직접 설정하기 어려운 업무가 있다면 전문가 구축을 요청할 수 있습니다.</p>
-            </div>
+            <EmptyState className="border-0 py-7" icon={<Wrench className="size-5" />} title="아직 구축 요청이 없습니다" description="직접 설정하기 어려운 업무가 있다면 전문가 구축을 요청할 수 있습니다." action={<Button asChild size="sm" variant="outline"><Link href="/setup-request">구축 요청하기</Link></Button>} />
           ) : (
             <ul className="divide-y divide-slate-100">
               {setupRequests.map((request) => (
@@ -178,11 +176,7 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             {recentRuns.length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-                <Clock3 className="size-7 text-slate-300" />
-                <p className="text-sm font-medium">아직 실행 기록이 없습니다</p>
-                <p className="text-xs text-muted-foreground">자동화를 실행하면 이곳에 결과가 표시됩니다.</p>
-              </div>
+              <EmptyState className="border-0 py-10" icon={<Clock3 className="size-5" />} title="아직 실행 기록이 없습니다" description="자동화를 실행하면 이곳에 결과가 표시됩니다." action={<Button asChild size="sm" variant="outline"><Link href="/automations">자동화 관리</Link></Button>} />
             ) : (
               <ul className="divide-y divide-slate-100">
                 {recentRuns.map((run) => {

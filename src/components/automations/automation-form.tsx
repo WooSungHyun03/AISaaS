@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FormMessage } from "@/components/ui/form-message";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createAutomation, type AutomationActionState } from "@/app/(app)/automations/actions";
 import type { AutomationTemplate, Business } from "@/types/domain";
@@ -40,11 +41,11 @@ export function AutomationForm({
         <CardTitle>자동화 설정</CardTitle>
       </CardHeader>
       <CardContent>
-        <form action={formAction} className="space-y-5">
+        <form action={formAction} className="space-y-5" aria-describedby={state.error ? "automation-form-error" : undefined}>
           <div className="space-y-2">
             <Label htmlFor="businessId">사업체</Label>
-            <Select name="businessId" required defaultValue={businesses[0]?.id}>
-              <SelectTrigger id="businessId">
+            <Select name="businessId" required defaultValue={businesses[0]?.id} disabled={isPending}>
+              <SelectTrigger id="businessId" className="w-full" aria-label="사업체">
                 <SelectValue placeholder="사업체를 선택하세요" />
               </SelectTrigger>
               <SelectContent>
@@ -59,8 +60,8 @@ export function AutomationForm({
 
           <div className="space-y-2">
             <Label htmlFor="templateId">자동화 유형</Label>
-            <Select name="templateId" required defaultValue={defaultTemplateId ?? templates[0]?.id}>
-              <SelectTrigger id="templateId">
+            <Select name="templateId" required defaultValue={defaultTemplateId ?? templates[0]?.id} disabled={isPending}>
+              <SelectTrigger id="templateId" className="w-full" aria-label="자동화 유형">
                 <SelectValue placeholder="자동화 유형을 선택하세요" />
               </SelectTrigger>
               <SelectContent>
@@ -75,13 +76,13 @@ export function AutomationForm({
 
           <div className="space-y-2">
             <Label htmlFor="name">자동화 이름</Label>
-            <Input id="name" name="name" placeholder="예: 헬스장 블로그 자동화" required />
+            <Input id="name" name="name" placeholder="예: 헬스장 블로그 자동화" required maxLength={100} disabled={isPending} />
           </div>
 
           <div className="space-y-2">
-            <Label>실행 주기</Label>
-            <Select name="frequency" value={frequency} onValueChange={(value) => setFrequency(value as "DAILY" | "WEEKLY")}>
-              <SelectTrigger>
+            <Label htmlFor="frequency">실행 주기</Label>
+            <Select name="frequency" value={frequency} onValueChange={(value) => setFrequency(value as "DAILY" | "WEEKLY")} disabled={isPending}>
+              <SelectTrigger id="frequency" className="w-full" aria-label="실행 주기">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -92,15 +93,18 @@ export function AutomationForm({
           </div>
 
           {frequency === "WEEKLY" ? (
-            <div className="space-y-2">
-              <Label>요일 선택</Label>
-              <div className="flex flex-wrap gap-2">
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">요일 선택</legend>
+              <div className="flex flex-wrap gap-2" aria-describedby={selectedDays.length === 0 ? "weekday-error" : undefined}>
                 {WEEKDAYS.map((day) => {
                   const active = selectedDays.includes(day.value);
                   return (
                     <button
                       type="button"
                       key={day.value}
+                      aria-pressed={active}
+                      aria-label={`${day.label}요일 ${active ? "선택됨" : "선택 안 됨"}`}
+                      disabled={isPending}
                       onClick={() =>
                         setSelectedDays((prev) =>
                           prev.includes(day.value) ? prev.filter((d) => d !== day.value) : [...prev, day.value],
@@ -118,15 +122,16 @@ export function AutomationForm({
               {selectedDays.map((day) => (
                 <input key={day} type="hidden" name="daysOfWeek" value={day} />
               ))}
-            </div>
+              {selectedDays.length === 0 ? <p id="weekday-error" className="text-xs text-destructive">요일을 하나 이상 선택해주세요.</p> : null}
+            </fieldset>
           ) : null}
 
           <div className="space-y-2">
             <Label htmlFor="timeOfDay">실행 시각 (한국 시간)</Label>
-            <Input id="timeOfDay" name="timeOfDay" type="time" defaultValue="09:00" required />
+            <Input id="timeOfDay" name="timeOfDay" type="time" defaultValue="09:00" required disabled={isPending} />
           </div>
 
-          {state.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
+          {state.error ? <FormMessage id="automation-form-error">{state.error}</FormMessage> : null}
 
           <Button type="submit" className="w-full" disabled={isPending || businesses.length === 0}>
             {isPending ? "생성 중..." : "자동화 생성"}
