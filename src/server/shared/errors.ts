@@ -58,6 +58,21 @@ export function isConnectorError(error: unknown): error is ConnectorError {
 }
 
 /**
+ * Classifies an HTTP response status into the shared connector error
+ * taxonomy. Shared by every connector that talks to a REST API over HTTP
+ * (WordPress, Resend/email — see src/server/connectors/wordpress/index.ts
+ * and src/server/connectors/email/resend.ts) so the 401/403/4xx/5xx →
+ * error-code mapping stays consistent instead of each connector guessing
+ * its own.
+ */
+export function classifyHttpStatus(status: number): "AUTH_FAILED" | "PERMISSION_DENIED" | "UPSTREAM_SERVER_ERROR" | "UPSTREAM_CLIENT_ERROR" {
+  if (status === 401) return "AUTH_FAILED";
+  if (status === 403) return "PERMISSION_DENIED";
+  if (status >= 500) return "UPSTREAM_SERVER_ERROR";
+  return "UPSTREAM_CLIENT_ERROR";
+}
+
+/**
  * Client-safe explanation for an automation run failure. `automation_runs`
  * only ever persists `error.message` (a string — see runner.ts), so this
  * necessarily classifies by matching text rather than a `.code`, but it is

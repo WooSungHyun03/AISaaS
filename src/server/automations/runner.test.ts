@@ -103,11 +103,15 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
     });
     createAdminClientMock.mockReturnValue(admin);
     canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
-    okHandler({ output: { ok: true }, content: "body", contentType: "blog", title: "T", topic: "Topic" });
+    const run = okHandler({ output: { ok: true }, content: "body", contentType: "blog", title: "T", topic: "Topic" });
 
     const result = await runDueAutomation("auto-1");
 
     expect(result).toEqual({ runId: "run-1", status: "SUCCESS", output: { ok: true } });
+    // The handler gets the automation_runs row id the runner already
+    // inserted — newsletter.ts derives its per-recipient idempotency key
+    // from this (see types/automation.ts#AutomationRunContext.runId).
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ runId: "run-1" }));
     expect(admin.inserts.automation_runs[0]).toMatchObject({ automation_id: "auto-1", status: "RUNNING", source: "SCHEDULED" });
     const expectedNext = computeNextRunAt(SCHEDULE).toISOString();
     expect(admin.updates.automations[0]).toMatchObject({ next_run_at: expectedNext });

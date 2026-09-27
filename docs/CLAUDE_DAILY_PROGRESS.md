@@ -6,7 +6,7 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 7 — Newsletter Automation + Resend Connector
+Day 8 — Instagram Professional Account Connection
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
@@ -15,9 +15,10 @@ Day 7 — Newsletter Automation + Resend Connector
 - Day 4 — Blog AI Pipeline Upgrade (2026-09-24)
 - Day 5 — Automation Runner Reliability (2026-09-25)
 - Day 6 — Production Scheduler (2026-09-26)
+- Day 7 — Newsletter Automation + Resend Connector (2026-09-27)
 
 ## Current
-- (none — Day 7 not started yet)
+- (none — Day 8 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -50,13 +51,30 @@ Day 7 — Newsletter Automation + Resend Connector
   tests, not by an actual cron tick firing. Confirm on first real deploy that
   `select * from cron.job_run_details order by start_time desc limit 5;`
   shows successful (200) runs, not 401s.
+- RESEND_API_KEY / RESEND_FROM_EMAIL: not present in this environment.
+  `ResendConnector` (`src/server/connectors/email/resend.ts`) is only
+  verified against a mocked global `fetch` (success incl. exact request
+  body/headers, 401/422 non-retryable, a single 5xx retried once then
+  succeeding, repeated 5xx exhausting the bound, network failure, timeout —
+  `src/server/connectors/email/resend.test.ts` +
+  `resend.send.test.ts`), never against the real Resend API. Set both env
+  vars to smoke-test a real send.
+- No live Supabase project in this environment (same root cause as above):
+  the new `subscribers` table + RLS (`0026_subscribers.sql`) have only been
+  exercised through a mocked Supabase client
+  (`src/server/automations/handlers/newsletter.test.ts` mocks
+  `listActiveSubscribers()` directly), not against a real Postgres
+  instance with RLS actually enforced.
 
 ## Next
-- Day 7 — Newsletter Automation + Resend Connector: see `DAILY_ROUTINE_PLAN.md`
-  Day 7 for the full spec (subscribers migration/RLS, `NewsletterAutomationHandler`,
-  `EmailConnector`/`ResendConnector`, idempotent send keyed off
-  `automation_run.id`, per-run success/failure counts, mocked-HTTP tests since
-  no `RESEND_API_KEY` is available here).
+- Day 8 — Instagram Professional Account Connection: see
+  `DAILY_ROUTINE_PLAN.md` Day 8 for the full spec (Meta OAuth flow using
+  Day 2's `integration_connections` foundation, state/CSRF validation,
+  Professional-account-only enforcement, token exchange, reconnect/
+  disconnect, mocked OAuth/HTTP tests since no Meta app credentials are
+  available here). Note: `src/server/connectors/instagram/oauth.ts` already
+  has some scaffolding from earlier work — verify it against Day 8's DoD
+  before rebuilding anything.
 
 ## Daily History
 
@@ -551,6 +569,119 @@ Tests:
 Blocked External:
 - None new — this Day's work is entirely internal runner logic and a schema
   addition; no new external credential surface.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-27 (Day 7)
+Completed Day 7 — Newsletter Automation + Resend Connector:
+- New migration `supabase/migrations/0026_subscribers.sql` (next sequential
+  number — the repo currently has two files numbered `0018`, from parallel
+  work; picked `0026` after `0025_directory_tools_classification_source.sql`,
+  the highest existing number, never edited an existing file): `subscribers`
+  (`business_id`, `email`, `name`, `status` check-constrained to
+  `ACTIVE|UNSUBSCRIBED`, `subscribed_at`, `unsubscribed_at`), unique on
+  `(business_id, email)` so re-subscribing updates the same row instead of
+  duplicating it, `updated_at` trigger. RLS follows `business_faqs`'
+  exact pattern (`0022_business_faqs.sql`) — every policy re-checks
+  `businesses.owner_id = auth.uid()` via subquery, full owner CRUD (the
+  newsletter handler itself always reads through the service-role client
+  and bypasses RLS; these policies are for a future owner-facing
+  subscriber management page, not built this Day).
+- `src/types/database.types.ts`/`domain.ts`: `subscribers` table Row/
+  Insert/Update, `SubscriberStatus` type, `Subscriber` alias.
+- `src/server/ai/prompts/newsletter.ts`: `newsletterContentSchema`
+  (`{ subject, previewText, htmlBody }`) + `buildNewsletterPrompt()`,
+  following `prompts/blog.ts`'s shape (business-profile context, an
+  `avoid these recent subjects` steer).
+- `src/server/connectors/email/provider.ts`: new `EmailConnector`
+  interface (`isConfigured()` + `send(params)`) mirroring the
+  `AIProvider`/`BillingProvider` vendor-neutral pattern — deliberately not
+  `PlatformConnector` (one email per subscriber is a different shape than
+  "publish one thing to one account"). `src/server/connectors/email/
+  resend.ts`: `ResendConnector` implementation — plain `fetch` (not
+  WordPress's raw `node:https`; a fixed trusted endpoint has no SSRF
+  surface to validate), a bounded one-retry loop for transient failures
+  only (`TIMEOUT`/`UPSTREAM_SERVER_ERROR`/`NETWORK_FAILURE`), and an
+  `Idempotency-Key` header on every request derived from
+  `${automation_runs.id}:${subscriber.id}` so a retried attempt for the
+  same run + recipient is deduped by Resend instead of delivering twice.
+  `src/server/connectors/email/subscribers.ts`: `listActiveSubscribers()`
+  (service-role read, status = ACTIVE only).
+- Added `runId: string` to `AutomationRunContext`
+  (`src/types/automation.ts`) and threaded `run.id` into it from
+  `runner.ts` (the row the runner already inserts before calling
+  `handler.run()`) — the one piece newsletter's idempotency key needed
+  that no existing handler had a reason to ask for. Verified this doesn't
+  change any other handler's behavior (structural typing; only blog.ts's
+  test needed a `runId` added to its hand-built context fixture).
+- `src/server/automations/handlers/newsletter.ts`: business profile +
+  recent subjects → `generateStructured()`, regenerating the subject
+  exactly once on a near-duplicate (reused Day 4's
+  `isNearDuplicateTopic()` — same bounded-once pattern as
+  `blog.ts#generateTopic()`, never a loop) → send to every ACTIVE
+  subscriber. A per-recipient failure (bad address, exhausted transient
+  retry) is recorded and the loop continues; an auth/permission/
+  not-configured failure aborts the whole run immediately (every
+  remaining send would fail identically) and propagates so the runner
+  marks the run `FAILED`. Persists `subject`, `previewText`,
+  `totalSubscribers`, `successCount`, `failureCount`, `messageIds`, and
+  `failures` on `automation_runs.output`.
+- Extracted two small pieces of duplicated logic once a second real call
+  site needed them (Rule 10): `stripHtml()` (blog.ts → new
+  `src/server/shared/html.ts`) and `classifyHttpStatus()`
+  (wordpress/index.ts → `src/server/shared/errors.ts`, now shared by both
+  the WordPress and Resend connectors).
+- Left `newsletter` as `COMING_SOON` in `AUTOMATION_AVAILABILITY`
+  (`src/types/automation.ts`) even though the backend is fully done —
+  flipping it needs a subscriber-list management UI that doesn't exist
+  yet (Dev2/UI scope, `src/app/`/`src/components/`), same reasoning Day 3
+  used for WordPress's setup-wizard rewiring.
+- `.env.example` already documented `RESEND_API_KEY`/`RESEND_FROM_EMAIL`
+  from earlier scaffolding — no change needed there.
+- Documented the full design in `docs/ARCHITECTURE.md` (new "Newsletter
+  Automation & Resend Connector (Day 7)" subsection under Automation
+  Flow, plus a `subscribers` line in "Database Overview").
+- Did not touch `src/app/`, `src/components/`, `src/server/directory/`,
+  or `src/server/customer-support/`.
+
+Tests: `src/server/connectors/email/resend.test.ts` (not-configured →
+`NOT_CONFIGURED`, no `serverEnv` mock needed — same pattern as
+WordPress's not-configured test, relying on the real empty test env) +
+`resend.send.test.ts` (7 cases, `serverEnv` mocked: send success incl.
+exact request body/headers/idempotency key, 401 and 422 never retried,
+a single 5xx retried once and succeeding with the same idempotency key
+reused, repeated 5xx exhausting the bound at exactly 2 attempts, network
+failure, timeout/abort). `src/server/automations/handlers/
+newsletter.test.ts` (10 cases): only ACTIVE subscribers reached, per-run
+success/failure counts and message ids, a stable idempotency key derived
+from `runId` + subscriber id, identical keys across two calls with the
+same `runId` (the "retried run" scenario), a partial per-recipient
+failure continuing the loop without failing the run, a systemic failure
+aborting the run immediately, not-configured failing before any
+generation/send call, zero subscribers still succeeding with zero
+counts, and both the regenerate-once-on-near-duplicate and
+no-regeneration paths. `src/server/automations/runner.test.ts` gained an
+assertion that the handler receives `runId` matching the inserted run's
+id.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 262/262 (`npm test`, includes 19 new Day 7 tests: 9 connector
+  + 10 handler)
+- build: pass (`npm run build`) — required the same local-only `.env.local`
+  placeholder values as Days 4/5/6 to get past static page collection;
+  not committed (gitignored). Also required a fresh `npm ci` — this
+  session's container had no `node_modules/` at all; installed cleanly
+  with 0 vulnerabilities.
+
+Blocked External:
+- RESEND_API_KEY / RESEND_FROM_EMAIL and the live Supabase RLS
+  round-trip for `subscribers` — see "Blocked External" above for detail.
 
 Commit:
 - (see git log for this file's commit)

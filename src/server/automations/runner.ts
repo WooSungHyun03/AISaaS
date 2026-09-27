@@ -174,6 +174,7 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
       business,
       config: (automation.config as Record<string, never>) ?? {},
       recentTopics: (recent ?? []).map((r) => r.topic).filter((topic): topic is string => Boolean(topic)),
+      runId: run.id,
     });
 
     // Every write below is checked for a returned `error` and thrown into

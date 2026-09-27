@@ -17,6 +17,7 @@ export type SetupRequestContactMethod = "EMAIL" | "PHONE" | "KAKAO" | "OTHER";
 export type IntegrationProvider = "wordpress" | "instagram" | "email" | "youtube";
 export type ConnectionStatus = "CONNECTED" | "EXPIRED" | "ERROR" | "DISCONNECTED";
 export type BillingCheckoutStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "CANCELED";
+export type SubscriberStatus = "ACTIVE" | "UNSUBSCRIBED";
 
 export interface Database {
   public: {
@@ -455,6 +456,32 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["integration_connections"]["Insert"]>;
+        Relationships: [];
+      };
+      subscribers: {
+        Row: {
+          id: string;
+          business_id: string;
+          email: string;
+          name: string | null;
+          status: SubscriberStatus;
+          subscribed_at: string;
+          unsubscribed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          email: string;
+          name?: string | null;
+          status?: SubscriberStatus;
+          subscribed_at?: string;
+          unsubscribed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["subscribers"]["Insert"]>;
         Relationships: [];
       };
     };

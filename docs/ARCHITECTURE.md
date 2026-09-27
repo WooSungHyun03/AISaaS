@@ -87,7 +87,7 @@ A handler only implements "what does this automation actually do" — loading co
 
 Tests: `src/server/automations/runner.test.ts` — source tagging on both entry points, `next_run_at` advancing only for a scheduled success (never for manual), refusal on `PAUSED`/`ERROR`/entitlement-denied without calling the handler, the duplicate-run guard for both a manual double-click and a concurrent scheduled tick, an unanticipated handler exception being caught and terminating the run as `FAILED`/the automation as `ERROR`, and a DB write failure on the SUCCESS-marking update itself still resulting in `FAILED` rather than a stuck `RUNNING` row.
 
-Only `blog-marketing` has a working handler + connector (WordPress) today — the vertical slice used to validate the architecture end to end. The other four templates have handler/connector interfaces in place that throw "not implemented yet"; `AUTOMATION_AVAILABILITY` in `src/types/automation.ts` is the single source of truth the UI reads to show Available/Beta/Coming Soon and to gate what the creation wizard offers.
+`blog-marketing` (WordPress) and, as of Day 7, `newsletter` (Resend) have working handlers + connectors end to end — the other three templates still have handler/connector interfaces in place that throw "not implemented yet". `AUTOMATION_AVAILABILITY` in `src/types/automation.ts` is the single source of truth the UI reads to show Available/Beta/Coming Soon and to gate what the creation wizard offers; `newsletter` is deliberately left `COMING_SOON` there even though the backend is complete — flipping it is a UI/product decision (a subscriber-list management page doesn't exist yet) left for Dev2, same as Day 3 left WordPress's setup-wizard rewiring to Dev2.
 
 ### Production Scheduler (Day 6)
 
@@ -100,6 +100,89 @@ Only `blog-marketing` has a working handler + connector (WordPress) today — th
 **Cron auth was a real deployment gap, now fixed.** `POST /api/cron/run-automations` (`src/app/api/cron/run-automations/route.ts`) already rejected a missing/mismatched `x-cron-secret` header before calling `findDueAutomations()` — that was correct from the start. But the *first* hop — `pg_cron` (`0014_scheduler_cron.sql`) calling the Supabase Edge Function `run-due-automations` via `net.http_post()` — sent no `Authorization` header at all. Supabase Edge Functions reject unauthenticated requests by default (`verify_jwt`), so in a real deployment the cron trigger could never fire even once; this was invisible in this environment because there is no live Supabase project to smoke-test pg_cron against. `0018_scheduler_cron_auth.sql` reschedules the same job with `Authorization: Bearer <service_role_key>`, the key read at execution time from a database-level setting (`current_setting('app.settings.service_role_key', true)`) rather than committed to git — see README.md "Deployment" for the one-time `alter database ... set` step. The Edge Function itself stays exactly as thin as before: it still only exists to forward `CRON_SECRET` to the Next.js route, which remains the actual authorization boundary for running automations.
 
 Tests: `src/server/automations/scheduler.test.ts` (year/month-boundary rollovers for DAILY and WEEKLY schedules in the default Asia/Seoul timezone — no DST there, so no gap/ambiguous-time cases exist on the production path; two documentation-only tests lock in `zonedTimeToUtc`'s current gap/ambiguous-time resolution for a DST-observing timezone, since `AutomationSchedule.timezone` is a generic IANA field even though the product only schedules in KST today). `src/server/automations/runner.test.ts` — `next_run_at` provably advances before the handler is invoked (asserted from inside the mocked handler itself), and the two concurrent-tick cases above.
+
+### Newsletter Automation & Resend Connector (Day 7)
+
+The second real automation vertical, alongside blog: `subscribers` (new
+migration `0026_subscribers.sql`) → `NewsletterAutomationHandler`
+(`src/server/automations/handlers/newsletter.ts`) → `ResendConnector`
+(`src/server/connectors/email/resend.ts`).
+
+- **`subscribers` table.** `business_id`, `email`, `name`, `status`
+  (`ACTIVE`/`UNSUBSCRIBED`), `subscribed_at`/`unsubscribed_at`. Unique on
+  `(business_id, email)` so re-subscribing the same address updates the
+  existing row instead of duplicating it. RLS follows `business_faqs`'
+  pattern exactly (`0022_business_faqs.sql`): every policy re-checks
+  `businesses.owner_id = auth.uid()` via a subquery, full CRUD for the
+  owner. The newsletter handler itself always reads through the
+  service-role client (`listActiveSubscribers()`,
+  `src/server/connectors/email/subscribers.ts`) and bypasses RLS
+  entirely — these policies exist for a future owner-facing subscriber
+  management page (not built this Day; out of scope, see below).
+- **`EmailConnector` interface** (`src/server/connectors/email/provider.ts`)
+  mirrors the `AIProvider`/`BillingProvider` pattern — vendor-neutral,
+  `isConfigured()` + `send(params)` for one recipient at a time — and is
+  deliberately not `PlatformConnector`: that interface publishes one piece
+  of content to one external account (WordPress, Instagram), while a
+  newsletter send is one email per subscriber, a different shape.
+  `ResendConnector` is the only implementation. `RESEND_API_KEY`/
+  `RESEND_FROM_EMAIL` stay server-only (`src/lib/env/server.ts`, already
+  documented in `.env.example` from before this Day).
+- **Idempotent sends.** Every `send()` call carries an `Idempotency-Key`
+  header derived from `${automation_runs.id}:${subscriber.id}` (added to
+  `AutomationRunContext` as `runId`, threaded through by `runner.ts` —
+  see `types/automation.ts`). Resend dedupes a repeated request carrying
+  the same key instead of delivering twice, which is what makes
+  `ResendConnector`'s own bounded one-retry-on-transient-failure loop
+  (mirroring `src/server/ai/http.ts`'s shape, scoped to `ConnectorError`)
+  safe — a retried attempt for the same run + recipient can't double-send.
+  The key is stable across a re-invocation of the *same* run (verified by
+  a test calling the handler twice with the same `runId`); a fresh manual
+  "Run Now" gets a new `automation_runs` row and therefore a new key by
+  design — that's a deliberate new send, not a retry.
+- **Per-recipient vs. systemic failure.** A per-recipient failure
+  (`UPSTREAM_CLIENT_ERROR` — e.g. a malformed address, `TIMEOUT`/
+  `NETWORK_FAILURE`/`UPSTREAM_SERVER_ERROR` already exhausted their own
+  retry) is recorded and the loop continues to the next subscriber. A
+  systemic failure (`AUTH_FAILED`/`PERMISSION_DENIED`/`NOT_CONFIGURED` —
+  every remaining send would fail identically) aborts the whole run
+  immediately instead of burning through the rest of the list, and
+  propagates so the runner marks the run `FAILED`.
+- **Per-run counts persisted on `automation_runs.output`**: `subject`,
+  `previewText`, `totalSubscribers`, `successCount`, `failureCount`,
+  `messageIds` (Resend's own per-send id), and `failures` (subscriber id +
+  email + error message for anything that didn't send) — same shape
+  philosophy as blog.ts's unified output object.
+- **Subject dedup reuses Day 4's `isNearDuplicateTopic()`** the same way
+  `blog.ts#generateTopic()` does: regenerate once (never a loop) if the
+  first subject is a near-duplicate of a recently sent one
+  (`content_history.topic` for this automation), then accept whatever
+  comes back regardless of its own similarity.
+- **`stripHtml()`** (rendering the generated HTML body down to
+  `content_history.content`'s plain-text convention) was extracted from
+  `blog.ts` into `src/server/shared/html.ts` once newsletter became a
+  second real call site (Rule 10). **`classifyHttpStatus()`** (HTTP status →
+  `ConnectorError` code) was likewise extracted from
+  `wordpress/index.ts` into `src/server/shared/errors.ts` for the same
+  reason — both connectors now share it.
+- **Out of scope this Day, left for Dev2**: an owner-facing subscriber
+  list/import/unsubscribe management page — `src/app/`/`src/components/`
+  are UI-owned directories this routine's safety rules don't touch beyond
+  the minimum needed to keep the build compiling. `listActiveSubscribers()`
+  and the RLS policies above are ready for that page to be built against.
+
+Tests: `src/server/connectors/email/resend.test.ts` +
+`resend.send.test.ts` (not-configured, send success incl. exact request
+body/headers, 401/422 never retried, a single 5xx retried once and
+succeeding, repeated 5xx exhausting the bound, network failure, timeout).
+`src/server/automations/handlers/newsletter.test.ts` (only ACTIVE
+subscribers reached, per-run success/failure counts, a stable idempotency
+key derived from `runId` + subscriber id — including across two calls with
+the same `runId` — partial failure continuing the loop, a systemic failure
+aborting it, not-configured failing before any generation/send, zero
+subscribers still succeeding, and the near-duplicate-subject regeneration
+path). `src/server/automations/runner.test.ts` gained an assertion that
+the handler receives `runId`.
 
 ## Shared Error Handling & Logging
 
@@ -254,6 +337,7 @@ See `supabase/migrations/` for the authoritative schema (RLS policies in `0012_r
 - `directory_tools` — AI Tool Directory catalog.
 - `faqs` — Guides/Support content.
 - `integration_connections` — a business's connections to external platforms (WordPress today; Instagram/Resend/YouTube later). See "Integration Connections & Secret Storage" below.
+- `subscribers` — a business's own newsletter list (`ACTIVE`/`UNSUBSCRIBED`), read by the newsletter automation handler. See "Newsletter Automation & Resend Connector (Day 7)" above.
 
 Everything a user can query directly is RLS-scoped to `owner_id`/`user_id`; writes that must bypass RLS (usage counters, subscription updates, cron-driven runs) go through the service-role client in `src/lib/supabase/admin.ts`, which is only ever imported from trusted server code, never from a route a browser can trigger without the secret/entitlement checks in front of it.
 

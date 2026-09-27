@@ -4,7 +4,7 @@ import { lookup } from "node:dns/promises";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { serverEnv } from "@/lib/env/server";
-import { ConnectorError } from "@/server/shared/errors";
+import { classifyHttpStatus, ConnectorError } from "@/server/shared/errors";
 import type { PlatformConnector, PublishContentParams, PublishResult } from "../types";
 
 export interface WordPressConnection {
@@ -57,14 +57,6 @@ async function publicHostAddress(siteUrl: string): Promise<{ address: string; fa
     throw new ConnectorError("wordpress", "INVALID_TARGET", "공개 인터넷에서 접속 가능한 WordPress 주소를 입력해주세요.");
   }
   return addresses[0];
-}
-
-/** Classifies an HTTP failure into the shared connector error taxonomy. */
-function classifyHttpStatus(status: number): "AUTH_FAILED" | "PERMISSION_DENIED" | "UPSTREAM_SERVER_ERROR" | "UPSTREAM_CLIENT_ERROR" {
-  if (status === 401) return "AUTH_FAILED";
-  if (status === 403) return "PERMISSION_DENIED";
-  if (status >= 500) return "UPSTREAM_SERVER_ERROR";
-  return "UPSTREAM_CLIENT_ERROR";
 }
 
 /** WordPress REST API connector using an Application Password. */

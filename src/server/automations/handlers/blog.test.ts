@@ -85,6 +85,7 @@ function baseContext(overrides: Partial<AutomationRunContext> = {}): AutomationR
     business,
     config: {},
     recentTopics: [],
+    runId: "run-1",
     ...overrides,
   };
 }

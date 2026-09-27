@@ -22,6 +22,14 @@ export interface AutomationRunContext {
   config: Record<string, Json>;
   /** Recent content produced by this automation, used to avoid repetition. */
   recentTopics: string[];
+  /**
+   * The `automation_runs.id` row the runner already inserted before calling
+   * `handler.run()`. Handlers that call an external API once per recipient
+   * (e.g. newsletter sends) derive a per-recipient idempotency key from
+   * this so a request retried at the HTTP layer for the same run can't
+   * double-send — see src/server/automations/handlers/newsletter.ts.
+   */
+  runId: string;
 }
 
 export interface AutomationHandlerResult {

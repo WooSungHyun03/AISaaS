@@ -14,13 +14,9 @@ import { loadWordPressConnector } from "@/server/connectors/wordpress/connect";
 import { getConnection, updateConnectionStatus } from "@/server/connectors/integrations";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isConnectorError } from "@/server/shared/errors";
+import { stripHtml } from "@/server/shared/html";
 import { blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
 import type { AutomationHandler, AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
-
-/** content_history.content has historically held plain text; bodyHtml is HTML. */
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
 
 /**
  * Stage 1 of the pipeline: pick a topic, reject it once if it's a
