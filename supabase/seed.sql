@@ -15,9 +15,9 @@ on conflict (slug) do update set
 
 insert into public.directory_tools (name, slug, description, github_url, stars, forks, language, license, category, tags)
 values
-  ('LangChain', 'langchain', 'LLM 애플리케이션 개발을 위한 프레임워크', 'https://github.com/langchain-ai/langchain', 90000, 14000, 'Python', 'MIT', 'framework', array['llm', 'agent', 'rag']),
-  ('n8n', 'n8n', '오픈소스 워크플로우 자동화 툴', 'https://github.com/n8n-io/n8n', 50000, 15000, 'TypeScript', 'Sustainable Use', 'automation', array['workflow', 'no-code']),
-  ('Supabase', 'supabase', '오픈소스 Firebase 대안 (Postgres 기반 BaaS)', 'https://github.com/supabase/supabase', 70000, 7500, 'TypeScript', 'Apache-2.0', 'backend', array['database', 'auth', 'baas'])
+  ('LangChain', 'langchain', 'LLM 애플리케이션 개발을 위한 프레임워크', 'https://github.com/langchain-ai/langchain', 90000, 14000, 'Python', 'MIT', 'ai-infrastructure', array['llm', 'agent', 'rag']),
+  ('n8n', 'n8n', '오픈소스 워크플로우 자동화 툴', 'https://github.com/n8n-io/n8n', 50000, 15000, 'TypeScript', 'Sustainable Use', 'automation-platform', array['workflow', 'no-code']),
+  ('Supabase', 'supabase', '오픈소스 Firebase 대안 (Postgres 기반 BaaS)', 'https://github.com/supabase/supabase', 70000, 7500, 'TypeScript', 'Apache-2.0', 'ai-infrastructure', array['database', 'auth', 'baas'])
 on conflict (slug) do update set
   description = excluded.description,
   github_url = excluded.github_url,

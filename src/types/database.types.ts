@@ -267,6 +267,8 @@ export interface Database {
           license: string | null;
           category: string | null;
           tags: string[];
+          status: string;
+          classification_source: string | null;
           last_github_sync_at: string | null;
           created_at: string;
           updated_at: string;
@@ -283,6 +285,8 @@ export interface Database {
           license?: string | null;
           category?: string | null;
           tags?: string[];
+          status?: string;
+          classification_source?: string | null;
           last_github_sync_at?: string | null;
           created_at?: string;
           updated_at?: string;
