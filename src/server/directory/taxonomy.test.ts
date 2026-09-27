@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DIRECTORY_CATEGORIES } from "./taxonomy";
 import { classifyCategory } from "./classifier";
-import { extractCheckConstraintValues, readLatestMigrationSql } from "./check-constraint-testing";
+import { extractCheckConstraintValues, readLatestMigrationSql } from "@/server/shared/check-constraint-testing";
 
 const CONSTRAINT_NAME = "directory_tools_category_check";
 

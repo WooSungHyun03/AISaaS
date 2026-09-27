@@ -11,7 +11,10 @@ export type AutomationStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "ERROR";
 export type AutomationRunStatus = "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED";
 export type SubscriptionPlan = "FREE" | "STARTER" | "PRO";
 export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED" | "INCOMPLETE";
-export type SetupRequestStatus = "REQUESTED" | "CONTACTED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+// setup_requests.status is intentionally plain `string` below, not a named
+// union — see src/server/customer-support/setup-request-status.ts (the
+// taxonomy.ts/status.ts pattern: single source of truth lives in the
+// domain, this file stays a loose mirror of the actual Postgres column type).
 export type IntegrationProvider = "wordpress" | "instagram" | "email" | "youtube";
 export type ConnectionStatus = "CONNECTED" | "EXPIRED" | "ERROR" | "DISCONNECTED";
 
@@ -238,7 +241,7 @@ export interface Database {
           automation_type: string;
           description: string | null;
           budget_range: string | null;
-          status: SetupRequestStatus;
+          status: string;
           created_at: string;
           updated_at: string;
         };
@@ -249,7 +252,7 @@ export interface Database {
           automation_type: string;
           description?: string | null;
           budget_range?: string | null;
-          status?: SetupRequestStatus;
+          status?: string;
           created_at?: string;
           updated_at?: string;
         };

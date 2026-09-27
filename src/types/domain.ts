@@ -26,11 +26,15 @@ export type {
   AutomationRunStatus,
   SubscriptionPlan,
   SubscriptionStatus,
-  SetupRequestStatus,
   IntegrationProvider,
   ConnectionStatus,
   Json,
 } from "./database.types";
+
+// SetupRequestStatus is NOT re-exported here — its single source of truth
+// is src/server/customer-support/setup-request-status.ts (same pattern as
+// DirectoryCategory/DirectoryToolStatus, which aren't re-exported here
+// either). Import it directly from there.
 
 /** Slugs for the automation templates seeded in supabase/seed.sql. */
 export type AutomationTemplateSlug =

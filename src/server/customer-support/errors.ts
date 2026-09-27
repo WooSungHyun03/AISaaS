@@ -1,10 +1,16 @@
 import { AppError } from "@/server/shared/errors";
 
 /**
- * Error codes for the customer-support domain (business_faqs CRUD today;
- * the #9/#10 answer engine and chat API will reuse this too).
+ * Error codes for the customer-support domain (business_faqs CRUD,
+ * the #9/#10 answer engine/chat API, and #13's setup request workflow).
+ *
+ * INVALID_TRANSITION covers both "that status change isn't allowed by the
+ * state machine" and "the row's status changed between when we read it and
+ * when we tried to update it" (see setup-requests.ts's compare-and-swap) —
+ * from a caller's point of view both mean the same thing: the transition
+ * you asked for didn't happen.
  */
-export type CustomerSupportErrorCode = "NOT_FOUND" | "UNKNOWN";
+export type CustomerSupportErrorCode = "NOT_FOUND" | "INVALID_TRANSITION" | "UNKNOWN";
 
 export class CustomerSupportError extends AppError {
   declare readonly code: CustomerSupportErrorCode;

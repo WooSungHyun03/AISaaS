@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DIRECTORY_TOOL_STATUSES } from "./status";
-import { extractCheckConstraintValues, readLatestMigrationSql } from "./check-constraint-testing";
+import { extractCheckConstraintValues, readLatestMigrationSql } from "@/server/shared/check-constraint-testing";
 
 const CONSTRAINT_NAME = "directory_tools_status_check";
 

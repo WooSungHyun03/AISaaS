@@ -5,10 +5,12 @@ import { fileURLToPath } from "node:url";
 const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../supabase/migrations");
 
 /**
- * Test-only helper shared by taxonomy.test.ts and status.test.ts: finds the
- * highest-numbered migration file that mentions `constraintName`, so a test
- * always compares against the *current* DB constraint — not a hardcoded
- * file name — even after a future migration replaces this one.
+ * Test-only helper shared across domains (originally extracted for
+ * directory's taxonomy/status/classification-source tests, now also used
+ * by customer-support's setup-request-status): finds the highest-numbered
+ * migration file that mentions `constraintName`, so a test always compares
+ * against the *current* DB constraint — not a hardcoded file name — even
+ * after a future migration replaces this one.
  */
 export function readLatestMigrationSql(constraintName: string): string {
   const migrationFiles = readdirSync(MIGRATIONS_DIR)
