@@ -152,8 +152,8 @@ export class WordPressConnector implements PlatformConnector {
     }
   }
 
-  async publish({ title, content }: PublishContentParams, status: "draft" | "publish" = "publish"): Promise<PublishResult> {
-    const response = await this.request("/wp-json/wp/v2/posts", { title, content, status });
+  async publish({ title, content, excerpt }: PublishContentParams, status: "draft" | "publish" = "publish"): Promise<PublishResult> {
+    const response = await this.request("/wp-json/wp/v2/posts", { title, content, status, ...(excerpt ? { excerpt } : {}) });
     if (!response.ok) {
       throw new ConnectorError(
         "wordpress",

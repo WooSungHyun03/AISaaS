@@ -22,11 +22,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .maybeSingle();
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen min-w-0">
       <AppSidebar />
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <AppHeader email={user.email ?? ""} plan={subscription?.plan ?? "FREE"} />
-        <main className="flex-1 bg-muted/10 p-4 md:p-8">{children}</main>
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 bg-muted/10 p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
     </div>
   );

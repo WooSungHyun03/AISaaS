@@ -52,6 +52,7 @@ Scheduler (cron, every few minutes)
     ▼
 Automation Runner (src/server/automations/runner.ts)
     │  loads automation + business + template (service-role client)
+    │  refuses a PAUSED/ERROR automation or one over its plan limit
     │  guards against duplicate in-flight runs
     ▼
 Automation Handler (src/server/automations/handlers/<slug>.ts)
@@ -72,7 +73,33 @@ Two entry points into the same `executeAutomation()` core:
 
 A handler only implements "what does this automation actually do" — loading context, persisting results, and duplicate-run protection are the runner's job, shared by every automation type. AI generation (`src/server/ai/`) and platform publishing (`src/server/connectors/`) never call each other directly; a handler orchestrates both.
 
+### Runner Reliability (Day 5)
+
+`executeAutomation()` is the single internal function both `runAutomationNow()` and `runDueAutomation()` call — every guard below applies identically to a manual click and a cron tick, instead of being re-implemented (and potentially missed) at each entry point:
+
+- **Status gate.** A `PAUSED` or `ERROR` automation is refused before the handler ever runs. `findDueAutomations()` already only selects `ACTIVE` automations, so this mainly protects the manual "Run Now" path and closes a race where an automation flips status between being read and actually executing.
+- **Entitlement gate.** `canExecuteAutomation()` (`src/server/billing/entitlements.ts`) is re-checked inside the runner itself — not only in the `triggerRunNow()` Server Action — so the cron path is covered too, not just manual runs initiated through the UI.
+- **Refused runs are recorded, not silently dropped.** Both gates above insert an already-`FAILED` `automation_runs` row with a human-readable `error_message` (`recordRefusedRun()`), so a refusal shows up in run history like any other outcome instead of vanishing as a no-op. Neither gate touches `automations.status` — being paused or over a plan limit isn't itself a new failure.
+- **No retry-storm on a recurring refusal.** If a `SCHEDULED` run is refused for a reason that can repeat on the very next tick (a plan limit — a paused/error automation is already excluded from the due query), `next_run_at` is advanced immediately so the cron loop waits for the next legitimately due slot instead of re-attempting and re-refusing every few minutes.
+- **Every status-transition write is error-checked.** The Supabase client resolves a failed query with `{ error }` rather than throwing; `executeAutomation()` explicitly checks and re-throws on every write that transitions a run's lifecycle (marking `SUCCESS`, writing `content_history`, advancing `next_run_at`) so a silently swallowed DB error can never leave a run's `automation_runs` row out of sync with reality, and can never leave it stuck `RUNNING` because the one write meant to close it out failed unnoticed. The final `FAILED`/`ERROR` writes inside the `catch` block are themselves error-checked too (logged as `automation_run_terminal_write_failed` if even that fails) — there is nothing further to safely retry inside the same request, so this is best-effort observability, not a guarantee.
+- **`source: "MANUAL" | "SCHEDULED"`** (new column, `0016_automation_run_source.sql`) is stamped on every `automation_runs` row at creation, including refused ones — the one place to answer "was this a dashboard click or a cron tick" without inferring it from `started_at`/`next_run_at` heuristics.
+- **On a genuine handler failure**, the automation still flips to `ERROR` (unchanged from before this Day) — a stronger guarantee against a retry storm than merely advancing `next_run_at`, since `findDueAutomations()` only ever selects `status = 'ACTIVE'` and reactivating always recomputes a fresh `next_run_at` anyway.
+
+Tests: `src/server/automations/runner.test.ts` — source tagging on both entry points, `next_run_at` advancing only for a scheduled success (never for manual), refusal on `PAUSED`/`ERROR`/entitlement-denied without calling the handler, the duplicate-run guard for both a manual double-click and a concurrent scheduled tick, an unanticipated handler exception being caught and terminating the run as `FAILED`/the automation as `ERROR`, and a DB write failure on the SUCCESS-marking update itself still resulting in `FAILED` rather than a stuck `RUNNING` row.
+
 Only `blog-marketing` has a working handler + connector (WordPress) today — the vertical slice used to validate the architecture end to end. The other four templates have handler/connector interfaces in place that throw "not implemented yet"; `AUTOMATION_AVAILABILITY` in `src/types/automation.ts` is the single source of truth the UI reads to show Available/Beta/Coming Soon and to gate what the creation wizard offers.
+
+### Production Scheduler (Day 6)
+
+`findDueAutomations()` (`src/server/automations/scheduler.ts`) selects only `status = 'ACTIVE'` automations with `next_run_at <= now()`, backed by a partial index (`automations_due_idx`, `0005_automations.sql`) on exactly that predicate. `next_run_at`/`last_run_at` are `timestamptz` columns and every comparison uses `new Date().toISOString()` (UTC) — `computeNextRunAt()` is the only place a schedule's Asia/Seoul (or other IANA) `timeOfDay` gets converted to/from a UTC instant (`src/lib/utils/date.ts#zonedTimeToUtc`); nothing else in the scheduler path touches wall-clock time.
+
+**`next_run_at` now advances at run START, not completion.** Before this Day, `executeAutomation()` only wrote the next `next_run_at` after the handler finished successfully. Since `findDueAutomations()` re-polls on a fixed interval independent of how long a run takes, a slow run left the automation "due" (old, already-past `next_run_at`, still `ACTIVE`) for every tick until it finished — each of those ticks would reach the in-flight guard and get rejected there instead of not seeing the automation as due at all. The schedule is now advanced immediately after the `RUNNING` row is inserted, before the handler is even invoked (still inside the same `try` Day 5 already wrapped everything in — a failure to advance it is caught exactly like any other lifecycle-write failure, marking the run `FAILED`/automation `ERROR`). `last_run_at` still only updates on completion, since it genuinely means "the last time this finished".
+
+**Concurrent-tick safety is two layers, both verified by tests.** The app-level check (`SELECT ... WHERE status IN ('QUEUED','RUNNING')` before inserting) is a check-then-act race on its own — two near-simultaneous ticks could both read "no in-flight run" before either has inserted. The actual backstop is the DB partial unique index `automation_runs_one_inflight_idx` (`0006_automation_runs.sql`): the losing INSERT fails with a unique-violation error, which propagates out of `executeAutomation()` before the handler is ever called (mirrored in `runner.test.ts` by asserting a bare app-level in-flight hit *and*, separately, a DB unique-violation error on insert both result in "handler never called").
+
+**Cron auth was a real deployment gap, now fixed.** `POST /api/cron/run-automations` (`src/app/api/cron/run-automations/route.ts`) already rejected a missing/mismatched `x-cron-secret` header before calling `findDueAutomations()` — that was correct from the start. But the *first* hop — `pg_cron` (`0014_scheduler_cron.sql`) calling the Supabase Edge Function `run-due-automations` via `net.http_post()` — sent no `Authorization` header at all. Supabase Edge Functions reject unauthenticated requests by default (`verify_jwt`), so in a real deployment the cron trigger could never fire even once; this was invisible in this environment because there is no live Supabase project to smoke-test pg_cron against. `0018_scheduler_cron_auth.sql` reschedules the same job with `Authorization: Bearer <service_role_key>`, the key read at execution time from a database-level setting (`current_setting('app.settings.service_role_key', true)`) rather than committed to git — see README.md "Deployment" for the one-time `alter database ... set` step. The Edge Function itself stays exactly as thin as before: it still only exists to forward `CRON_SECRET` to the Next.js route, which remains the actual authorization boundary for running automations.
+
+Tests: `src/server/automations/scheduler.test.ts` (year/month-boundary rollovers for DAILY and WEEKLY schedules in the default Asia/Seoul timezone — no DST there, so no gap/ambiguous-time cases exist on the production path; two documentation-only tests lock in `zonedTimeToUtc`'s current gap/ambiguous-time resolution for a DST-observing timezone, since `AutomationSchedule.timezone` is a generic IANA field even though the product only schedules in KST today). `src/server/automations/runner.test.ts` — `next_run_at` provably advances before the handler is invoked (asserted from inside the mocked handler itself), and the two concurrent-tick cases above.
 
 ## Shared Error Handling & Logging
 
@@ -149,6 +176,46 @@ handlers never touch a vendor SDK or fetch call directly. The real adapters
 at most once if the model's response doesn't parse or validate, throwing
 `AIProviderError("INVALID_STRUCTURED_RESPONSE", ...)` if it still fails.
 
+## Blog AI Pipeline (Day 4)
+
+`src/server/automations/handlers/blog.ts` runs a two-stage pipeline instead
+of one single-shot generation:
+
+- **Stage 1 — topic.** `buildBlogTopicPrompt()` (`src/server/ai/prompts/blog.ts`)
+  asks for just `{ topic, title }` (cheap, small `maxTokens`), fed with the
+  business's `name`/`industry`/`location`/`description`/`target_customer`/
+  `brand_tone`/`keywords` plus the automation's own `objective`/`tone`/
+  `keywords` and the last 5 `content_history` topics for this automation
+  (`ctx.recentTopics`, loaded by `runner.ts`).
+- **Near-duplicate check.** `src/server/ai/similarity.ts#isNearDuplicateTopic()`
+  compares the candidate topic against `recentTopics` with character-bigram
+  Jaccard similarity on normalized text (lowercased, NFKC, punctuation/
+  whitespace stripped) — no embeddings/vector infra. Bigrams (not
+  whitespace-tokenized words) were chosen because Korean topic phrases often
+  have no natural word boundaries. Default threshold `0.5`
+  (`NEAR_DUPLICATE_THRESHOLD`). If the candidate is a near-duplicate,
+  `generateTopic()` regenerates **exactly once** (passing the rejected topic
+  back in the prompt's avoid-list) and accepts whatever comes back — bounded,
+  never a loop.
+- **Stage 2 — body.** `buildBlogBodyPrompt()` takes the accepted topic+title
+  and asks for `{ excerpt, bodyHtml, keywords, callToAction }`.
+- **Unified shape.** `blogContentSchema` (`blogTopicSchema.merge(blogBodySchema)`)
+  is `{ topic, title, excerpt, bodyHtml, keywords, callToAction }` — the
+  single source of truth for what "AI blog content" looks like, replacing
+  the old single-stage `{ topic, title, content }` shape. `PublishContentParams`
+  gained an optional `excerpt` field so `WordPressConnector.publish()` can
+  send it through to `/wp-json/wp/v2/posts`; other connectors ignore it.
+  `content_history.content` (a plain-text column, rendered with
+  `whitespace-pre-line` by the automation detail page) stores a tags-stripped
+  rendering of `bodyHtml`, not the raw HTML — `automation_runs.output` keeps
+  the full structured object (including raw `bodyHtml`) for any future
+  consumer that wants it.
+- **Success-only persistence.** Unchanged from before this Day:
+  `runner.ts#executeAutomation()` only inserts into `content_history` after
+  `handler.run()` resolves; any throw from either generation stage (or from
+  a configured WordPress publish) is caught by the runner, marks the run
+  `FAILED`, and never writes a partial/corrupt history row.
+
 ## Billing Flow
 
 ```
@@ -179,7 +246,7 @@ See `supabase/migrations/` for the authoritative schema (RLS policies in `0012_r
 - `businesses` — owned by a profile; the context AI generation reads from.
 - `automation_templates` — the catalog (seeded in `supabase/seed.sql`).
 - `automations` — a user's configured instance of a template (`schedule`/`config` as jsonb).
-- `automation_runs` — one row per execution; a partial unique index blocks a second QUEUED/RUNNING row per automation.
+- `automation_runs` — one row per execution attempt (including a refused one); a partial unique index blocks a second QUEUED/RUNNING row per automation; `source` (`MANUAL` | `SCHEDULED`, `0016_automation_run_source.sql`) records how it was triggered.
 - `content_history` — generated output, used to avoid repeating topics.
 - `subscriptions` — one per user, drives entitlements.
 - `usage` — one row per user per month (`YYYY-MM`, Asia/Seoul), incremented by the runner.

@@ -9,14 +9,14 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 
 export type AutomationStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "ERROR";
 export type AutomationRunStatus = "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED";
+export type AutomationRunSource = "MANUAL" | "SCHEDULED";
 export type SubscriptionPlan = "FREE" | "STARTER" | "PRO";
 export type SubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELED" | "INCOMPLETE";
-// setup_requests.status is intentionally plain `string` below, not a named
-// union — see src/server/customer-support/setup-request-status.ts (the
-// taxonomy.ts/status.ts pattern: single source of truth lives in the
-// domain, this file stays a loose mirror of the actual Postgres column type).
+export type SetupRequestStatus = "REQUESTED" | "CONTACTED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+export type SetupRequestContactMethod = "EMAIL" | "PHONE" | "KAKAO" | "OTHER";
 export type IntegrationProvider = "wordpress" | "instagram" | "email" | "youtube";
 export type ConnectionStatus = "CONNECTED" | "EXPIRED" | "ERROR" | "DISCONNECTED";
+export type BillingCheckoutStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "CANCELED";
 
 export interface Database {
   public: {
@@ -134,6 +134,7 @@ export interface Database {
           id: string;
           automation_id: string;
           status: AutomationRunStatus;
+          source: AutomationRunSource;
           input: Json;
           output: Json;
           error_message: string | null;
@@ -145,6 +146,7 @@ export interface Database {
           id?: string;
           automation_id: string;
           status?: AutomationRunStatus;
+          source?: AutomationRunSource;
           input?: Json;
           output?: Json;
           error_message?: string | null;
@@ -211,6 +213,44 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["subscriptions"]["Insert"]>;
         Relationships: [];
       };
+      billing_checkout_sessions: {
+        Row: {
+          id: string;
+          user_id: string;
+          plan: Exclude<SubscriptionPlan, "FREE">;
+          provider: "mock" | "toss";
+          status: BillingCheckoutStatus;
+          customer_key: string;
+          order_id: string;
+          provider_billing_key: string | null;
+          provider_payment_key: string | null;
+          error_code: string | null;
+          error_message: string | null;
+          expires_at: string;
+          completed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          plan: Exclude<SubscriptionPlan, "FREE">;
+          provider: "mock" | "toss";
+          status?: BillingCheckoutStatus;
+          customer_key: string;
+          order_id: string;
+          provider_billing_key?: string | null;
+          provider_payment_key?: string | null;
+          error_code?: string | null;
+          error_message?: string | null;
+          expires_at?: string;
+          completed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["billing_checkout_sessions"]["Insert"]>;
+        Relationships: [];
+      };
       usage: {
         Row: {
           id: string;
@@ -241,7 +281,11 @@ export interface Database {
           automation_type: string;
           description: string | null;
           budget_range: string | null;
-          status: string;
+          current_work: string | null;
+          desired_outcome: string | null;
+          contact_method: SetupRequestContactMethod | null;
+          contact_value: string | null;
+          status: SetupRequestStatus;
           created_at: string;
           updated_at: string;
         };
@@ -252,7 +296,11 @@ export interface Database {
           automation_type: string;
           description?: string | null;
           budget_range?: string | null;
-          status?: string;
+          current_work?: string | null;
+          desired_outcome?: string | null;
+          contact_method?: SetupRequestContactMethod | null;
+          contact_value?: string | null;
+          status?: SetupRequestStatus;
           created_at?: string;
           updated_at?: string;
         };

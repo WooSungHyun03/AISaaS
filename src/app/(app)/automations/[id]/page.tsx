@@ -175,12 +175,10 @@ export default async function AutomationDetailPage({ params }: { params: Promise
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {run.status === "FAILED" ? (
-                        <div className="max-w-md space-y-1">
-                          <p>{describeAutomationRunError(run.error_message)}</p>
-                          <Link href={`/automations/${automation.id}/runs/${run.id}`} className="text-primary underline-offset-2 hover:underline">상세 보기</Link>
-                        </div>
-                      ) : run.status === "SUCCESS" ? "완료" : "진행 중"}
+                      <div className="max-w-md space-y-1">
+                        <p>{run.status === "FAILED" ? describeAutomationRunError(run.error_message) : run.status === "SUCCESS" ? "완료" : "진행 중"}</p>
+                        <Link href={`/automations/${automation.id}/runs/${run.id}`} className="text-primary underline-offset-2 hover:underline">상세 보기</Link>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

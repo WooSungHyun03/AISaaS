@@ -71,7 +71,14 @@ npm run dev
    supabase secrets set SITE_URL=https://<your-domain> CRON_SECRET=<CRON_SECRET과 동일한 값>
    ```
 
-3. `supabase/migrations/0014_scheduler_cron.sql`이 pg_cron으로 5분마다 이 함수를 호출하도록 이미 등록합니다 — Vercel의 무료 플랜 Cron Jobs는 하루 1회로 제한되어 이 용도에 맞지 않으므로 사용하지 않습니다.
+3. `supabase/migrations/0014_scheduler_cron.sql`이 pg_cron으로 5분마다 이 함수를 호출하도록 이미 등록하고, `0018_scheduler_cron_auth.sql`이 그 호출에 인증 헤더를 추가합니다 — Vercel의 무료 플랜 Cron Jobs는 하루 1회로 제한되어 이 용도에 맞지 않으므로 사용하지 않습니다.
+4. **필수 — 한 번만 수동으로 실행 (마이그레이션에는 실제 키를 커밋하지 않습니다):** Supabase Edge Function은 기본적으로 요청의 Authorization 헤더에 유효한 Supabase JWT(anon 또는 service_role 키)가 없으면 거부합니다(`verify_jwt`). `0018_scheduler_cron_auth.sql`이 등록하는 pg_cron 작업은 이 값을 하드코딩하지 않고, DB 레벨 설정에서 실행 시점에 읽어옵니다 — SQL Editor에서 프로젝트의 **service_role** 키로 한 번만 설정하세요:
+
+   ```sql
+   alter database postgres set app.settings.service_role_key = '<service role key>';
+   ```
+
+   이 설정 없이는 cron 작업이 계속 401로 실패합니다(이전과 동일하게 안전하게 실패 — 자동으로 보안이 느슨해지지 않습니다). 실제 트리거 보호는 여전히 `CRON_SECRET`(2단계)이 담당합니다: 이 헤더는 Supabase 게이트웨이가 Edge Function 호출 자체를 허용하도록 하는 것일 뿐, `POST /api/cron/run-automations`는 별도로 `CRON_SECRET`을 확인합니다.
 
 ### Resend (뉴스레터 자동화)
 

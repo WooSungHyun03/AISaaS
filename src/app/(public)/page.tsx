@@ -295,7 +295,7 @@ export default function LandingPage() {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <Button asChild size="lg" className="rounded-lg bg-blue-600 hover:bg-blue-700"><Link href="/directory">무료 AI 탐색하기 <ArrowRight className="ml-1 h-4 w-4" /></Link></Button>
-            <Button asChild size="lg" variant="outline" className="rounded-lg bg-transparent"><Link href="/pricing#setup-service">구축 대행 요청 <ArrowUpRight className="ml-1 h-4 w-4" /></Link></Button>
+            <Button asChild size="lg" variant="outline" className="rounded-lg bg-transparent"><Link href="/setup-request">자동화 구축 맡기기 <ArrowUpRight className="ml-1 h-4 w-4" /></Link></Button>
           </div>
         </div>
       </section>

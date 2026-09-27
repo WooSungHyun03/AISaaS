@@ -6,15 +6,18 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 4 — Blog AI Pipeline Upgrade
+Day 7 — Newsletter Automation + Resend Connector
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
 - Day 2 — External Platform Connection Management (2026-09-23)
 - Day 3 — WordPress Production Connector (2026-09-23)
+- Day 4 — Blog AI Pipeline Upgrade (2026-09-24)
+- Day 5 — Automation Runner Reliability (2026-09-25)
+- Day 6 — Production Scheduler (2026-09-26)
 
 ## Current
-- (none — Day 4 not started yet)
+- (none — Day 7 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -38,17 +41,22 @@ Day 4 — Blog AI Pipeline Upgrade
   not a live WordPress REST API. Set `WORDPRESS_SITE_URL`/`WORDPRESS_USERNAME`/
   `WORDPRESS_APP_PASSWORD` to smoke-test the legacy env-based connector path
   for real.
+- No live Supabase project in this environment (unchanged from Day 2): Day
+  6's `0018_scheduler_cron_auth.sql` (pg_cron → Edge Function Authorization
+  header) and the `alter database ... set app.settings.service_role_key`
+  one-time step it depends on have not been smoke-tested against a real
+  `pg_cron`/`pg_net` install — verified by reading Supabase's documented
+  `verify_jwt`/pg_net behavior and by the existing scheduler/runner unit
+  tests, not by an actual cron tick firing. Confirm on first real deploy that
+  `select * from cron.job_run_details order by start_time desc limit 5;`
+  shows successful (200) runs, not 401s.
 
 ## Next
-- Day 4 — Blog AI Pipeline Upgrade: business-context-aware prompt input
-  (`name`/`industry`/`location`/`target_customer`/`brand_tone`/`keywords` +
-  recent `content_history` topics), a two-stage generate-topic-then-body
-  pipeline with a bounded (non-looping) regenerate-once-on-near-duplicate
-  step (normalized string comparison, no embeddings), a unified
-  `{ title, topic, excerpt, bodyHtml, keywords, callToAction }` structured
-  shape reconciling `blogContentSchema`'s current field names, and
-  success-only `content_history` persistence. See `DAILY_ROUTINE_PLAN.md`
-  Day 4 for the full spec.
+- Day 7 — Newsletter Automation + Resend Connector: see `DAILY_ROUTINE_PLAN.md`
+  Day 7 for the full spec (subscribers migration/RLS, `NewsletterAutomationHandler`,
+  `EmailConnector`/`ResendConnector`, idempotent send keyed off
+  `automation_run.id`, per-run success/failure counts, mocked-HTTP tests since
+  no `RESEND_API_KEY` is available here).
 
 ## Daily History
 
@@ -258,6 +266,291 @@ Tests:
 Blocked External:
 - No real WordPress site/Application Password in this environment — see
   "Blocked External" above for detail.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-24 (Day 4)
+Completed Day 4 — Blog AI Pipeline Upgrade:
+- Checked `businesses` (`supabase/migrations/0003_businesses.sql`) first per
+  this Day's own instruction to verify before adding a migration:
+  `location` already existed as a column and on `Business`/`database.types.ts`
+  — no new migration needed.
+- `src/server/ai/prompts/blog.ts`: split the old single-stage
+  `buildBlogPrompt()`/`blogContentSchema` into `blogTopicSchema`
+  (`{ topic, title }`) + `blogBodySchema`
+  (`{ excerpt, bodyHtml, keywords, callToAction }`), with
+  `blogContentSchema = blogTopicSchema.merge(blogBodySchema)` as the unified
+  `{ topic, title, excerpt, bodyHtml, keywords, callToAction }` shape the
+  spec asked for. `buildBlogTopicPrompt()` and `buildBlogBodyPrompt()` both
+  feed the business's `name`/`industry`/`location`/`description`/
+  `target_customer`/`brand_tone`/`keywords` plus the automation's own
+  `objective`/`tone`/`keywords`; the topic prompt also takes the recent
+  `content_history` topics (already threaded through as `ctx.recentTopics`
+  by `runner.ts`) and an optional `rejectedTopic` to steer a regeneration
+  away from what was just rejected.
+- New `src/server/ai/similarity.ts`: character-bigram Jaccard similarity on
+  normalized text (lowercase, NFKC, `\p{L}\p{N}` filter strips
+  punctuation/whitespace) — deliberately not whitespace/word tokenization,
+  since Korean topic phrases often have no spaces to split on, and
+  deliberately not embeddings (no new vector infra for one similarity
+  check). `isNearDuplicateTopic(candidate, recentTopics, threshold = 0.5)`.
+  Threshold picked empirically: a real near-duplicate pair in the test
+  suite (differently-phrased same idea) scored ~0.58, a genuinely distinct
+  pair scored well under 0.3.
+- `src/server/automations/handlers/blog.ts` rewritten around the two-stage
+  pipeline: `generateTopic()` calls stage 1, checks
+  `isNearDuplicateTopic()`, and — bounded, never a loop — regenerates stage
+  1 **exactly once** if it's a near-duplicate, accepting whatever comes
+  back from that single retry regardless of its own similarity. Stage 2
+  (body) always runs once, against the accepted topic/title. Any throw from
+  either stage (or from a configured WordPress publish) propagates out of
+  `run()` unchanged — `runner.ts`'s existing try/catch (unmodified this
+  Day) already only inserts into `content_history` after `handler.run()`
+  resolves, so a mid-pipeline failure was already guaranteed to leave no
+  partial/corrupt history row; this Day added tests proving both failure
+  points (topic stage, body stage) actually throw instead of silently
+  returning partial content.
+- Reconciled the two parallel content shapes instead of leaving them:
+  `PublishContentParams` (`src/server/connectors/types.ts`) gained an
+  optional `excerpt` field, `WordPressConnector.publish()`
+  (`src/server/connectors/wordpress/index.ts`) now sends it to
+  `/wp-json/wp/v2/posts` when present (other connectors already destructure
+  an unused `_params`, so this is additive/non-breaking for them).
+  `content_history.content` (a plain-text column rendered with
+  `whitespace-pre-line` in `src/app/(app)/automations/[id]/page.tsx`) now
+  gets a small in-handler `stripHtml()` rendering of `bodyHtml` rather than
+  raw HTML tags — `automation_runs.output` still keeps the full structured
+  object with the raw `bodyHtml` for any future consumer. Did not touch
+  `src/app/` itself: the existing detail-page rendering of
+  `output.title`/`output.topic`/`output.externalUrl`/`item.content` all
+  keep working unchanged with the new shape, so per this routine's minimal-
+  diff rule for that directory there was nothing there that needed editing.
+- Tests: `src/server/ai/similarity.test.ts` (9 cases — exact match,
+  punctuation/case/whitespace-only differences, a real near-duplicate pair,
+  genuinely distinct topics, empty-string edge case, and the
+  `isNearDuplicateTopic` wrapper including the empty-recent-topics case).
+  `src/server/automations/handlers/blog.test.ts` (10 cases, `generateStructured`
+  and `WordPressConnector` mocked) — the two-stage pipeline producing the
+  unified shape, the regenerate-once-on-near-duplicate path, no regeneration
+  when the first topic is already distinct, WordPress publish receiving
+  `title`/`bodyHtml`/`excerpt`, both the wizard-configured and legacy
+  env-configured WordPress paths (including the "not configured" skip
+  case), and both failure points propagating instead of returning partial
+  output.
+- Documented the design in `docs/ARCHITECTURE.md` (new "Blog AI Pipeline
+  (Day 4)" section).
+- Did not touch `src/components/`, `src/server/directory/`, or
+  `src/server/customer-support/`.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 78/78 (`npm test`, includes 19 new Day 4 tests)
+- build: pass (`npm run build`) — required a local-only `.env.local` with
+  placeholder Supabase/public values to get past static page collection for
+  `/api/cron/run-automations`; not committed (already gitignored), no real
+  credentials involved.
+
+Blocked External:
+- OPENAI_API_KEY / GEMINI_API_KEY / WordPress credentials: unchanged from
+  above — this Day's new prompts/schemas run through the same mocked
+  provider path as before, no new live-credential surface was added.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-26 (Day 6)
+Completed Day 6 — Production Scheduler:
+- Verified (no code change needed) `findDueAutomations()`
+  (`src/server/automations/scheduler.ts`): selects only `status = 'ACTIVE'`
+  with `next_run_at <= now()`, both stored/compared as UTC `timestamptz`,
+  backed by the existing `automations_due_idx` partial index. KST conversion
+  happens only inside `computeNextRunAt()`/`zonedTimeToUtc()`
+  (`src/lib/utils/date.ts`) — confirmed nothing else in the scheduler path
+  touches wall-clock time.
+- `src/server/automations/runner.ts`: moved the `next_run_at` advance
+  (`computeNextRunAt()` + write) from *after* the handler completes to
+  *immediately after* the `RUNNING` row is inserted, before the handler is
+  ever called — still inside Day 5's existing `try`, so a write failure here
+  is caught exactly like any other lifecycle-write failure (run `FAILED`,
+  automation `ERROR`). Before this change, a slow run left the automation
+  looking "due" (old, already-past `next_run_at`, still `ACTIVE`) for every
+  cron tick until it finished, relying entirely on the in-flight guard to
+  reject each repeat attempt instead of the automation simply not being
+  selected as due again. The success-path completion write now only touches
+  `last_run_at`; `next_run_at` is never written twice.
+- Found and fixed a real production gap while verifying "the cron route
+  rejects a missing/mismatched CRON_SECRET before doing anything else"
+  (already true) one hop earlier: `0014_scheduler_cron.sql`'s pg_cron job
+  called the Supabase Edge Function via `net.http_post()` with no
+  `Authorization` header at all. Supabase Edge Functions reject
+  unauthenticated requests by default (`verify_jwt`), so on a real
+  deployment the scheduler could never fire a single tick — invisible here
+  since there's no live Supabase project to smoke-test pg_cron against. New
+  migration `supabase/migrations/0018_scheduler_cron_auth.sql` (never edited
+  0014, per the never-edit-a-migration rule) reschedules the same job with
+  `Authorization: Bearer <service_role_key>`, the key read at execution time
+  from `current_setting('app.settings.service_role_key', true)` — a
+  database-level setting configured once directly on the live database, not
+  committed to git (documented as a new required manual step in README.md
+  "Deployment", alongside the existing `supabase secrets set` step). If that
+  setting is never configured, the job keeps failing with 401 exactly as it
+  silently did before — fail-closed, no-worse-than-before, never a silent
+  security downgrade. The Edge Function itself is untouched and stays exactly
+  as thin as before; `CRON_SECRET` (checked by the Next.js route) remains the
+  actual authorization boundary for running automations, not this new header.
+- Verified (no code change) the two-layer concurrent-tick protection: the
+  app-level `SELECT ... WHERE status IN ('QUEUED','RUNNING')` check is a
+  check-then-act race on its own, but the DB partial unique index
+  `automation_runs_one_inflight_idx` (`0006_automation_runs.sql`, existing
+  from before Day 5) is the real backstop — a losing INSERT fails with a
+  unique-violation error that propagates before the handler is ever called.
+  Added a test exercising that DB-level path directly (not just the
+  app-level check a concurrent tick would normally hit first).
+- Checked `computeNextRunAt`'s DST/timezone-boundary coverage
+  (`scheduler.test.ts`) for gaps per this Day's own instruction: found none
+  in the actual product path (Asia/Seoul has no DST, so no gap/ambiguous-time
+  case exists there) but the existing tests had zero year-boundary or
+  month-boundary coverage even for the no-DST case, and zero coverage of
+  `zonedTimeToUtc`'s gap/ambiguous-time resolution for a schedule that *did*
+  specify a DST-observing timezone (the type is a generic IANA string,
+  `types/automation.ts`, even though the product only ever schedules in
+  KST today). Added both: year/month-boundary DAILY+WEEKLY rollovers (all
+  passed unchanged — no bug found, so `computeNextRunAt` itself was not
+  modified, per this Day's own "don't change passing expectations without a
+  demonstrated bug" rule) and two documentation-only tests locking in the
+  current spring-forward-gap and fall-back-ambiguous-hour resolution for
+  `America/New_York` as an explicit, visible contract instead of undefined
+  behavior nobody had actually checked.
+- Documented all of the above in `docs/ARCHITECTURE.md` (new "Production
+  Scheduler (Day 6)" subsection under Automation Flow).
+- Did not touch `src/app/`, `src/components/`, `src/server/directory/`, or
+  `src/server/customer-support/`.
+
+Tests: `src/server/automations/runner.test.ts` (12 cases, 3 new: `next_run_at`
+provably advances before the handler is invoked — asserted from inside the
+mocked handler itself — a DB unique-violation insert error rejecting a
+concurrent tick before the handler runs, and the manual-run assertion updated
+to reflect that a manual completion write no longer touches `next_run_at` at
+all instead of redundantly re-writing its unchanged value).
+`src/server/automations/scheduler.test.ts` (8 cases, 5 new: year-boundary
+DAILY/WEEKLY, a non-leap-February month boundary, and the two DST
+documentation cases above).
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 104/104 (`npm test`)
+- build: pass (`npm run build`) — required the same local-only `.env.local`
+  placeholder values as Days 4/5 to get past static page collection;
+  not committed (gitignored).
+
+Blocked External:
+- No live Supabase project in this environment: `0018_scheduler_cron_auth.sql`
+  and its required `app.settings.service_role_key` one-time setup have not
+  been smoke-tested against a real `pg_cron`/`pg_net` install. See "Blocked
+  External" above for the exact verification step to run on first real
+  deploy.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-25 (Day 5)
+Completed Day 5 — Automation Runner Reliability:
+- New migration `supabase/migrations/0016_automation_run_source.sql`: adds
+  `automation_runs.source text not null default 'SCHEDULED' check (source in
+  ('MANUAL','SCHEDULED'))`. Default backfills existing rows (all
+  cron-triggered in practice before this Day) without a separate UPDATE.
+  `src/types/database.types.ts`/`src/types/domain.ts` gained the matching
+  `AutomationRunSource` type and `Row`/`Insert` field.
+- `src/server/automations/runner.ts` rewritten around a single
+  `executeAutomation(automationId, source)` core (was
+  `executeAutomation(automationId, { advanceSchedule })`) so `source` drives
+  both the stamped column and whether the schedule advances, removing a
+  second implicit parameter that had to stay in sync with it:
+  - **Status gate**: a `PAUSED`/`ERROR` automation is refused before the
+    handler runs — closes a real gap where the existing manual "Run Now"
+    Server Action (`src/app/(app)/automations/actions.ts`, not touched this
+    Day per the minimal-diff rule) checked ownership and entitlement but
+    never re-checked automation status, so a paused automation could still
+    be manually triggered. Verified by re-reading `triggerRunNow()` before
+    writing the fix rather than assuming.
+  - **Entitlement gate**: `canExecuteAutomation()` (already existed from
+    prior work, not reimplemented — checked `src/server/billing/
+    entitlements.ts` first per project rule 9) is now re-checked inside the
+    runner itself, closing the matching gap on the cron path
+    (`runDueAutomation()` had no entitlement check at all before this Day).
+  - **Refused runs are recorded** via a new `recordRefusedRun()` helper — an
+    already-`FAILED` `automation_runs` row with a Korean, secret-free
+    `error_message`, never touching `automations.status` (a refusal isn't a
+    new failure). A refused `SCHEDULED` run advances `next_run_at` when the
+    reason can recur next tick (a plan limit) so the cron loop doesn't
+    re-attempt and re-refuse the same slot every few minutes; a paused/error
+    refusal doesn't need to (already excluded from `findDueAutomations()`).
+  - **Every lifecycle-transition write is now error-checked** — the
+    Supabase client resolves `{ error }` on a failed query rather than
+    throwing, so the pre-existing code silently ignored a failed
+    mark-`SUCCESS`/`content_history`-insert/`next_run_at`-advance write; a
+    run could end up permanently stuck `RUNNING` if the one update meant to
+    close it out failed and nobody noticed. Fixed by checking `error` and
+    throwing into the existing `catch`, which then marks the run `FAILED`
+    and the automation `ERROR` as it already did for handler exceptions.
+    The final catch-block writes are themselves error-checked and logged
+    (`automation_run_terminal_write_failed`) as a last-resort observability
+    measure — there is nothing further to safely retry in the same request.
+  - Confirmed (did not need to change) the pre-existing duplicate-run guard:
+    the app-level in-flight check plus the DB partial unique index
+    (`automation_runs_one_inflight_idx`, `0006_automation_runs.sql`) already
+    cover both the manual double-click case and a concurrent scheduled tick
+    — added tests for both instead of re-implementing.
+  - Confirmed (did not need to change) that a genuine handler failure
+    already flips the automation to `ERROR`, which is a strictly stronger
+    "never retry-storm" guarantee than merely advancing `next_run_at`, since
+    `findDueAutomations()` only ever selects `status = 'ACTIVE'`.
+- `src/server/shared/errors.ts#describeAutomationRunError()`: added a
+  passthrough for the runner's own refusal reasons (already complete,
+  secret-free Korean sentences) instead of flattening them into the generic
+  fallback message.
+- Tests: new `src/server/automations/runner.test.ts` (10 cases) — a
+  table-name-dispatched mock Supabase admin client (queued per-table
+  results, since `automation_runs`/`automations` are each queried multiple
+  times per execution for different purposes) covering: `source` tagging on
+  both entry points, `next_run_at` advancing only for a scheduled success
+  (never manual), refusal on `PAUSED`/`ERROR`/entitlement-denied without
+  ever calling the handler, the duplicate-run guard for both a manual
+  double-click and a concurrent scheduled tick, an unanticipated handler
+  exception being caught and terminating the run as `FAILED`/the automation
+  as `ERROR`, and a DB write failure on the SUCCESS-marking update itself
+  still resulting in `FAILED` rather than a silently stuck `RUNNING` row.
+- Documented the design in `docs/ARCHITECTURE.md` (new "Runner Reliability
+  (Day 5)" subsection under Automation Flow, updated the `automation_runs`
+  DB summary line and the flow diagram).
+- Did not touch `src/app/`, `src/components/`, `src/server/directory/`, or
+  `src/server/customer-support/` — the manual "Run Now" Server Action needed
+  no change since the new guards live in the shared runner core both entry
+  points already call through.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 88/88 (`npm test`, includes 10 new runner-reliability tests)
+- build: pass (`npm run build`) — required the same local-only `.env.local`
+  placeholder values as Day 4 to get past static page collection for
+  `/api/cron/run-automations`; not committed (gitignored).
+
+Blocked External:
+- None new — this Day's work is entirely internal runner logic and a schema
+  addition; no new external credential surface.
 
 Commit:
 - (see git log for this file's commit)

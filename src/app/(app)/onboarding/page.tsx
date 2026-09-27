@@ -4,7 +4,7 @@ import { BusinessOnboardingWizard } from "@/components/business/business-onboard
 
 export default async function OnboardingPage({ searchParams }: PageProps<"/onboarding">) {
   const { next } = await searchParams;
-  const destination = typeof next === "string" && /^\/billing\?plan=(STARTER|PRO)$/.test(next)
+  const destination = typeof next === "string" && (/^\/billing\?plan=(STARTER|PRO)$/.test(next) || next === "/setup-request")
     ? next
     : "/automations/marketplace";
 

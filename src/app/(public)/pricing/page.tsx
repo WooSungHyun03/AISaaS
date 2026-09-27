@@ -13,7 +13,6 @@ import {
   WandSparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { SetupRequestDialog } from "@/components/pricing/setup-request-dialog";
 import { ALL_PLANS } from "@/server/billing/plans";
 import { createClient } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env/server";
@@ -236,7 +235,9 @@ export default async function PricingPage() {
             <h2 id="setup-title" className="mt-4 text-3xl font-black tracking-[-0.035em] sm:text-5xl">직접 설정이 어렵다면,<br />구축을 요청하세요.</h2>
             <p className="mt-5 max-w-xl text-base leading-7 text-slate-300">필요한 업무와 현재 사용 중인 도구를 알려주시면 자동화 구성과 초기 설정을 함께 진행합니다. 구독 플랜과 별도 견적으로 운영됩니다.</p>
             <div className="mt-8">
-              <SetupRequestDialog isAuthenticated={Boolean(user)} />
+              <Button asChild size="lg" className="h-11 rounded-lg bg-blue-600 px-5 text-white hover:bg-blue-700">
+                <Link href="/setup-request">자동화 구축 맡기기 <ArrowRight className="ml-1 h-4 w-4" /></Link>
+              </Button>
             </div>
           </div>
 

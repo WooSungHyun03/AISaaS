@@ -1,37 +1,23 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { describe, expect, it } from "vitest";
-import { vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Database } from "@/types/database.types";
-import type { SetupRequest } from "@/types/domain";
-import { canTransition, listMySetupRequests, updateSetupRequestStatus } from "./setup-requests";
-import { SETUP_REQUEST_STATUSES, type SetupRequestStatus } from "./setup-request-status";
+import type { SetupRequestStatus } from "@/types/domain";
+import { canTransition, updateSetupRequestStatus } from "./setup-request-transitions";
 import { isCustomerSupportError } from "./errors";
 
-function makeRequest(overrides: Partial<SetupRequest> = {}): SetupRequest {
-  return {
-    id: "req-1",
-    user_id: "user-1",
-    business_id: null,
-    automation_type: "blog-marketing",
-    description: null,
-    budget_range: null,
-    status: "REQUESTED",
-    created_at: "2026-01-01T00:00:00.000Z",
-    updated_at: "2026-01-01T00:00:00.000Z",
-    ...overrides,
-  };
-}
+const ALL_STATUSES: SetupRequestStatus[] = ["REQUESTED", "CONTACTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
 
 /**
- * `rows` stands in for "whatever RLS already lets this session see" — a
- * request belonging to another user simply isn't in this array, the same
- * way Postgres RLS silently filters rows this session's policy denies
- * (there's no way to unit-test RLS enforcement itself without a live
- * Postgres instance; this only proves this code reacts correctly to what
- * RLS would produce — see this ticket's report for the SQL-based
- * verification procedure that covers the rest).
+ * `rows` stands in for "whatever RLS already lets this session see" — see
+ * setup-requests.test.ts's original note (same limitation: this can only
+ * prove the code reacts correctly to what RLS would produce, not that RLS
+ * itself enforces it; docs/dev3/SETUP_REQUESTS_OPERATIONS.md has the SQL
+ * procedure for that half).
  */
-function createFakeSupabase(rows: SetupRequest[], options: { raceStatusAfterRead?: string } = {}) {
+function createFakeSupabase(
+  rows: { id: string; status: SetupRequestStatus }[],
+  options: { raceStatusAfterRead?: SetupRequestStatus } = {},
+) {
   const state = rows.map((r) => ({ ...r }));
   const updates: { id: string; status: string }[] = [];
 
@@ -44,15 +30,9 @@ function createFakeSupabase(rows: SetupRequest[], options: { raceStatusAfterRead
           maybeSingle: vi.fn(async () => {
             const row = state.find((r) => r.id === id) ?? null;
             const result = row ? { status: row.status } : null;
-            // Simulates another request/session changing this row's status
-            // the instant after this read resolves, before the caller's
-            // subsequent update runs.
             if (row && options.raceStatusAfterRead) row.status = options.raceStatusAfterRead;
             return { data: result, error: null };
           }),
-        })),
-        order: vi.fn(() => ({
-          limit: vi.fn(async () => ({ data: state, error: null })),
         })),
       })),
       update: vi.fn((patch: Record<string, unknown>) => ({
@@ -73,7 +53,7 @@ function createFakeSupabase(rows: SetupRequest[], options: { raceStatusAfterRead
     };
   });
 
-  return { client: { from } as unknown as SupabaseClient<Database>, state, updates };
+  return { client: { from } as unknown as SupabaseClient<Database>, updates };
 }
 
 describe("canTransition", () => {
@@ -86,34 +66,17 @@ describe("canTransition", () => {
     "IN_PROGRESS->CANCELLED",
   ]);
 
-  it.each(SETUP_REQUEST_STATUSES.flatMap((from) => SETUP_REQUEST_STATUSES.map((to) => [from, to] as const)))(
+  it.each(ALL_STATUSES.flatMap((from) => ALL_STATUSES.map((to) => [from, to] as const)))(
     "%s -> %s",
-    (from: SetupRequestStatus, to: SetupRequestStatus) => {
-      const expected = ALLOWED.has(`${from}->${to}`);
-      expect(canTransition(from, to)).toBe(expected);
+    (from, to) => {
+      expect(canTransition(from, to)).toBe(ALLOWED.has(`${from}->${to}`));
     },
   );
-
-  it("never allows a self-transition", () => {
-    for (const status of SETUP_REQUEST_STATUSES) {
-      expect(canTransition(status, status)).toBe(false);
-    }
-  });
-});
-
-describe("listMySetupRequests", () => {
-  it("returns whatever rows the (RLS-filtered) client provides, newest first per the query", async () => {
-    const { client } = createFakeSupabase([makeRequest({ id: "a" }), makeRequest({ id: "b" })]);
-
-    const result = await listMySetupRequests(client);
-
-    expect(result.map((r) => r.id)).toEqual(["a", "b"]);
-  });
 });
 
 describe("updateSetupRequestStatus", () => {
   it("cancels a REQUESTED request", async () => {
-    const { client, updates } = createFakeSupabase([makeRequest({ id: "a", status: "REQUESTED" })]);
+    const { client, updates } = createFakeSupabase([{ id: "a", status: "REQUESTED" }]);
 
     const updated = await updateSetupRequestStatus(client, "a", "CANCELLED");
 
@@ -121,13 +84,38 @@ describe("updateSetupRequestStatus", () => {
     expect(updates).toEqual([{ id: "a", status: "CANCELLED" }]);
   });
 
-  it("rejects a disallowed transition before ever calling update", async () => {
-    const { client, updates } = createFakeSupabase([makeRequest({ id: "a", status: "COMPLETED" })]);
+  it("cancels a CONTACTED request", async () => {
+    const { client, updates } = createFakeSupabase([{ id: "a", status: "CONTACTED" }]);
+
+    await updateSetupRequestStatus(client, "a", "CANCELLED");
+
+    expect(updates).toEqual([{ id: "a", status: "CANCELLED" }]);
+  });
+
+  it("rejects a transition the state machine doesn't recognize at all, before ever calling update", async () => {
+    const { client, updates } = createFakeSupabase([{ id: "a", status: "COMPLETED" }]);
 
     const error = await updateSetupRequestStatus(client, "a", "CANCELLED").catch((e) => e);
 
     expect(isCustomerSupportError(error)).toBe(true);
     expect(error.code).toBe("INVALID_TRANSITION");
+    expect(updates).toEqual([]);
+  });
+
+  it("rejects cancelling an IN_PROGRESS request with INVALID_TRANSITION, not a concurrent-change error, and never calls update", async () => {
+    // canTransition("IN_PROGRESS", "CANCELLED") is true in the abstract
+    // state machine — this specifically tests that the RLS-shaped
+    // USER_CANCELLABLE_FROM guard still catches it before the DB call,
+    // instead of reaching the update and getting back a misleading
+    // "changed before this update landed" race message.
+    const { client, updates } = createFakeSupabase([{ id: "a", status: "IN_PROGRESS" }]);
+
+    const error = await updateSetupRequestStatus(client, "a", "CANCELLED").catch((e) => e);
+
+    expect(isCustomerSupportError(error)).toBe(true);
+    expect(error.code).toBe("INVALID_TRANSITION");
+    expect(error.message).not.toContain("changed status before this update landed");
+    expect(error.message).toContain("already IN_PROGRESS");
     expect(updates).toEqual([]);
   });
 
@@ -140,8 +128,8 @@ describe("updateSetupRequestStatus", () => {
     expect(error.code).toBe("NOT_FOUND");
   });
 
-  it("detects a concurrent status change between read and write instead of overwriting it", async () => {
-    const { client, updates } = createFakeSupabase([makeRequest({ id: "a", status: "REQUESTED" })], {
+  it("detects a genuine concurrent status change between read and write (distinct from the IN_PROGRESS case above)", async () => {
+    const { client, updates } = createFakeSupabase([{ id: "a", status: "REQUESTED" }], {
       raceStatusAfterRead: "COMPLETED", // someone else finished it right after we read REQUESTED
     });
 
@@ -149,6 +137,7 @@ describe("updateSetupRequestStatus", () => {
 
     expect(isCustomerSupportError(error)).toBe(true);
     expect(error.code).toBe("INVALID_TRANSITION");
+    expect(error.message).toContain("changed status before this update landed");
     expect(updates).toEqual([]);
   });
 });

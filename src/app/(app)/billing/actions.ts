@@ -12,13 +12,20 @@ export async function startCheckout(plan: "STARTER" | "PRO"): Promise<void> {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const provider = getBillingProvider();
-  const { url } = await provider.createCheckout({
-    userId: user.id,
-    plan,
-    successUrl: clientEnv.NEXT_PUBLIC_SITE_URL,
-    cancelUrl: `${clientEnv.NEXT_PUBLIC_SITE_URL}/billing`,
-  });
+  let url: string;
+  try {
+    const provider = getBillingProvider();
+    const checkout = await provider.createCheckout({
+      userId: user.id,
+      plan,
+      successUrl: `${clientEnv.NEXT_PUBLIC_SITE_URL}/api/billing/toss/success`,
+      cancelUrl: `${clientEnv.NEXT_PUBLIC_SITE_URL}/billing/fail`,
+    });
+    url = checkout.url;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "결제 요청을 시작하지 못했습니다.";
+    redirect(`/billing/fail?code=CHECKOUT_START_FAILED&message=${encodeURIComponent(message)}`);
+  }
 
   redirect(url);
 }
