@@ -34,7 +34,7 @@ export async function signUp(_prevState: AuthActionState, formData: FormData): P
   const password = String(formData.get("password") ?? "");
   const displayName = String(formData.get("displayName") ?? "");
   const redirectTo = safeRedirectTo(String(formData.get("redirectTo") ?? "/onboarding"));
-  const onboardingPath = /^\/billing\?plan=(STARTER|PRO)$/.test(redirectTo)
+  const onboardingPath = /^\/billing\?plan=(STARTER|PRO)$/.test(redirectTo) || redirectTo === "/setup-request"
     ? `/onboarding?next=${encodeURIComponent(redirectTo)}`
     : "/onboarding";
 

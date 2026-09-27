@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { clientEnv } from "@/lib/env/client";
 
-const PROTECTED_PREFIXES = ["/dashboard", "/automations", "/business", "/billing", "/settings"];
+const PROTECTED_PREFIXES = ["/dashboard", "/automations", "/business", "/billing", "/settings", "/setup-request"];
 const AUTH_PREFIXES = ["/login", "/signup"];
 
 /** Refreshes the Supabase session cookie and gates protected routes. */

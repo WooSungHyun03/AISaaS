@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowRight, CalendarClock, CircleCheck, CircleX, Clock3, PlayCircle, Store, Zap } from "lucide-react";
+import { ArrowRight, CalendarClock, CircleCheck, CircleX, Clock3, PlayCircle, Store, Wrench, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPlanConfig } from "@/server/billing/plans";
 import { getPeriodKey, SERVICE_TIMEZONE, zonedTimeToUtc } from "@/lib/utils/date";
@@ -10,6 +10,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import type { AutomationRun } from "@/types/domain";
+import { getRecentSetupRequests } from "@/server/setup-requests";
+import { SetupRequestStatusBadge } from "@/components/setup-requests/setup-request-status";
+import { SETUP_REQUEST_STATUS, setupAutomationTypeLabel, setupRequestNumber } from "@/types/setup-request";
 
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
@@ -35,11 +38,12 @@ export default async function DashboardPage() {
   const periodKey = getPeriodKey();
   const [year, month] = periodKey.split("-").map(Number);
 
-  const [businessResult, automationResult, subscriptionResult, usageResult] = await Promise.all([
+  const [businessResult, automationResult, subscriptionResult, usageResult, setupRequests] = await Promise.all([
     supabase.from("businesses").select("id").eq("owner_id", user.id).limit(1).maybeSingle(),
     supabase.from("automations").select("id, name, status, next_run_at").eq("user_id", user.id),
     supabase.from("subscriptions").select("plan, status").eq("user_id", user.id).maybeSingle(),
     supabase.from("usage").select("automation_runs").eq("user_id", user.id).eq("period", periodKey).maybeSingle(),
+    getRecentSetupRequests(user.id),
   ]);
 
   const readError = businessResult.error || automationResult.error || subscriptionResult.error || usageResult.error;
@@ -90,9 +94,10 @@ export default async function DashboardPage() {
           <h1 className="mt-1 text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="mt-2 text-sm text-muted-foreground">자동화 운영 현황과 최근 실행 결과를 확인하세요.</p>
         </div>
-        <Button asChild className="h-9 bg-blue-600 text-white hover:bg-blue-700">
-          <Link href="/automations/marketplace"><Store className="size-4" /> 자동화 둘러보기</Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" className="h-9"><Link href="/setup-request"><Wrench className="size-4" /> 구축 맡기기</Link></Button>
+          <Button asChild className="h-9 bg-blue-600 text-white hover:bg-blue-700"><Link href="/automations/marketplace"><Store className="size-4" /> 자동화 둘러보기</Link></Button>
+        </div>
       </div>
 
       {!hasBusiness ? (
@@ -131,6 +136,36 @@ export default async function DashboardPage() {
           hint={nextAutomation ? <Link href={`/automations/${nextAutomation.id}`} className="hover:underline">{nextAutomation.name} →</Link> : "활성 자동화의 다음 실행 시각"}
         />
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <div><CardTitle className="flex items-center gap-2 text-base"><Wrench className="size-4 text-blue-700" /> 구축 대행 요청</CardTitle><p className="mt-1 text-xs text-muted-foreground">최근 요청의 상담·구축 진행 상태</p></div>
+          <Button asChild variant="outline" size="sm"><Link href="/setup-request">새 요청 <ArrowRight /></Link></Button>
+        </CardHeader>
+        <CardContent>
+          {setupRequests.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-7 text-center">
+              <p className="text-sm font-medium">아직 구축 요청이 없습니다</p>
+              <p className="text-xs text-muted-foreground">직접 설정하기 어려운 업무가 있다면 전문가 구축을 요청할 수 있습니다.</p>
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {setupRequests.map((request) => (
+                <li key={request.id} className="flex flex-col gap-3 py-3.5 first:pt-0 last:pb-0 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1">
+                    <Link href={`/setup-request/${request.id}`} className="font-medium hover:text-blue-700 hover:underline">{setupAutomationTypeLabel(request.automation_type)}</Link>
+                    <p className="mt-1 text-xs text-muted-foreground">{setupRequestNumber(request.id)} · {dateFormatter.format(new Date(request.created_at))}</p>
+                  </div>
+                  <div className="flex items-center gap-3 sm:justify-end">
+                    <p className="hidden text-xs text-muted-foreground lg:block">{SETUP_REQUEST_STATUS[request.status].description}</p>
+                    <SetupRequestStatusBadge status={request.status} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(260px,1fr)]">
         <Card>

@@ -26,6 +26,7 @@ export type {
   SubscriptionPlan,
   SubscriptionStatus,
   SetupRequestStatus,
+  SetupRequestContactMethod,
   IntegrationProvider,
   ConnectionStatus,
   Json,
