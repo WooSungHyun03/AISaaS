@@ -1,9 +1,9 @@
-import { randomBytes } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { clientEnv } from "@/lib/env/client";
 import { serverEnv } from "@/lib/env/server";
 import { createClient } from "@/lib/supabase/server";
-import { buildInstagramAuthorizationUrl, INSTAGRAM_OAUTH_COOKIE } from "@/server/connectors/instagram/oauth";
+import { startInstagramOAuth } from "@/server/connectors/instagram/connect";
+import { INSTAGRAM_OAUTH_COOKIE } from "@/server/connectors/instagram/oauth";
 
 function settingsUrl(request: NextRequest, businessId: string, result: string) {
   const url = new URL("/settings", request.url);
@@ -25,11 +25,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(settingsUrl(request, businessId, "not_configured"));
   }
 
-  const state = randomBytes(24).toString("base64url");
   const redirectUri = new URL("/api/integrations/instagram/callback", clientEnv.NEXT_PUBLIC_SITE_URL).toString();
-  const authorizationUrl = buildInstagramAuthorizationUrl({ appId: serverEnv.INSTAGRAM_APP_ID, redirectUri, state });
+  const { authorizationUrl, cookieValue } = startInstagramOAuth({ appId: serverEnv.INSTAGRAM_APP_ID, redirectUri, businessId });
   const response = NextResponse.redirect(authorizationUrl);
-  response.cookies.set(INSTAGRAM_OAUTH_COOKIE, Buffer.from(JSON.stringify({ state, businessId })).toString("base64url"), {
+  response.cookies.set(INSTAGRAM_OAUTH_COOKIE, cookieValue, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

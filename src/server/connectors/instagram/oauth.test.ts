@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isConnectorError } from "@/server/shared/errors";
 import { buildInstagramAuthorizationUrl, exchangeInstagramCode, getInstagramProfile, isProfessionalInstagramAccount } from "./oauth";
 
 afterEach(() => vi.unstubAllGlobals());
+
+const exchangeParams = { appId: "app", appSecret: "secret", redirectUri: "https://app.example.com/callback", code: "code" };
 
 describe("Instagram OAuth", () => {
   it("builds an authorization URL with state and current professional scopes", () => {
@@ -28,5 +31,57 @@ describe("Instagram OAuth", () => {
     expect(isProfessionalInstagramAccount("BUSINESS")).toBe(true);
     expect(isProfessionalInstagramAccount("MEDIA_CREATOR")).toBe(true);
     expect(isProfessionalInstagramAccount("PERSONAL")).toBe(false);
+  });
+
+  it("classifies a rejected code exchange (invalid/expired/reused authorization code) as AUTH_FAILED", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 401 })));
+    const error = await exchangeInstagramCode(exchangeParams).catch((e: unknown) => e);
+    expect(isConnectorError(error)).toBe(true);
+    expect((error as { code: string }).code).toBe("AUTH_FAILED");
+  });
+
+  it("classifies a permission-denied response from the long-token exchange as PERMISSION_DENIED", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "short-secret", user_id: "ig-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "forbidden" }), { status: 403 })));
+    const error = await exchangeInstagramCode(exchangeParams).catch((e: unknown) => e);
+    expect(isConnectorError(error)).toBe(true);
+    expect((error as { code: string }).code).toBe("PERMISSION_DENIED");
+  });
+
+  it("classifies a 5xx from Meta as UPSTREAM_SERVER_ERROR (retryable)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response("upstream error", { status: 503 })));
+    const error = await exchangeInstagramCode(exchangeParams).catch((e: unknown) => e);
+    expect(isConnectorError(error)).toBe(true);
+    expect((error as { code: string }).code).toBe("UPSTREAM_SERVER_ERROR");
+    expect((error as { retryable: boolean }).retryable).toBe(true);
+  });
+
+  it("classifies a raw network failure as NETWORK_FAILURE", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new TypeError("fetch failed")));
+    const error = await exchangeInstagramCode(exchangeParams).catch((e: unknown) => e);
+    expect(isConnectorError(error)).toBe(true);
+    expect((error as { code: string }).code).toBe("NETWORK_FAILURE");
+  });
+
+  it("classifies an aborted (timed-out) request as TIMEOUT", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new DOMException("The operation timed out.", "TimeoutError")));
+    const error = await exchangeInstagramCode(exchangeParams).catch((e: unknown) => e);
+    expect(isConnectorError(error)).toBe(true);
+    expect((error as { code: string }).code).toBe("TIMEOUT");
+  });
+
+  it("rejects an auth-token response for a revoked/expired access token as AUTH_FAILED", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "Error validating access token" } }), { status: 401 })));
+    const error = await getInstagramProfile("revoked-token").catch((e: unknown) => e);
+    expect(isConnectorError(error)).toBe(true);
+    expect((error as { code: string }).code).toBe("AUTH_FAILED");
+  });
+
+  it("rejects an incomplete profile response even on HTTP 200", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ user_id: "ig-1" }), { status: 200 })));
+    const error = await getInstagramProfile("token").catch((e: unknown) => e);
+    expect(isConnectorError(error)).toBe(true);
+    expect((error as { code: string }).code).toBe("UPSTREAM_SERVER_ERROR");
   });
 });

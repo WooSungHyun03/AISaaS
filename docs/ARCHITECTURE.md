@@ -184,6 +184,116 @@ subscribers still succeeding, and the near-duplicate-subject regeneration
 path). `src/server/automations/runner.test.ts` gained an assertion that
 the handler receives `runId`.
 
+### Instagram Professional Account Connection (Day 8)
+
+A `feature/directory-cs` merge (2026-09-26, before this Day started) had
+already landed a working Meta OAuth flow — `src/server/connectors/
+instagram/oauth.ts`, `src/app/api/integrations/instagram/{connect,
+callback}/route.ts`, and the Settings page's "Connect Instagram"/disconnect
+UI (`src/components/settings/integration-settings.tsx`). Per this routine's
+own rule 1 ("search before creating a new file... verify against the
+Definition of Done before rebuilding"), this Day verified that flow against
+Day 8's DoD instead of re-implementing it, and closed the two real gaps
+found:
+
+1. **No tests covering the actual OAuth orchestration** — only
+   `oauth.ts`'s three low-level helpers (`buildInstagramAuthorizationUrl`/
+   `exchangeInstagramCode`/`getInstagramProfile`) had unit tests; the state
+   generation, CSRF cookie packing, constant-time state comparison, and the
+   exchange → professional-check → persist-or-mark-ERROR orchestration all
+   lived inline in the two Next.js route handlers, untestable without
+   mocking `NextRequest`/`NextResponse` — a pattern this repo doesn't use
+   anywhere else (the cron route, WordPress, and newsletter are all tested
+   by testing their `src/server/` functions directly, never the route
+   layer). Extracted that orchestration into a new
+   `src/server/connectors/instagram/connect.ts` (mirroring Day 3's
+   `wordpress/connect.ts` bridge):
+   ```
+   src/server/connectors/instagram/connect.ts (server-only)
+       startInstagramOAuth()       — fresh CSRF state + Meta authorization URL
+                                      + the packed OAuth cookie value
+       parseInstagramOAuthCookie() — unpacks/validates the cookie back to {state, businessId}
+       isMatchingOAuthState()      — constant-time state comparison (timingSafeEqual)
+       completeInstagramOAuth()    — code exchange -> professional-account check
+                                      -> createConnection() (Vault-backed, Day 2) on
+                                      success; any failure marks a pre-existing
+                                      connection for this business ERROR via
+                                      updateConnectionStatus(), never silently
+                                      leaves it looking CONNECTED
+   ```
+   Both route handlers were reduced to thin wrappers around this module —
+   same URLs, same cookie name/path/maxAge, same `?instagram=<result>`
+   query-param contract the Settings page already reads, so this is a
+   mechanical extraction, not a redesign. `connect.test.ts` (10 cases)
+   covers state round-tripping, a malformed/incomplete cookie, state
+   mismatch, the success path (mocked Instagram API responses via a
+   stubbed `fetch`, asserting the exact `createConnection()` payload —
+   secret never touches the row itself, only Vault), a personal account
+   being rejected without persisting anything, a failed code exchange and
+   a failed profile fetch each marking a pre-existing connection `ERROR`,
+   and the no-pre-existing-connection / lookup-itself-fails cases never
+   throwing out of `completeInstagramOAuth()`.
+2. **Inconsistent error handling** — `oauth.ts`'s three Graph/Instagram API
+   calls threw a bare `Error` on a non-2xx response and let a raw
+   network/timeout exception propagate unclassified, unlike every other
+   connector (WordPress, Resend) which throws `ConnectorError` via the
+   shared `classifyHttpStatus()` taxonomy (`src/server/shared/errors.ts`).
+   Fixed by routing all three calls through one `fetchJson()` helper that
+   classifies a non-2xx response (`classifyHttpStatus`), a timed-out
+   request (`AbortSignal.timeout(12_000)` rejecting with a `TimeoutError`
+   `DOMException` → `TIMEOUT`), and a raw network failure (→
+   `NETWORK_FAILURE`) the same way `WordPressConnector`/`ResendConnector`
+   do — 6 new test cases in `oauth.test.ts` lock in the classification
+   (`AUTH_FAILED`/`PERMISSION_DENIED`/`UPSTREAM_SERVER_ERROR`/
+   `NETWORK_FAILURE`/`TIMEOUT`, plus an incomplete-profile-on-HTTP-200
+   case).
+
+**Already satisfied, verified rather than rebuilt:**
+`buildInstagramAuthorizationUrl()` requests
+`instagram_business_basic,instagram_business_content_publish` (current
+Meta scopes for Instagram Login for Professional accounts);
+`exchangeInstagramCode()` upgrades the short-lived token to a long-lived
+one and never returns the short-lived token to the caller;
+`isProfessionalInstagramAccount()` accepts only `BUSINESS`/`CREATOR`/
+`MEDIA_CREATOR`, rejecting `PERSONAL` with a distinct `professional_
+required` result the Settings page surfaces as a clear message (never
+silently connected as if supported); the callback route distinguishes
+`state_error` (CSRF mismatch), `denied` (the user declined **or** Meta
+returned an `error` query param — both mean "no code to exchange"),
+`invalid_business` (the state's business isn't owned by the signed-in
+user), `not_configured` (no `INSTAGRAM_APP_ID`/`SECRET`), `professional_
+required`, `connected`, and a generic `error` for anything else — each a
+distinct, user-visible outcome, never a single undifferentiated failure;
+the access token is stored exclusively through Day 2's
+`createConnection()` (Vault `secret_reference`), never in a plaintext
+column; `disconnectIntegration()` (`src/app/(app)/settings/actions.ts`,
+already generic across every provider) and the account-expiry display
+(`integration-settings.tsx#displayStatus()`, comparing the stored
+`expiresAt` metadata against `Date.now()`) both already worked for
+Instagram with no change needed.
+
+**Deliberately out of scope this Day (Day 9's territory):** actively
+detecting a *stored* token going bad — e.g. the user revokes access on
+Meta's side without ever visiting this app's Settings page again — needs a
+live Graph API call with that token, which nothing calls yet
+(`InstagramConnector.publish()`, `src/server/connectors/instagram/
+index.ts`, is still the Day 9 placeholder that throws "not implemented").
+When Day 9 adds the real publish call and it gets a `ConnectorError` with
+`AUTH_FAILED`/`PERMISSION_DENIED` from Meta, it should call Day 2's
+`updateConnectionStatus(admin, connection.id, "ERROR")` — the helper
+already exists and needs no changes; there is deliberately no speculative
+polling/health-check job added here with no caller yet (project rule 10).
+
+Tests: `src/server/connectors/instagram/oauth.test.ts` (10 cases, 6 new —
+see above). `src/server/connectors/instagram/connect.test.ts` (10 cases,
+new file — see above). Did not touch `src/server/connectors/instagram/
+index.ts` (the Day 9 `PlatformConnector` placeholder), `src/server/
+directory/`, or `src/server/customer-support/`; touched `src/app/api/
+integrations/instagram/{connect,callback}/route.ts` only to the minimum
+needed to delegate to the new `src/server/` module (no URL/behavior/UI
+change) — `src/components/settings/integration-settings.tsx` and
+`src/app/(app)/settings/actions.ts` needed no change at all.
+
 ## Shared Error Handling & Logging
 
 Every server domain reports failures through `src/server/shared/errors.ts`

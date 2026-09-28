@@ -6,7 +6,7 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 8 — Instagram Professional Account Connection
+Day 9 — Instagram Publishing
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
@@ -16,9 +16,10 @@ Day 8 — Instagram Professional Account Connection
 - Day 5 — Automation Runner Reliability (2026-09-25)
 - Day 6 — Production Scheduler (2026-09-26)
 - Day 7 — Newsletter Automation + Resend Connector (2026-09-27)
+- Day 8 — Instagram Professional Account Connection (2026-09-28)
 
 ## Current
-- (none — Day 8 not started yet)
+- (none — Day 9 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -65,16 +66,33 @@ Day 8 — Instagram Professional Account Connection
   (`src/server/automations/handlers/newsletter.test.ts` mocks
   `listActiveSubscribers()` directly), not against a real Postgres
   instance with RLS actually enforced.
+- META_ACCESS_TOKEN / META_IG_USER_ID / INSTAGRAM_APP_ID /
+  INSTAGRAM_APP_SECRET: no Meta app or test Instagram Professional account
+  exists in this environment. The full OAuth flow (`src/server/connectors/
+  instagram/oauth.ts` + `connect.ts`, `src/app/api/integrations/instagram/
+  {connect,callback}/route.ts`) is only verified against a mocked `fetch`
+  (state validation, non-professional rejection, token-exchange/
+  profile-fetch failure classification, the success path persisting a
+  Vault-backed connection) — never against the real Meta Graph API. Set
+  `INSTAGRAM_APP_ID`/`INSTAGRAM_APP_SECRET` and register the callback URL
+  (`${NEXT_PUBLIC_SITE_URL}/api/integrations/instagram/callback`) in the
+  Meta App Dashboard to smoke-test a real connection end to end.
 
 ## Next
-- Day 8 — Instagram Professional Account Connection: see
-  `DAILY_ROUTINE_PLAN.md` Day 8 for the full spec (Meta OAuth flow using
-  Day 2's `integration_connections` foundation, state/CSRF validation,
-  Professional-account-only enforcement, token exchange, reconnect/
-  disconnect, mocked OAuth/HTTP tests since no Meta app credentials are
-  available here). Note: `src/server/connectors/instagram/oauth.ts` already
-  has some scaffolding from earlier work — verify it against Day 8's DoD
-  before rebuilding anything.
+- Day 9 — Instagram Publishing: see `DAILY_ROUTINE_PLAN.md` Day 9 for the
+  full spec (`InstagramAutomationHandler` generating caption + hashtags via
+  `AIProvider`, a single static marketing-card image uploaded to Supabase
+  Storage, container-create → status-check → `media_publish` sequence
+  wired into the standard `AutomationRunner`, media id persisted on
+  `automation_runs.output`, mocked HTTP tests for the full sequence and its
+  failure modes). `src/server/connectors/instagram/index.ts`'s
+  `InstagramConnector.publish()` is still the pre-existing placeholder that
+  throws "not implemented" — that's exactly what Day 9 replaces. When it
+  gets a `ConnectorError` (`AUTH_FAILED`/`PERMISSION_DENIED`) from a stored
+  token Meta has since revoked/expired, it should call Day 2's
+  `updateConnectionStatus(admin, connection.id, "ERROR")` — already
+  available, no new helper needed (see Day 8's ARCHITECTURE.md note on why
+  that wasn't added speculatively this Day).
 
 ## Daily History
 
@@ -682,6 +700,87 @@ Tests:
 Blocked External:
 - RESEND_API_KEY / RESEND_FROM_EMAIL and the live Supabase RLS
   round-trip for `subscribers` — see "Blocked External" above for detail.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-28 (Day 8)
+Completed Day 8 — Instagram Professional Account Connection:
+- A `feature/directory-cs` merge (2026-09-26, commit `c0e9e6e`, before this
+  routine ever reached Day 8) had already landed a working Meta OAuth
+  connection flow: `src/server/connectors/instagram/oauth.ts` (authorization
+  URL, code exchange + short→long token upgrade, profile fetch,
+  professional-account check), `src/app/api/integrations/instagram/
+  {connect,callback}/route.ts` (state/CSRF cookie, business-ownership check,
+  distinct `state_error`/`denied`/`invalid_business`/`not_configured`/
+  `professional_required`/`connected`/`error` outcomes), and the Settings
+  page's Connect/reconnect/disconnect UI
+  (`src/components/settings/integration-settings.tsx`,
+  `src/app/(app)/settings/actions.ts`'s already-generic
+  `disconnectIntegration()`). Per this routine's rule 1 and Day 8's own
+  progress note, verified this against Day 8's Definition of Done instead of
+  rebuilding it — all three DoD criteria (OAuth flow, non-professional
+  rejection, no plaintext tokens) were already met by the existing code.
+- Found and closed two real gaps rather than declaring the Day complete on
+  someone else's unverified work:
+  1. **No tests over the actual OAuth orchestration.** The CSRF state
+     generation/packing/comparison and the exchange → professional-check →
+     persist-or-mark-ERROR sequence lived inline in the two Next.js route
+     handlers — untestable without mocking `NextRequest`, a pattern this
+     repo doesn't use anywhere else (cron/WordPress/newsletter are all
+     tested at the `src/server/` layer). Extracted it into new
+     `src/server/connectors/instagram/connect.ts` (mirrors Day 3's
+     `wordpress/connect.ts` bridge exactly): `startInstagramOAuth()`,
+     `parseInstagramOAuthCookie()`, `isMatchingOAuthState()`,
+     `completeInstagramOAuth()`. Both route handlers became thin wrappers
+     with the exact same URLs/cookie/query-param contract — a mechanical
+     extraction, not a redesign, so this stayed within the minimal-diff
+     rule for `src/app/`.
+  2. **Inconsistent error handling.** `oauth.ts`'s three Graph/Instagram API
+     calls threw a bare `Error` instead of the shared `ConnectorError`/
+     `classifyHttpStatus()` taxonomy every other connector (WordPress,
+     Resend) uses. Fixed via one `fetchJson()` helper classifying non-2xx
+     responses, `AbortSignal.timeout()` timeouts, and raw network failures
+     the same way.
+- Full design + the explicit Day 9 deferral (detecting an already-stored
+  token going bad requires a live Graph API call, which nothing makes yet)
+  documented in `docs/ARCHITECTURE.md` (new "Instagram Professional Account
+  Connection (Day 8)" subsection under Automation Flow).
+- Did not touch `src/server/directory/` or `src/server/customer-support/`.
+  Touched `src/app/api/integrations/instagram/{connect,callback}/route.ts`
+  only to delegate to the new `src/server/` module (no behavior/URL/UI
+  change); `src/components/settings/integration-settings.tsx` and
+  `src/app/(app)/settings/actions.ts` needed no change at all.
+
+Tests: `src/server/connectors/instagram/oauth.test.ts` (10 cases, 6 new —
+AUTH_FAILED/PERMISSION_DENIED/UPSTREAM_SERVER_ERROR/NETWORK_FAILURE/TIMEOUT
+classification plus an incomplete-profile-on-200 case).
+`src/server/connectors/instagram/connect.test.ts` (10 cases, new file) —
+state round-trip + uniqueness, a malformed/incomplete OAuth cookie, state
+mismatch, the success path asserting the exact Vault-backed
+`createConnection()` payload, a personal account rejected without
+persisting anything, a failed code exchange and a failed profile fetch each
+marking a pre-existing connection `ERROR`, and both the
+no-pre-existing-connection and the ERROR-marking-lookup-itself-fails cases
+never throwing out of `completeInstagramOAuth()`.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 279/279 (`npm test`, includes 17 new Day 8 tests: 6 oauth +
+  10 connect, net of one pre-existing oauth test unchanged)
+- build: pass (`npm run build`) — required the same local-only `.env.local`
+  placeholder values as Days 4/5/6/7 to get past static page collection;
+  not committed (gitignored). Also required a fresh `npm ci` — this
+  session's container had no `node_modules/` at all; installed cleanly with
+  0 vulnerabilities.
+
+Blocked External:
+- META_ACCESS_TOKEN / META_IG_USER_ID / INSTAGRAM_APP_ID /
+  INSTAGRAM_APP_SECRET — see "Blocked External" above for detail.
 
 Commit:
 - (see git log for this file's commit)
