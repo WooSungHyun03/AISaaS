@@ -294,6 +294,127 @@ needed to delegate to the new `src/server/` module (no URL/behavior/UI
 change) — `src/components/settings/integration-settings.tsx` and
 `src/app/(app)/settings/actions.ts` needed no change at all.
 
+### Instagram Publishing (Day 9)
+
+Replaces `InstagramConnector.publish()`'s Day 8 placeholder (which threw
+"not implemented yet") with a real single-image Content Publishing flow,
+wired into the same `AutomationRunner` core every other handler uses.
+
+```
+src/server/ai/prompts/instagram.ts      buildInstagramCaptionPrompt() + instagramCaptionSchema
+                                         { topic, caption, hashtags[] } — generateStructured()
+                                         only, per Day 1's constraint (never a vendor SDK).
+
+src/server/connectors/instagram/
+  assets/marketing-card.ts              base64 PNG constant (see below)
+  media.ts                              ensureMarketingCardImageUrl() — Storage upload/lookup
+  index.ts#InstagramConnector.publish() container-create -> status-poll -> media_publish
+  connect.ts#loadInstagramConnector()   business's Vault-backed connection -> InstagramConnector
+
+src/server/automations/handlers/instagram.ts
+  instagramAutomationHandler            generateCaption() -> ensureMarketingCardImageUrl()
+                                         -> connector.publish() -> persists mediaId
+```
+
+**MVP media — a single static marketing-card image, not per-post
+rendering.** The roadmap's own wording ("a single static marketing-card
+image") is taken literally: every Instagram post this handler makes uses
+the *exact same* image; per-post differentiation comes entirely from the
+AI-generated caption/hashtags, not from dynamically composing text into a
+picture. This sidesteps a real constraint — the repo has no image-rendering
+or raster-graphics library (`package.json` was checked first, per project
+rule 2/3; the closest thing, `lucide-react`, is UI icons, not a server-side
+renderer), and the roadmap explicitly forbids adding one for this Day. The
+image itself — a 1080x1080 RGB PNG, a vertical indigo→teal brand gradient
+with a dark band along the bottom edge — was generated once with a small
+standalone Python script using only `zlib`/`struct` (both stdlib; the
+script is not part of the app or its dependency tree, exactly like a
+designer handing over a finished asset) and embedded as a base64 string
+constant in `assets/marketing-card.ts` rather than read from disk at
+request time: a Netlify serverless function's deployment doesn't reliably
+include arbitrary repo files outside Next.js's own file-tracing, so a
+string literal is the only form guaranteed to survive every deploy target.
+
+**Storage.** `ensureMarketingCardImageUrl()` (`media.ts`) uploads that PNG
+to a new public Supabase Storage bucket, `marketing-assets` (migration
+`0027_instagram_marketing_assets_bucket.sql` — `storage.buckets` insert +
+a `storage.objects` RLS policy granting public `select` only; writes stay
+service-role-only, matching every other table's write pattern in this
+repo), so Meta's Graph API can fetch it by URL with no auth of its own. It
+checks for the object first and only uploads when missing — self-healing if
+the bucket is ever emptied, without re-uploading the same bytes on every
+run.
+
+**Publish sequence** (`InstagramConnector.publish()`, mirrors
+`WordPressConnector`'s constructor shape — an explicit
+`{ accessToken, igUserId }` from `loadInstagramConnector()` takes priority,
+falling back to the legacy env-configured single-account path
+(`META_ACCESS_TOKEN`/`META_IG_USER_ID`) when a business has no shared
+connection):
+1. `POST /{ig-user-id}/media` with `image_url` + `caption` → a creation id.
+2. Poll `GET /{creation-id}?fields=status_code` up to 5 times (bounded —
+   never unbounded, Rule 29) until `FINISHED`; `ERROR`/`EXPIRED` fails
+   immediately, exhausting the bound without `FINISHED` throws `TIMEOUT`
+   ("stuck"). A single static image is normally processed near-instantly,
+   but Meta's API contract still requires checking status before
+   `media_publish` rather than assuming it.
+3. `POST /{ig-user-id}/media_publish` with the creation id → the published
+   media id, persisted on `automation_runs.output.mediaId` (alongside
+   `topic`/`caption`/`hashtags`/`imageUrl`) via the runner's existing
+   `result.output` write — no runner change needed.
+
+Every non-2xx response, timeout, and raw network failure is classified
+through the same `ConnectorError`/`classifyHttpStatus()` taxonomy every
+other connector uses (`src/server/shared/errors.ts`) — this Day's own
+mocked-HTTP tests cover all three named failure modes (container creation
+failure, stuck/failed status, publish failure) plus timeout/network/
+not-configured/missing-image-url. A publish failure classified
+`AUTH_FAILED`/`PERMISSION_DENIED` — a stored token Meta has since
+revoked — calls Day 2's `updateConnectionStatus(admin, connection.id,
+"EXPIRED")`; any other failure marks it `ERROR`; this closes the item Day
+8 explicitly deferred ("detecting a *stored* token going bad needs a live
+Graph API call, which nothing calls yet").
+
+**Availability.** `AUTOMATION_AVAILABILITY["instagram-marketing"]` flipped
+`COMING_SOON` → `BETA` (`src/types/automation.ts`) — the same const
+comment's own rule ("update this the same release a handler stops throwing
+'not implemented yet'"). No new automation-creation wizard was needed: the
+generic `AutomationForm` (used by every non-blog template already) needs no
+per-automation config for this handler, since the image is fixed and the
+connection comes from Settings (Day 8's UI, unchanged). A user who enables
+this automation without ever connecting Instagram in Settings gets the
+same graceful-degradation UX WordPress's legacy path already has: the
+handler throws a clear Korean message the runner records on the run, not a
+broken page.
+
+**Out of scope this Day (by the roadmap's own instruction):** carousels
+and Reels — single static image only.
+
+Tests: `src/server/connectors/instagram/index.test.ts` (12 cases, new —
+full container→status→publish success, IN_PROGRESS polling to FINISHED,
+container-creation failure, an ERROR status_code, a stuck-IN_PROGRESS
+timeout after exactly the bounded attempt count, a `media_publish`
+failure, missing `imageUrl`, not-configured, timeout, network failure).
+`src/server/connectors/instagram/media.test.ts` (5 cases, new — uploads
+when missing, skips upload when already present, and classifies a list/
+upload/missing-public-URL failure). `src/server/connectors/instagram/
+connect.test.ts` gained a `loadInstagramConnector` suite (5 cases,
+mirroring `wordpress/connect.test.ts#loadWordPressConnector`'s four
+branches plus a missing-`accountId`-metadata case).
+`src/server/automations/handlers/instagram.test.ts` (10 cases, new) — the
+shared-connection and legacy-env-fallback paths, a CONNECTED-but-unusable
+connection marked `ERROR` without ever calling the AI/connector, an
+`AUTH_FAILED` publish failure marking the connection `EXPIRED` vs. any
+other failure marking it `ERROR`, the regenerate-once-on-near-duplicate
+topic pattern (same bounded-once rule as blog.ts/newsletter.ts), and both
+a caption-generation failure and a marketing-card-upload failure
+propagating without ever calling `publish()`.
+
+Did not touch `src/app/`, `src/components/`, `src/server/directory/`, or
+`src/server/customer-support/` — `AUTOMATION_AVAILABILITY` lives in
+`src/types/automation.ts` (a shared domain type, not a UI file), and the
+existing `AutomationForm`/marketplace UI already reads it generically.
+
 ## Shared Error Handling & Logging
 
 Every server domain reports failures through `src/server/shared/errors.ts`
@@ -448,6 +569,7 @@ See `supabase/migrations/` for the authoritative schema (RLS policies in `0012_r
 - `faqs` — Guides/Support content.
 - `integration_connections` — a business's connections to external platforms (WordPress today; Instagram/Resend/YouTube later). See "Integration Connections & Secret Storage" below.
 - `subscribers` — a business's own newsletter list (`ACTIVE`/`UNSUBSCRIBED`), read by the newsletter automation handler. See "Newsletter Automation & Resend Connector (Day 7)" above.
+- Storage bucket `marketing-assets` (public, `0027_instagram_marketing_assets_bucket.sql`) — not a table; holds the single static Instagram marketing-card image so Meta's Graph API can fetch it by URL. See "Instagram Publishing (Day 9)" above.
 
 Everything a user can query directly is RLS-scoped to `owner_id`/`user_id`; writes that must bypass RLS (usage counters, subscription updates, cron-driven runs) go through the service-role client in `src/lib/supabase/admin.ts`, which is only ever imported from trusted server code, never from a route a browser can trigger without the secret/entitlement checks in front of it.
 

@@ -1,20 +1,120 @@
 import "server-only";
 import { serverEnv } from "@/lib/env/server";
+import { classifyHttpStatus, ConnectorError } from "@/server/shared/errors";
 import type { PlatformConnector, PublishContentParams, PublishResult } from "../types";
 
+const GRAPH_API_BASE = "https://graph.instagram.com/v21.0";
+/** Bounded polling for the media container's processing status — never unbounded (Rule 29). */
+const MEDIA_STATUS_MAX_ATTEMPTS = 5;
+const MEDIA_STATUS_POLL_INTERVAL_MS = 2_000;
+
+export interface InstagramConnection {
+  accessToken: string;
+  igUserId: string;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
- * Placeholder — Meta Graph API integration for Instagram automation.
- * Interface only for now; implement publish() when Instagram automation
- * moves from "Coming Soon" to "Beta" in the marketplace.
+ * Instagram Content Publishing (Meta Graph API) connector for a single
+ * static-image post — Day 9. Carousels/Reels are explicitly out of scope.
+ * Mirrors `WordPressConnector`'s constructor shape: an explicit
+ * `InstagramConnection` (from a business's Vault-backed
+ * `integration_connections` row, see `./connect.ts#loadInstagramConnector`)
+ * takes priority, falling back to the legacy env-configured single-account
+ * path (`META_ACCESS_TOKEN`/`META_IG_USER_ID`) when none is given.
  */
 export class InstagramConnector implements PlatformConnector {
   readonly name = "instagram";
 
+  constructor(
+    private readonly connection?: InstagramConnection,
+    private readonly options?: { pollIntervalMs?: number },
+  ) {}
+
   isConfigured(): boolean {
+    if (this.connection) return Boolean(this.connection.accessToken && this.connection.igUserId);
     return Boolean(serverEnv.META_ACCESS_TOKEN && serverEnv.META_IG_USER_ID);
   }
 
-  async publish(_params: PublishContentParams): Promise<PublishResult> {
-    throw new Error("Instagram connector is not implemented yet.");
+  private credentials(): InstagramConnection {
+    if (this.connection) return this.connection;
+    if (!this.isConfigured()) throw new ConnectorError("instagram", "NOT_CONFIGURED", "Instagram 연결이 설정되지 않았습니다.");
+    return { accessToken: serverEnv.META_ACCESS_TOKEN!, igUserId: serverEnv.META_IG_USER_ID! };
+  }
+
+  /** Same fetch/classify shape as oauth.ts's fetchJson() — kept local since this class owns its own credentials. */
+  private async fetchJson<T>(url: URL, init: RequestInit, fallback: string): Promise<T> {
+    let response: Response;
+    try {
+      response = await fetch(url, { ...init, cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    } catch (cause) {
+      if (cause instanceof Error && cause.name === "TimeoutError") {
+        throw new ConnectorError("instagram", "TIMEOUT", `${fallback} (요청 시간 초과)`, { cause });
+      }
+      throw new ConnectorError("instagram", "NETWORK_FAILURE", `${fallback} (연결 실패)`, { cause });
+    }
+    if (!response.ok) {
+      throw new ConnectorError("instagram", classifyHttpStatus(response.status), `${fallback} (HTTP ${response.status})`);
+    }
+    return response.json() as Promise<T>;
+  }
+
+  private async createMediaContainer(imageUrl: string, caption: string): Promise<string> {
+    const { accessToken, igUserId } = this.credentials();
+    const url = new URL(`${GRAPH_API_BASE}/${igUserId}/media`);
+    url.searchParams.set("image_url", imageUrl);
+    url.searchParams.set("caption", caption);
+    url.searchParams.set("access_token", accessToken);
+    const result = await this.fetchJson<{ id?: string }>(url, { method: "POST" }, "Instagram 게시물 컨테이너를 생성하지 못했습니다.");
+    if (!result.id) throw new ConnectorError("instagram", "UPSTREAM_SERVER_ERROR", "Instagram 게시물 컨테이너 ID를 받지 못했습니다.");
+    return result.id;
+  }
+
+  /**
+   * Polls the container's `status_code` up to MEDIA_STATUS_MAX_ATTEMPTS
+   * times before giving up as `TIMEOUT` ("stuck") — a single static image
+   * is normally processed near-instantly, but Meta's API contract still
+   * requires checking before `media_publish` rather than assuming FINISHED.
+   */
+  private async waitForContainerReady(creationId: string): Promise<void> {
+    const { accessToken } = this.credentials();
+    const pollIntervalMs = this.options?.pollIntervalMs ?? MEDIA_STATUS_POLL_INTERVAL_MS;
+
+    for (let attempt = 0; attempt < MEDIA_STATUS_MAX_ATTEMPTS; attempt++) {
+      const url = new URL(`${GRAPH_API_BASE}/${creationId}`);
+      url.searchParams.set("fields", "status_code");
+      url.searchParams.set("access_token", accessToken);
+      const status = await this.fetchJson<{ status_code?: string }>(url, {}, "Instagram 게시물 처리 상태를 확인하지 못했습니다.");
+
+      if (status.status_code === "FINISHED") return;
+      if (status.status_code === "ERROR" || status.status_code === "EXPIRED") {
+        throw new ConnectorError("instagram", "UPSTREAM_SERVER_ERROR", `Instagram 게시물 처리에 실패했습니다 (${status.status_code}).`);
+      }
+      if (attempt < MEDIA_STATUS_MAX_ATTEMPTS - 1) await delay(pollIntervalMs);
+    }
+    throw new ConnectorError("instagram", "TIMEOUT", "Instagram 게시물 처리가 시간 내에 완료되지 않았습니다.");
+  }
+
+  private async publishMediaContainer(creationId: string): Promise<string> {
+    const { accessToken, igUserId } = this.credentials();
+    const url = new URL(`${GRAPH_API_BASE}/${igUserId}/media_publish`);
+    url.searchParams.set("creation_id", creationId);
+    url.searchParams.set("access_token", accessToken);
+    const result = await this.fetchJson<{ id?: string }>(url, { method: "POST" }, "Instagram 게시물을 발행하지 못했습니다.");
+    if (!result.id) throw new ConnectorError("instagram", "UPSTREAM_SERVER_ERROR", "Instagram 게시물 ID를 받지 못했습니다.");
+    return result.id;
+  }
+
+  /** create media container -> poll status -> media_publish. Single image only (no carousel/reels — Day 9 scope). */
+  async publish({ content, imageUrl }: PublishContentParams): Promise<PublishResult> {
+    if (!imageUrl) throw new ConnectorError("instagram", "INVALID_TARGET", "Instagram 게시물에는 이미지 URL이 필요합니다.");
+
+    const creationId = await this.createMediaContainer(imageUrl, content);
+    await this.waitForContainerReady(creationId);
+    const mediaId = await this.publishMediaContainer(creationId);
+    return { externalId: mediaId };
   }
 }

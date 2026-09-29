@@ -64,7 +64,7 @@ export type AutomationAvailability = "AVAILABLE" | "BETA" | "COMING_SOON";
  */
 export const AUTOMATION_AVAILABILITY: Record<AutomationTemplateSlug, AutomationAvailability> = {
   "blog-marketing": "AVAILABLE",
-  "instagram-marketing": "COMING_SOON",
+  "instagram-marketing": "BETA",
   newsletter: "COMING_SOON",
   "customer-support": "COMING_SOON",
   shorts: "COMING_SOON",

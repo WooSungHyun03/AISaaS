@@ -85,6 +85,11 @@ npm run dev
 1. Resend에서 발신 도메인을 추가하고(루트 도메인에 이미 다른 이메일 라우팅이 있다면 `mail.<domain>` 같은 서브도메인 사용), DKIM/SPF/DMARC 레코드를 DNS에 등록합니다.
 2. Sending 권한만 있는 API 키를 발급해 `RESEND_API_KEY`/`RESEND_FROM_EMAIL`에 등록합니다.
 
+### Instagram (게시물 자동 발행)
+
+1. 마이그레이션 적용만으로 충분합니다 — `0027_instagram_marketing_assets_bucket.sql`이 공개 Storage 버킷(`marketing-assets`)을 자동으로 생성하므로 별도 수동 설정이 없습니다.
+2. Meta 앱 자격 증명(`INSTAGRAM_APP_ID`/`INSTAGRAM_APP_SECRET`) 등록 및 콜백 URL 설정은 위 `.env.example`의 안내(`${NEXT_PUBLIC_SITE_URL}/api/integrations/instagram/callback`)를 따릅니다.
+
 ## Docker
 
 Vercel이 실제 배포 대상이지만, 이식 가능한 실행이 필요하면 Docker로도 빌드/실행할 수 있습니다.

@@ -1,17 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { createConnectionMock, getConnectionMock, updateConnectionStatusMock } = vi.hoisted(() => ({
+const { createConnectionMock, getConnectionMock, getConnectionSecretMock, updateConnectionStatusMock } = vi.hoisted(() => ({
   createConnectionMock: vi.fn(),
   getConnectionMock: vi.fn(),
+  getConnectionSecretMock: vi.fn(),
   updateConnectionStatusMock: vi.fn(),
 }));
 vi.mock("@/server/connectors/integrations", () => ({
   createConnection: createConnectionMock,
   getConnection: getConnectionMock,
+  getConnectionSecret: getConnectionSecretMock,
   updateConnectionStatus: updateConnectionStatusMock,
 }));
 
-const { completeInstagramOAuth, isMatchingOAuthState, parseInstagramOAuthCookie, startInstagramOAuth } = await import("./connect");
+const { completeInstagramOAuth, isMatchingOAuthState, loadInstagramConnector, parseInstagramOAuthCookie, startInstagramOAuth } = await import("./connect");
+const { InstagramConnector } = await import("./index");
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -146,5 +149,43 @@ describe("completeInstagramOAuth", () => {
     getConnectionMock.mockRejectedValueOnce(new Error("db unavailable"));
 
     await expect(completeInstagramOAuth(params, fakeAdmin)).resolves.toBe("error");
+  });
+});
+
+describe("loadInstagramConnector", () => {
+  it("returns null when the business has no connection", async () => {
+    getConnectionMock.mockResolvedValueOnce(null);
+    const connector = await loadInstagramConnector(fakeAdmin, "user-1", "biz-1");
+    expect(connector).toBeNull();
+    expect(getConnectionSecretMock).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the connection is not CONNECTED", async () => {
+    getConnectionMock.mockResolvedValueOnce({ status: "DISCONNECTED", metadata: { accountId: "ig-user-1" } });
+    const connector = await loadInstagramConnector(fakeAdmin, "user-1", "biz-1");
+    expect(connector).toBeNull();
+  });
+
+  it("returns null when the stored secret is missing", async () => {
+    getConnectionMock.mockResolvedValueOnce({ status: "CONNECTED", metadata: { accountId: "ig-user-1" } });
+    getConnectionSecretMock.mockResolvedValueOnce(null);
+    const connector = await loadInstagramConnector(fakeAdmin, "user-1", "biz-1");
+    expect(connector).toBeNull();
+  });
+
+  it("returns null when the stored metadata has no accountId (ig user id)", async () => {
+    getConnectionMock.mockResolvedValueOnce({ status: "CONNECTED", metadata: {} });
+    getConnectionSecretMock.mockResolvedValueOnce("decrypted-token");
+    const connector = await loadInstagramConnector(fakeAdmin, "user-1", "biz-1");
+    expect(connector).toBeNull();
+  });
+
+  it("builds a connector from the decrypted token when the connection is CONNECTED", async () => {
+    getConnectionMock.mockResolvedValueOnce({ status: "CONNECTED", metadata: { accountId: "ig-user-1" } });
+    getConnectionSecretMock.mockResolvedValueOnce("decrypted-token");
+
+    const connector = await loadInstagramConnector(fakeAdmin, "user-1", "biz-1");
+    expect(connector).toBeInstanceOf(InstagramConnector);
+    expect(connector!.isConfigured()).toBe(true);
   });
 });

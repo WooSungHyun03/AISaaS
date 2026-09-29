@@ -2,9 +2,10 @@ import "server-only";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createConnection, getConnection, updateConnectionStatus } from "@/server/connectors/integrations";
+import { createConnection, getConnection, getConnectionSecret, updateConnectionStatus } from "@/server/connectors/integrations";
 import type { Database } from "@/types/database.types";
 import { buildInstagramAuthorizationUrl, exchangeInstagramCode, getInstagramProfile, isProfessionalInstagramAccount } from "./oauth";
+import { InstagramConnector } from "./index";
 
 type DbClient = SupabaseClient<Database>;
 
@@ -81,6 +82,31 @@ export async function completeInstagramOAuth(
     await markInstagramConnectionError(admin, params.userId, params.businessId);
     return "error";
   }
+}
+
+/**
+ * Builds an `InstagramConnector` from a business's stored
+ * `integration_connections` row, decrypting the access token through Vault
+ * — mirrors `wordpress/connect.ts#loadWordPressConnector()` exactly. Returns
+ * null for any business without a usable CONNECTED Instagram connection;
+ * callers (Day 9's `instagramAutomationHandler`) decide whether that's a
+ * hard failure or a fallback to the legacy env-configured connector.
+ */
+export async function loadInstagramConnector(
+  admin: DbClient,
+  userId: string,
+  businessId: string,
+): Promise<InstagramConnector | null> {
+  const connection = await getConnection(admin, userId, businessId, "instagram");
+  if (!connection || connection.status !== "CONNECTED") return null;
+
+  const accessToken = await getConnectionSecret(admin, connection);
+  if (!accessToken) return null;
+
+  const metadata = (connection.metadata ?? {}) as { accountId?: string };
+  if (!metadata.accountId) return null;
+
+  return new InstagramConnector({ accessToken, igUserId: metadata.accountId });
 }
 
 async function markInstagramConnectionError(admin: DbClient, userId: string, businessId: string): Promise<void> {

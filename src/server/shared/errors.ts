@@ -106,6 +106,15 @@ export function describeAutomationRunError(message: string | null | undefined): 
     }
     return "WordPress에 글을 저장하지 못했습니다. 사이트 연결과 발행 설정을 확인해주세요.";
   }
+  if (error.includes("instagram")) {
+    if (/http 40[13]|authentication|access token|권한|연결/.test(error)) {
+      return "Instagram 인증 또는 게시 권한을 확인해주세요. 설정에서 연결 정보를 다시 확인할 수 있습니다.";
+    }
+    if (/시간이 초과|timeout|timed out/.test(error)) {
+      return "Instagram 게시물 처리가 늦어 실행이 중단되었습니다. 잠시 후 다시 시도해주세요.";
+    }
+    return "Instagram에 게시물을 올리지 못했습니다. 연결 상태와 게시 권한을 확인해주세요.";
+  }
   if (/api_key|api key|missing_api_key|authentication rejected/.test(error)) {
     return "AI 서비스 연결 정보가 올바르지 않습니다. 관리자에게 API 설정 확인을 요청해주세요.";
   }

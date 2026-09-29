@@ -3,6 +3,8 @@ export interface PublishContentParams {
   content: string;
   /** Short summary, when the platform supports one (e.g. WordPress post excerpt). */
   excerpt?: string;
+  /** Publicly fetchable image URL, when the platform requires one (e.g. Instagram's media container). */
+  imageUrl?: string;
 }
 
 export interface PublishResult {

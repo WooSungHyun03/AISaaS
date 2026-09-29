@@ -6,7 +6,7 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 9 — Instagram Publishing
+Day 10 — Toss Payments Billing Provider
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
@@ -17,9 +17,10 @@ Day 9 — Instagram Publishing
 - Day 6 — Production Scheduler (2026-09-26)
 - Day 7 — Newsletter Automation + Resend Connector (2026-09-27)
 - Day 8 — Instagram Professional Account Connection (2026-09-28)
+- Day 9 — Instagram Publishing (2026-09-29)
 
 ## Current
-- (none — Day 9 not started yet)
+- (none — Day 10 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -77,22 +78,34 @@ Day 9 — Instagram Publishing
   `INSTAGRAM_APP_ID`/`INSTAGRAM_APP_SECRET` and register the callback URL
   (`${NEXT_PUBLIC_SITE_URL}/api/integrations/instagram/callback`) in the
   Meta App Dashboard to smoke-test a real connection end to end.
+- META_ACCESS_TOKEN / META_IG_USER_ID / a connected Instagram Professional
+  account (same root cause as above, Day 9): the full container-create →
+  status-check → `media_publish` sequence
+  (`src/server/connectors/instagram/index.ts#InstagramConnector.publish()`)
+  and the `marketing-assets` Storage bucket upload
+  (`src/server/connectors/instagram/media.ts`) are only verified against a
+  mocked `fetch`/mocked Supabase Storage client, never against the real
+  Meta Graph API or a real Supabase project. Also unverified: whether
+  Meta's Content Publishing API accepts the marketing card as PNG in
+  practice — Meta's documented spec for `image_url` names JPEG; this Day
+  used PNG (built with pure Python `zlib`, no new image-generation
+  dependency per the roadmap's own constraint) since hand-rolling a JPEG
+  encoder without a library was judged out of proportion for a single
+  static asset. If a real smoke test shows Meta rejects PNG, re-encode the
+  same asset as JPEG (still no new dependency needed for a one-time
+  conversion) — everything else in the pipeline (Storage bucket, URL
+  construction, publish sequence) is format-agnostic and needs no change.
 
 ## Next
-- Day 9 — Instagram Publishing: see `DAILY_ROUTINE_PLAN.md` Day 9 for the
-  full spec (`InstagramAutomationHandler` generating caption + hashtags via
-  `AIProvider`, a single static marketing-card image uploaded to Supabase
-  Storage, container-create → status-check → `media_publish` sequence
-  wired into the standard `AutomationRunner`, media id persisted on
-  `automation_runs.output`, mocked HTTP tests for the full sequence and its
-  failure modes). `src/server/connectors/instagram/index.ts`'s
-  `InstagramConnector.publish()` is still the pre-existing placeholder that
-  throws "not implemented" — that's exactly what Day 9 replaces. When it
-  gets a `ConnectorError` (`AUTH_FAILED`/`PERMISSION_DENIED`) from a stored
-  token Meta has since revoked/expired, it should call Day 2's
-  `updateConnectionStatus(admin, connection.id, "ERROR")` — already
-  available, no new helper needed (see Day 8's ARCHITECTURE.md note on why
-  that wasn't added speculatively this Day).
+- Day 10 — Toss Payments Billing Provider: see `DAILY_ROUTINE_PLAN.md` Day
+  10 for the full spec (`TossBillingProvider` implementing the existing
+  `BillingProvider` interface, `BILLING_PROVIDER=mock|toss` env switch,
+  test-mode checkout/billing-key auth → callback → payment approval →
+  `subscriptions` row update, secrets stored server-side only per Day 2's
+  Vault pattern, `plans.ts` remaining the single source of truth for
+  pricing/limits, no live Toss merchant credentials in this environment so
+  everything is built against Toss's documented test-mode contract with
+  thorough mocked-HTTP tests).
 
 ## Daily History
 
@@ -781,6 +794,132 @@ Tests:
 Blocked External:
 - META_ACCESS_TOKEN / META_IG_USER_ID / INSTAGRAM_APP_ID /
   INSTAGRAM_APP_SECRET — see "Blocked External" above for detail.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-29 (Day 9)
+Completed Day 9 — Instagram Publishing:
+- Replaced `InstagramConnector.publish()`'s Day 8 placeholder
+  (`src/server/connectors/instagram/index.ts`, threw "not implemented
+  yet") with the real container-create → status-poll → `media_publish`
+  sequence against Meta's Graph API (`graph.instagram.com`, matching
+  Day 8's `oauth.ts`): `POST /{ig-user-id}/media` (image_url + caption) →
+  bounded polling of `GET /{creation-id}?fields=status_code` (max 5
+  attempts, never unbounded) until `FINISHED` → `POST
+  /{ig-user-id}/media_publish`. Every non-2xx response, timeout, and raw
+  network failure is classified through the shared `ConnectorError`/
+  `classifyHttpStatus()` taxonomy, same as WordPress/Resend/Instagram
+  OAuth. Constructor mirrors `WordPressConnector`'s shape: an explicit
+  `{ accessToken, igUserId }` (from a business's Vault-backed connection)
+  takes priority over the legacy env-configured single-account path
+  (`META_ACCESS_TOKEN`/`META_IG_USER_ID`).
+- New `src/server/connectors/instagram/connect.ts#loadInstagramConnector()`
+  — mirrors `wordpress/connect.ts#loadWordPressConnector()` exactly:
+  builds an `InstagramConnector` from a business's `integration_connections`
+  row (Day 2/8), decrypting the access token through Vault, returning null
+  for anything not usably `CONNECTED`.
+- **MVP media, taken literally from the roadmap's own wording ("a single
+  static marketing-card image"):** every Instagram post uses the exact
+  same image — per-post differentiation comes entirely from the
+  AI-generated caption/hashtags, not from per-post image rendering. This
+  was the only proportionate approach given the constraint (checked
+  `package.json` first, per project rule 2/3: no image-rendering/raster
+  library exists in this repo, and the roadmap explicitly forbids adding
+  one for this Day). Generated a 1080x1080 RGB PNG (indigo→teal brand
+  gradient) once with a standalone Python script using only stdlib
+  `zlib`/`struct` — not part of the app's dependency tree, the same as a
+  designer handing over a finished asset — and embedded it as a base64
+  string constant (`src/server/connectors/instagram/assets/
+  marketing-card.ts`) rather than reading it from disk at request time, so
+  it's guaranteed to be bundled regardless of a Netlify serverless
+  function's file-tracing behavior.
+- New `src/server/connectors/instagram/media.ts#ensureMarketingCardImageUrl()`
+  uploads that PNG to a new public Supabase Storage bucket
+  (`marketing-assets`, migration
+  `0027_instagram_marketing_assets_bucket.sql` — bucket insert + a
+  `storage.objects` RLS policy granting public `select` only, writes stay
+  service-role-only) so Meta's API can fetch it by URL; checks for the
+  object first and only uploads when missing.
+- `src/server/connectors/types.ts`: added an optional `imageUrl?: string`
+  to the shared `PublishContentParams` (additive, non-breaking for
+  WordPress/other implementers — same pattern Day 4 used for `excerpt`).
+- New `src/server/ai/prompts/instagram.ts`: `instagramCaptionSchema`
+  (`{ topic, caption, hashtags[] }`) + `buildInstagramCaptionPrompt()`,
+  following `prompts/blog.ts`'s business-context + "avoid these recent
+  topics" shape.
+- `src/server/automations/handlers/instagram.ts` rewritten around:
+  generate caption (regenerating once on a near-duplicate topic — same
+  bounded-once pattern as `blog.ts#generateTopic()`/`newsletter.ts`, never
+  a loop) → `ensureMarketingCardImageUrl()` → resolve a connector (shared
+  Day 8 connection, else the legacy env path) → `connector.publish()` →
+  persist `topic`/`caption`/`hashtags`/`imageUrl`/`mediaId` on
+  `automation_runs.output`. A publish failure classified
+  `AUTH_FAILED`/`PERMISSION_DENIED` marks the connection `EXPIRED`; any
+  other failure marks it `ERROR` — closing the item Day 8 explicitly
+  deferred ("detecting a *stored* token going bad needs a live Graph API
+  call, which nothing calls yet").
+- Wired into the same `AutomationRunner` core as every other handler — no
+  runner change needed; `result.output` already persists to
+  `automation_runs.output` generically.
+- Flipped `AUTOMATION_AVAILABILITY["instagram-marketing"]`
+  (`src/types/automation.ts`) from `COMING_SOON` to `BETA` — the same
+  const comment's own rule ("update this the same release a handler stops
+  throwing 'not implemented yet'"). No automation-creation wizard change
+  needed: the existing generic `AutomationForm` (already used by every
+  non-blog template) needs no per-automation config for this handler.
+- Added an Instagram branch to `describeAutomationRunError()`
+  (`src/server/shared/errors.ts`), mirroring the existing WordPress
+  branch, so a failed run surfaces a clear Korean message instead of the
+  generic fallback.
+- Carousel/Reels explicitly out of scope this Day, per the roadmap.
+- Documented the full design in `docs/ARCHITECTURE.md` (new "Instagram
+  Publishing (Day 9)" subsection under Automation Flow, plus a Storage
+  bucket line in "Database Overview") and added a short Instagram
+  deployment note to `README.md` (the bucket is created automatically by
+  the migration — no manual Supabase Storage setup needed).
+- Did not touch `src/app/`, `src/components/`, `src/server/directory/`,
+  or `src/server/customer-support/` — `AUTOMATION_AVAILABILITY` lives in
+  `src/types/automation.ts` (a shared domain type), and the existing
+  marketplace/automation-creation UI already reads it generically.
+
+Tests: `src/server/connectors/instagram/index.test.ts` (12 cases, new) —
+full success sequence, IN_PROGRESS polling to FINISHED, container-creation
+failure, an `ERROR` status_code, a stuck-IN_PROGRESS timeout after exactly
+the bounded attempt count, a `media_publish` failure, missing `imageUrl`,
+not-configured, timeout, network failure.
+`src/server/connectors/instagram/media.test.ts` (5 cases, new) — uploads
+when missing, skips upload when already present, classifies a list/
+upload/missing-public-URL failure.
+`src/server/connectors/instagram/connect.test.ts` gained a
+`loadInstagramConnector` suite (5 cases): no connection, not `CONNECTED`,
+missing secret, missing `accountId` metadata, and the success path.
+`src/server/automations/handlers/instagram.test.ts` (10 cases, new) —
+shared-connection and legacy-env-fallback paths, a `CONNECTED`-but-unusable
+connection marked `ERROR` without calling the AI/connector, an
+`AUTH_FAILED` failure marking the connection `EXPIRED` vs. any other
+failure marking it `ERROR`, the regenerate-once-on-near-duplicate pattern,
+and both a caption-generation failure and a marketing-card-upload failure
+propagating without ever calling `publish()`.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 311/311 (`npm test`, includes 32 new Day 9 tests: 12
+  connector + 5 media + 5 loadInstagramConnector + 10 handler)
+- build: pass (`npm run build`) — required a fresh `npm ci` (this
+  session's container had no `node_modules/` at all; installed cleanly
+  with 0 vulnerabilities) and the same local-only `.env.local` placeholder
+  values as prior Days to get past static page collection; not committed
+  (gitignored).
+
+Blocked External:
+- META_ACCESS_TOKEN / META_IG_USER_ID / a connected Instagram Professional
+  account, and whether Meta accepts the marketing card as PNG in
+  practice — see "Blocked External" above for detail.
 
 Commit:
 - (see git log for this file's commit)
