@@ -534,23 +534,91 @@ of one single-shot generation:
 
 ```
 User clicks "Upgrade" (src/app/(app)/billing/page.tsx)
-    │  Server Action: startCheckout(plan)
+    │  Server Action: startCheckout(plan)  — src/app/(app)/billing/actions.ts
     ▼
 BillingProvider.createCheckout()  — src/server/billing/provider.ts (interface)
-    │  mock: returns a URL to /billing/mock-checkout (in-app, no real PG)
+    │  creates a billing_checkout_sessions row (PENDING, opaque customerKey/orderId)
+    │  mock: redirects to in-app /billing/mock-checkout
+    │  toss:  redirects to in-app /billing/toss-checkout, which loads Toss's
+    │         hosted billing-auth widget (client key only, never the secret key)
     ▼
-User confirms → POST /api/billing/webhook  (same route a real PG would call)
-    │
+User authorizes a payment method
+    │  mock: confirms on the in-app page → POST /api/billing/mock/complete
+    │  toss: Toss redirects the browser to GET /api/billing/toss/success
+    │         (authKey + customerKey query params) or .../toss/fail (a
+    │         declined/canceled auth)
     ▼
-BillingProvider.handleWebhook() — updates subscriptions (plan, status, period)
-    │
+BillingProvider.completeCheckout() — the single trusted boundary both
+providers' callbacks funnel through:
+    1. claimCheckoutSession() — PENDING/FAILED → PROCESSING, atomically (a DB
+       partial update guarded by `.in("status", ["PENDING","FAILED"])`, so a
+       concurrent/duplicate callback for the same session gets
+       CHECKOUT_IN_PROGRESS instead of double-processing). Already-SUCCEEDED
+       is returned idempotently without calling the provider again.
+    2. toss only: issue a billing key from the one-time authKey (skipped if
+       a session already has one, e.g. a retried callback), charge it for
+       exactly `getPlanConfig(plan).priceMonthlyKrw` (plans.ts remains the
+       only source of price), and verify Toss's response echoes the same
+       orderId/amount/status=DONE before trusting it.
+    3. activateSubscription() — upserts `subscriptions` (ACTIVE, one-month
+       period) keyed by user_id; markCheckoutSucceeded()/markCheckoutFailed()
+       records the outcome on the session row.
     ▼
-Entitlements (src/server/billing/entitlements.ts) read the updated row on the
-next request — canCreateAutomation() / canExecuteAutomation() are always
-re-evaluated server-side, never cached client-side.
+Entitlements (src/server/billing/entitlements.ts) read the updated
+subscriptions row on the next request — canCreateAutomation() /
+canExecuteAutomation() are always re-evaluated server-side, never cached
+client-side.
 ```
 
-Swapping `BILLING_PROVIDER=mock` for a real PG later means implementing one more class against `BillingProvider` (`src/server/billing/providers/`) — `plans.ts`, `entitlements.ts`, and every call site stay untouched.
+**No plaintext PG callback ever reaches the client-visible flow.** `POST
+/api/billing/webhook` still exists as a provider-agnostic receiver
+(`getBillingProvider().handleWebhook()`), but neither provider currently
+uses it for the initial charge: `MockBillingProvider.handleWebhook()` throws
+(mock completion is only authenticated through `completeCheckout()`'s own
+user-session check, not an unsigned POST), and
+`TossBillingProvider.handleWebhook()` is a documented no-op — this
+integration completes entirely through the authenticated GET callback above,
+so there is no Toss webhook signature to verify yet. If a later Toss feature
+needs recurring/async billing events, signature verification belongs inside
+`TossBillingProvider.handleWebhook()`, using the raw `payload`/`headers`
+`HandleWebhookParams` already carries for exactly that purpose.
+
+**Cancellation vs. a genuine payment failure are distinguished explicitly**,
+not inferred from a generic error: Toss's failure redirect
+(`/api/billing/toss/fail`) checks the callback's `code` param —
+`PAY_PROCESS_CANCELED` calls `markCheckoutCanceled()` (status `CANCELED`),
+anything else calls `markCheckoutFailed()` (status `FAILED`) — so a
+dashboard or support flow reading `billing_checkout_sessions.status` later
+can tell "the user backed out" from "the charge was rejected" without
+parsing the error message.
+
+**Secrets never reach the client.** `TOSS_SECRET_KEY` is read only inside
+`src/server/billing/providers/toss.ts`/`toss-api.ts` (both `"server-only"`);
+the browser only ever sees `NEXT_PUBLIC_TOSS_CLIENT_KEY` (Toss's own
+public/client key, safe to expose by design — it authorizes the billing-auth
+widget, not a charge). `getTestKeys()` requires both configured keys to
+start with `test_`, and `createCheckout()`/`completeCheckout()` call it
+before doing anything else — a missing `TOSS_SECRET_KEY` throws
+synchronously with a "Missing required environment variable" message
+instead of silently falling back to the mock provider or a live key. The
+issued Toss `billingKey`/`paymentKey` are stored only in
+`billing_checkout_sessions` (`supabase/migrations/0017_billing_checkout_sessions.sql`),
+a table with RLS enabled and **no** authenticated-user policy at all — every
+read/write goes through the service-role client in
+`src/server/billing/checkout-sessions.ts`, the same "server-only table"
+pattern Day 2 established for `integration_connections` (Vault wasn't
+needed here since nothing outside billing server code ever needs to decrypt
+these values back out — they're write-once, read-only-by-the-same-flow).
+`subscriptions` (which a user *can* read via RLS) only ever stores the
+opaque `billing_checkout_sessions.id` as `provider_customer_id`/
+`provider_subscription_id`, never the real Toss identifiers.
+
+Swapping `BILLING_PROVIDER=mock` for `toss` is one env var
+(`src/lib/env/server.ts`'s `BILLING_PROVIDER` enum, picked in
+`src/server/billing/index.ts#getBillingProvider()`) — `plans.ts`,
+`entitlements.ts`, and every call site stay untouched. A third provider
+later means one more class against `BillingProvider`
+(`src/server/billing/providers/`), nothing else.
 
 ## Database Overview
 
@@ -563,6 +631,7 @@ See `supabase/migrations/` for the authoritative schema (RLS policies in `0012_r
 - `automation_runs` — one row per execution attempt (including a refused one); a partial unique index blocks a second QUEUED/RUNNING row per automation; `source` (`MANUAL` | `SCHEDULED`, `0016_automation_run_source.sql`) records how it was triggered.
 - `content_history` — generated output, used to avoid repeating topics.
 - `subscriptions` — one per user, drives entitlements.
+- `billing_checkout_sessions` — server-only checkout/payment state (opaque `customerKey`/`orderId`, and Toss's `billingKey`/`paymentKey` when applicable); no user-facing RLS policy at all. See "Billing Flow" above.
 - `usage` — one row per user per month (`YYYY-MM`, Asia/Seoul), incremented by the runner.
 - `setup_requests` — the "구축 대행" service-request queue.
 - `directory_tools` — AI Tool Directory catalog.
