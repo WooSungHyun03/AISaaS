@@ -23,7 +23,7 @@ export default async function MarketplacePage() {
       <div className="max-w-2xl">
         <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">Automations</p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Automation Marketplace</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600">반복되는 업무에 맞는 자동화를 살펴보세요. 각 카드에서 지금 설정할 수 있는 기능과 준비 중인 기능을 구분할 수 있습니다.</p>
+        <p className="mt-3 text-sm leading-6 text-slate-600">마케팅 콘텐츠에 맞는 자동화를 살펴보세요. 네이버 블로그용 원고 생성, Instagram 베타 게시와 준비 중인 기능을 카드 상태로 구분했습니다.</p>
       </div>
       <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs text-blue-900">
         <span><strong>Available</strong> · 지금 설정 가능</span>

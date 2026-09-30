@@ -1,56 +1,39 @@
 import {
-  Bell,
-  Bookmark,
-  BriefcaseBusiness,
+  Activity,
+  CalendarDays,
+  Camera,
   Check,
-  ChevronRight,
+  CircleAlert,
   CircleUserRound,
-  Code2,
   FileText,
-  FolderSearch2,
+  Globe2,
   LayoutGrid,
-  Mic2,
-  Newspaper,
-  Play,
-  Presentation,
-  Search,
   Sparkles,
+  TrendingUp,
   Video,
 } from "lucide-react";
 
-const DISCOVERY_CATEGORIES = [
-  { label: "PPT", icon: Presentation, color: "bg-orange-50 text-orange-600" },
-  { label: "프로그래밍", icon: Code2, color: "bg-blue-50 text-blue-600" },
-  { label: "영상 제작", icon: Video, color: "bg-violet-50 text-violet-600" },
-  { label: "Voice", icon: Mic2, color: "bg-emerald-50 text-emerald-600" },
+const DIAGNOSIS_ITEMS = [
+  { label: "사업 정보", detail: "6개 항목 입력", ready: true },
+  { label: "홈페이지", detail: "주소 등록 완료", ready: true },
+  { label: "Instagram", detail: "연결 필요", ready: false },
 ];
 
-const TRENDING_SKILLS = [
-  { rank: "01", name: "PPT 자동 생성", detail: "기획안을 발표 자료로", icon: Presentation, color: "bg-orange-50 text-orange-600" },
-  { rank: "02", name: "유튜브 쇼츠 스크립트", detail: "주제를 짧은 대본으로", icon: Video, color: "bg-violet-50 text-violet-600" },
-  { rank: "03", name: "데이터 분석", detail: "엑셀 데이터를 인사이트로", icon: LayoutGrid, color: "bg-emerald-50 text-emerald-600" },
+const CALENDAR_ITEMS = [
+  { day: "23", weekday: "수", title: "네이버 블로그 원고", time: "09:00", status: "활성" },
+  { day: "25", weekday: "금", title: "Instagram 콘텐츠", time: "14:00", status: "베타" },
+  { day: "28", weekday: "월", title: "네이버 블로그 원고", time: "09:00", status: "활성" },
 ];
 
-const TODAY_AUTOMATIONS = [
-  { time: "08:00", title: "블로그 글 자동 작성", detail: "AI가 새 글을 작성 중입니다", status: "완료", active: true },
-  { time: "10:00", title: "관심주제 기사 수집", detail: "오늘의 주요 기사 5개", status: "예정", active: false },
-  { time: "14:00", title: "채용공고 매칭 알림", detail: "새 공고를 탐색합니다", status: "예정", active: false },
-  { time: "18:00", title: "유튜브 쇼츠 제작", detail: "스크립트부터 영상까지", status: "예정", active: false },
-];
-
-function Sidebar({ active }: { active: "home" | "results" }) {
+function PreviewSidebar({ active }: { active: "diagnosis" | "results" }) {
   return (
     <aside className="hidden w-[116px] shrink-0 border-r border-stone-200 bg-stone-50/80 px-3 py-5 sm:block">
       <p className="px-2 text-sm font-black tracking-tight text-stone-950">AutoBiz</p>
       <div className="mt-8 space-y-2 text-[10px] font-semibold">
-        <p className={`flex items-center gap-2 rounded-lg px-2 py-2.5 ${active === "home" ? "bg-blue-600 text-white" : "text-stone-500"}`}>
-          <LayoutGrid className="h-3.5 w-3.5" /> 홈
-        </p>
-        <p className="flex items-center gap-2 px-2 py-2.5 text-stone-500"><Search className="h-3.5 w-3.5" /> AI 발견</p>
-        <p className="flex items-center gap-2 px-2 py-2.5 text-stone-500"><Sparkles className="h-3.5 w-3.5" /> 자동화</p>
-        <p className={`flex items-center gap-2 rounded-lg px-2 py-2.5 ${active === "results" ? "bg-blue-600 text-white" : "text-stone-500"}`}>
-          <FolderSearch2 className="h-3.5 w-3.5" /> 내 결과함
-        </p>
+        <p className="flex items-center gap-2 px-2 py-2.5 text-stone-500"><LayoutGrid className="h-3.5 w-3.5" /> 홈</p>
+        <p className={`flex items-center gap-2 rounded-lg px-2 py-2.5 ${active === "diagnosis" ? "bg-blue-600 text-white" : "text-stone-500"}`}><Activity className="h-3.5 w-3.5" /> 마케팅</p>
+        <p className="flex items-center gap-2 px-2 py-2.5 text-stone-500"><CalendarDays className="h-3.5 w-3.5" /> 캘린더</p>
+        <p className={`flex items-center gap-2 rounded-lg px-2 py-2.5 ${active === "results" ? "bg-blue-600 text-white" : "text-stone-500"}`}><Sparkles className="h-3.5 w-3.5" /> 결과함</p>
       </div>
     </aside>
   );
@@ -58,138 +41,89 @@ function Sidebar({ active }: { active: "home" | "results" }) {
 
 export function DailyBriefPreview() {
   return (
-    <div className="min-w-0 w-full max-w-full" aria-label="AutoBiz 오늘의 브리핑 제품 화면 예시">
+    <div className="min-w-0 w-full max-w-full" aria-label="AutoBiz 마케팅 진단과 캘린더 제품 화면 예시">
       <div className="overflow-hidden rounded-xl border border-stone-300 bg-white shadow-[0_24px_70px_-32px_rgba(20,35,70,0.35)]">
         <div className="flex h-11 items-center justify-between border-b border-stone-200 px-4">
           <span className="text-[11px] font-black tracking-tight sm:hidden">AutoBiz</span>
-          <span className="text-[10px] font-medium text-stone-400">화면 예시</span>
-          <div className="flex items-center gap-3 text-stone-500">
-            <Search className="h-3.5 w-3.5" />
-            <Bell className="h-3.5 w-3.5" />
-            <CircleUserRound className="h-4 w-4" />
-          </div>
+          <span className="text-[10px] font-medium text-stone-400">제품 화면 예시</span>
+          <CircleUserRound className="h-4 w-4 text-stone-500" />
         </div>
         <div className="flex min-h-[420px]">
-          <Sidebar active="home" />
+          <PreviewSidebar active="diagnosis" />
           <div className="min-w-0 flex-1 p-4 sm:p-5">
-            <div className="mb-5 flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-600">Daily workspace</p>
-                <h2 className="mt-1 text-lg font-black tracking-tight text-stone-950">오늘의 브리핑</h2>
-              </div>
-              <p className="text-[10px] text-stone-400">9월 21일 월요일</p>
+            <div className="mb-4">
+              <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-blue-600">Free marketing check</p>
+              <h2 className="mt-1 text-lg font-black tracking-tight text-stone-950">마케팅 진단</h2>
             </div>
-            <div className="grid gap-3 lg:grid-cols-[1.08fr_0.92fr]">
-              <div className="space-y-3">
-                <div className="rounded-xl border border-stone-200 p-3.5">
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-xs font-bold text-stone-900">무료로 먼저 탐색해보세요</p>
-                    <span className="text-[9px] font-bold text-blue-600">전체 보기</span>
-                  </div>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {DISCOVERY_CATEGORIES.map(({ label, icon: Icon, color }) => (
-                      <div key={label} className="flex min-w-0 flex-col items-center gap-1.5 rounded-lg bg-stone-50 px-1 py-2.5 text-center">
-                        <span className={`flex h-7 w-7 items-center justify-center rounded-md ${color}`}><Icon className="h-3.5 w-3.5" /></span>
-                        <span className="truncate text-[8px] font-semibold text-stone-600">{label}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-xl border border-stone-200 p-3.5">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-bold text-stone-900">지금 많이 찾는 AI 스킬</p>
-                    <span className="rounded-full bg-orange-50 px-2 py-1 text-[8px] font-bold text-orange-600">이번 주</span>
-                  </div>
-                  <div className="divide-y divide-stone-100">
-                    {TRENDING_SKILLS.map(({ rank, name, detail, icon: Icon, color }) => (
-                      <div key={rank} className="flex items-center gap-2.5 py-2">
-                        <span className="w-4 text-[9px] font-bold text-stone-300">{rank}</span>
-                        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${color}`}><Icon className="h-3.5 w-3.5" /></span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[10px] font-bold text-stone-800">{name}</p>
-                          <p className="truncate text-[8px] text-stone-400">{detail}</p>
-                        </div>
-                        <ChevronRight className="h-3 w-3 text-stone-300" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+            <div className="grid gap-3 lg:grid-cols-[0.8fr_1.2fr]">
+              <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+                <p className="text-[10px] font-bold text-stone-700">현재 마케팅 점수</p>
+                <p className="mt-2 text-3xl font-black text-stone-950">68<span className="ml-1 text-[10px] font-medium text-stone-400">/ 100</span></p>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white"><div className="h-full w-[68%] rounded-full bg-blue-600" /></div>
+                <p className="mt-3 text-[9px] leading-4 text-stone-500">핵심 채널을 조금 더 채워보세요.</p>
               </div>
               <div className="rounded-xl border border-stone-200 p-3.5">
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-xs font-bold text-stone-900">내 자동화 일정</p>
-                  <span className="text-[9px] font-bold text-blue-600">전체 보기</span>
-                </div>
-                <div className="relative space-y-4 before:absolute before:bottom-3 before:left-[46px] before:top-3 before:w-px before:bg-blue-100">
-                  {TODAY_AUTOMATIONS.map((item) => (
-                    <div key={item.time} className="relative grid grid-cols-[36px_12px_1fr] items-start gap-2">
-                      <span className="pt-0.5 text-[8px] font-medium text-stone-400">{item.time}</span>
-                      <span className={`relative z-10 mt-1 h-2.5 w-2.5 rounded-full border-2 border-white ${item.active ? "bg-blue-600" : "bg-orange-300"}`} />
-                      <div className="min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="truncate text-[10px] font-bold text-stone-800">{item.title}</p>
-                          <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[7px] font-bold ${item.active ? "bg-emerald-50 text-emerald-600" : "bg-stone-100 text-stone-400"}`}>{item.status}</span>
-                        </div>
-                        <p className="mt-0.5 truncate text-[8px] text-stone-400">{item.detail}</p>
-                      </div>
+                <p className="text-[10px] font-bold text-stone-900">채널 준비 상태</p>
+                <div className="mt-2 divide-y divide-stone-100">
+                  {DIAGNOSIS_ITEMS.map((item) => (
+                    <div key={item.label} className="flex items-center gap-2 py-2">
+                      <span className={`flex h-6 w-6 items-center justify-center rounded-full ${item.ready ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}>{item.ready ? <Check className="h-3 w-3" /> : <CircleAlert className="h-3 w-3" />}</span>
+                      <span className="min-w-0 flex-1"><span className="block text-[9px] font-bold text-stone-800">{item.label}</span><span className="block truncate text-[8px] text-stone-400">{item.detail}</span></span>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
+            <div className="mt-3 rounded-xl border border-stone-200 p-3.5">
+              <div className="flex items-center justify-between"><p className="text-[10px] font-bold text-stone-900">이번 주 마케팅 계획</p><span className="text-[8px] font-bold text-blue-600">캘린더 보기</span></div>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                {CALENDAR_ITEMS.map((item) => (
+                  <div key={`${item.day}-${item.title}`} className="rounded-lg bg-stone-50 p-2.5">
+                    <div className="flex items-center justify-between"><span className="text-[9px] font-black text-stone-700">{item.day}일 · {item.weekday}</span><span className="text-[7px] font-bold text-blue-600">{item.status}</span></div>
+                    <p className="mt-2 truncate text-[9px] font-bold text-stone-800">{item.title}</p>
+                    <p className="mt-0.5 text-[8px] text-stone-400">{item.time} KST</p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>
-      <p className="mt-3 text-center text-[10px] text-stone-400">제품 이해를 위한 예시 데이터입니다.</p>
+      <p className="mt-3 text-center text-[10px] text-stone-400">점수와 일정은 제품 이해를 위한 예시입니다.</p>
     </div>
   );
 }
 
 const RESULT_ITEMS = [
-  { title: "블로그 마케팅 글이 도착했어요", detail: "생성형 AI를 활용하는 7가지 실무 팁", time: "오늘 08:12", icon: FileText, color: "bg-blue-50 text-blue-600", status: "완료" },
-  { title: "관심주제 기사 수집", detail: "AI 산업 최신 동향 외 5건", time: "출시 예정", icon: Newspaper, color: "bg-emerald-50 text-emerald-600", status: "예정" },
-  { title: "새 채용공고 매칭", detail: "프로덕트 디자이너 외 8건", time: "출시 예정", icon: BriefcaseBusiness, color: "bg-orange-50 text-orange-600", status: "예정" },
-  { title: "유튜브 쇼츠 초안", detail: "60초 영상 구성과 내레이션", time: "출시 예정", icon: Play, color: "bg-violet-50 text-violet-600", status: "예정" },
+  { title: "네이버 블로그용 원고", detail: "우리 가게가 사랑받는 이유 5가지", time: "오늘 09:12", icon: FileText, color: "bg-blue-50 text-blue-600", status: "원고 완료" },
+  { title: "Instagram 콘텐츠", detail: "브랜드 캡션과 마케팅 카드", time: "오늘 14:05", icon: Camera, color: "bg-pink-50 text-pink-600", status: "게시 완료" },
+  { title: "광고 숏폼 제작", detail: "제작·예약·자동 게시", time: "출시 예정", icon: Video, color: "bg-violet-50 text-violet-600", status: "준비 중" },
+  { title: "성장 리포트", detail: "채널별 성과와 다음 액션", time: "출시 예정", icon: TrendingUp, color: "bg-emerald-50 text-emerald-600", status: "준비 중" },
 ];
 
 export function ResultsInboxPreview() {
   return (
-    <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-stone-300 bg-white shadow-[0_22px_60px_-36px_rgba(20,35,70,0.4)]" aria-label="AutoBiz 내 결과함 제품 화면 예시">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-stone-300 bg-white shadow-[0_22px_60px_-36px_rgba(20,35,70,0.4)]" aria-label="AutoBiz 마케팅 결과함 제품 화면 예시">
       <div className="flex min-h-[370px]">
-        <Sidebar active="results" />
+        <PreviewSidebar active="results" />
         <div className="min-w-0 flex-1 p-4 sm:p-5">
           <div className="mb-4 flex items-center justify-between">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-600">Results inbox</p>
-              <h3 className="mt-1 text-base font-black text-stone-950">내 결과함</h3>
-            </div>
-            <span className="rounded-full bg-blue-50 px-2 py-1 text-[8px] font-bold text-blue-600">새 결과 1</span>
+            <div><p className="text-[9px] font-bold uppercase tracking-[0.16em] text-blue-600">Marketing results</p><h3 className="mt-1 text-base font-black text-stone-950">콘텐츠 결과함</h3></div>
+            <span className="rounded-full bg-blue-50 px-2 py-1 text-[8px] font-bold text-blue-600">새 결과 2</span>
           </div>
           <div className="mb-3 flex gap-1.5 overflow-hidden">
-            {["전체 12", "블로그 4", "기사 3", "영상 2"].map((label, index) => (
-              <span key={label} className={`shrink-0 rounded-md px-2.5 py-1.5 text-[8px] font-semibold ${index === 0 ? "bg-blue-600 text-white" : "bg-stone-100 text-stone-500"}`}>{label}</span>
-            ))}
+            {["전체", "블로그", "SNS", "리포트"].map((label, index) => <span key={label} className={`shrink-0 rounded-md px-2.5 py-1.5 text-[8px] font-semibold ${index === 0 ? "bg-blue-600 text-white" : "bg-stone-100 text-stone-500"}`}>{label}</span>)}
           </div>
           <div className="divide-y divide-stone-100 rounded-xl border border-stone-200 px-3">
             {RESULT_ITEMS.map(({ title, detail, time, icon: Icon, color, status }) => (
               <div key={title} className="flex items-center gap-3 py-3">
                 <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${color}`}><Icon className="h-4 w-4" /></span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[10px] font-bold text-stone-800">{title}</p>
-                  <p className="mt-0.5 truncate text-[8px] text-stone-400">{detail}</p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="text-[8px] text-stone-400">{time}</p>
-                  <p className={`mt-1 inline-flex items-center gap-1 text-[8px] font-bold ${status === "완료" ? "text-emerald-600" : "text-stone-400"}`}>
-                    {status === "완료" ? <Check className="h-2.5 w-2.5" /> : null}{status}
-                  </p>
-                </div>
+                <div className="min-w-0 flex-1"><p className="truncate text-[10px] font-bold text-stone-800">{title}</p><p className="mt-0.5 truncate text-[8px] text-stone-400">{detail}</p></div>
+                <div className="shrink-0 text-right"><p className="text-[8px] text-stone-400">{time}</p><p className={`mt-1 text-[8px] font-bold ${status.includes("완료") ? "text-emerald-600" : "text-stone-400"}`}>{status}</p></div>
               </div>
             ))}
           </div>
-          <div className="mt-3 flex items-center gap-2 rounded-lg bg-stone-50 px-3 py-2 text-[8px] text-stone-400">
-            <Bookmark className="h-3 w-3" /> 결과물은 자동으로 모이고 실행 기록과 함께 보관됩니다.
-          </div>
+          <div className="mt-3 flex items-center gap-2 rounded-lg bg-stone-50 px-3 py-2 text-[8px] text-stone-400"><Globe2 className="h-3 w-3" /> 네이버 블로그는 게시 없이 복사 가능한 원고로 제공합니다.</div>
         </div>
       </div>
     </div>

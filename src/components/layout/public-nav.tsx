@@ -11,9 +11,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const NAV_LINKS = [
-  { href: "/#explore", label: "AI 발견" },
-  { href: "/directory", label: "AI 서비스" },
-  { href: "/#automations", label: "자동화" },
+  { href: "/marketing/diagnosis", label: "마케팅 진단" },
+  { href: "/marketing/calendar", label: "마케팅 캘린더" },
+  { href: "/#marketing-automation", label: "콘텐츠 자동화" },
   { href: "/pricing", label: "요금제" },
 ];
 

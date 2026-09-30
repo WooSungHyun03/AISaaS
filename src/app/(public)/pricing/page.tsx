@@ -23,7 +23,7 @@ import type { SubscriptionPlan } from "@/types/domain";
 const PLAN_COPY: Record<SubscriptionPlan, { description: string; eyebrow: string }> = {
   FREE: {
     eyebrow: "먼저 경험해보기",
-    description: "AI 도구를 탐색하고 블로그 자동화를 가볍게 체험해보세요.",
+    description: "사업 정보를 등록하고 마케팅 진단과 캘린더, 콘텐츠 자동화를 가볍게 체험해보세요.",
   },
   STARTER: {
     eyebrow: "꾸준히 자동화하기",
@@ -111,7 +111,7 @@ export default async function PricingPage() {
             무료로 시작하고,<br className="sm:hidden" /> 필요한 만큼 자동화하세요.
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-stone-600 sm:text-lg">
-            가격과 사용 한도는 실제 플랜 정책을 그대로 반영합니다. 무료로 시작한 뒤 현재 업무량에 맞춰 플랜을 선택하세요.
+            마케팅 진단과 캘린더로 시작한 뒤 콘텐츠 자동화 수와 월 실행량에 맞춰 플랜을 선택하세요. 가격과 한도는 실제 플랜 정책을 그대로 반영합니다.
           </p>
           <div className="mx-auto mt-8 flex max-w-2xl flex-wrap items-center justify-center gap-x-6 gap-y-3 border-y border-stone-200 py-4 text-sm text-stone-600">
             <span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-blue-600" /> 무료 플랜 제공</span>
