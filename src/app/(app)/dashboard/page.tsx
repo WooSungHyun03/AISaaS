@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowRight, CalendarClock, CircleCheck, CircleX, Clock3, PlayCircle, Store, Wrench, Zap } from "lucide-react";
+import { Activity, ArrowRight, CalendarClock, CircleCheck, CircleX, Clock3, PlayCircle, Store, Wrench, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPlanConfig } from "@/server/billing/plans";
 import { getPeriodKey, SERVICE_TIMEZONE, zonedTimeToUtc } from "@/lib/utils/date";
@@ -136,6 +136,23 @@ export default async function DashboardPage() {
           value={nextAutomation?.next_run_at ? <span className="block text-base leading-7">{dateFormatter.format(new Date(nextAutomation.next_run_at))}</span> : "예정 없음"}
           hint={nextAutomation ? <Link href={`/automations/${nextAutomation.id}`} className="hover:underline">{nextAutomation.name} →</Link> : "활성 자동화의 다음 실행 시각"}
         />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Link href="/marketing/diagnosis" className="group rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-blue-300 hover:bg-blue-50/30">
+          <div className="flex items-start gap-4">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><Activity className="size-5" /></span>
+            <div className="min-w-0 flex-1"><p className="font-semibold text-slate-950">마케팅 진단</p><p className="mt-1 text-sm leading-6 text-slate-500">사업 정보, 홈페이지, SNS 연결과 콘텐츠 운영 준비도를 확인하세요.</p></div>
+            <ArrowRight className="mt-1 size-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+          </div>
+        </Link>
+        <Link href="/marketing/calendar" className="group rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-blue-300 hover:bg-blue-50/30">
+          <div className="flex items-start gap-4">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><CalendarClock className="size-5" /></span>
+            <div className="min-w-0 flex-1"><p className="font-semibold text-slate-950">마케팅 캘린더</p><p className="mt-1 text-sm leading-6 text-slate-500">자동화 주기를 날짜별 콘텐츠 계획으로 확인하세요.</p></div>
+            <ArrowRight className="mt-1 size-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+          </div>
+        </Link>
       </div>
 
       <Card>

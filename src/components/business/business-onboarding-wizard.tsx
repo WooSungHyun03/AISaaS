@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, Building2, Check, MapPin, Palette, Sparkles, UsersRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, Check, Globe2, MapPin, Palette, Sparkles, UsersRound } from "lucide-react";
 import { createBusiness, type BusinessActionState } from "@/app/(app)/business/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ const STEPS = [
 const initialValues = {
   name: "",
   industry: "",
+  website: "",
   description: "",
   services: "",
   location: "",
@@ -77,7 +78,7 @@ export function BusinessOnboardingWizard({ destination }: { destination: string 
         </span>
         <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-950 md:text-4xl">사업 정보를 알려주세요</h1>
         <p className="mt-3 text-sm leading-6 text-muted-foreground md:text-base">
-          몇 가지 정보만 입력하면 자동화가 내 사업에 맞는 콘텐츠를 만들 수 있습니다. 선택 항목은 나중에 사업체 프로필에서 수정할 수 있어요.
+          사업 정보와 운영 중인 홈페이지를 등록하면 마케팅 준비도를 확인하고, 내 사업에 맞는 콘텐츠 자동화를 설정할 수 있습니다.
         </p>
       </div>
 
@@ -142,6 +143,14 @@ export function BusinessOnboardingWizard({ destination }: { destination: string 
                   <Label htmlFor="onboarding-industry">업종 <span className="font-normal text-slate-400">선택</span></Label>
                   <Input id="onboarding-industry" value={values.industry} onChange={(event) => setField("industry", event.target.value)} placeholder="예: 카페, 교육, 뷰티" maxLength={100} disabled={isPending} className="h-11" />
                   <p className="text-xs text-slate-500">업종을 입력하면 더 알맞은 표현을 제안하는 데 도움이 됩니다.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="onboarding-website">홈페이지 주소 <span className="font-normal text-slate-400">선택</span></Label>
+                  <div className="relative">
+                    <Globe2 className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                    <Input id="onboarding-website" type="url" value={values.website} onChange={(event) => setField("website", event.target.value)} placeholder="https://example.com" autoComplete="url" maxLength={500} disabled={isPending} className="h-11 pl-9" />
+                  </div>
+                  <p className="text-xs leading-5 text-slate-500">등록한 주소는 마케팅 진단의 채널 준비도에 반영됩니다. 외부 페이지 본문 자동 분석은 준비 중입니다.</p>
                 </div>
               </div>
             ) : null}

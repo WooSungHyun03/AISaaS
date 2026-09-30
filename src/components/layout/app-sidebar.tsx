@@ -7,6 +7,8 @@ import {
   Store,
   ListChecks,
   History,
+  Activity,
+  CalendarDays,
   Compass,
   BookOpen,
   Building2,
@@ -33,6 +35,13 @@ interface NavSection {
 const NAV_SECTIONS: NavSection[] = [
   {
     items: [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
+  },
+  {
+    label: "Marketing",
+    items: [
+      { href: "/marketing/diagnosis", label: "마케팅 진단", icon: Activity },
+      { href: "/marketing/calendar", label: "마케팅 캘린더", icon: CalendarDays },
+    ],
   },
   {
     label: "Automations",

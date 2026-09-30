@@ -15,6 +15,8 @@ import { signOut } from "@/app/(auth)/actions";
 
 const MOBILE_LINKS = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/marketing/diagnosis", label: "마케팅 진단" },
+  { href: "/marketing/calendar", label: "마케팅 캘린더" },
   { href: "/automations/marketplace", label: "Marketplace" },
   { href: "/automations", label: "My Automations" },
   { href: "/automations/history", label: "Execution History" },
