@@ -6,7 +6,7 @@ The full day-by-day spec (Definition of Done, rules, git procedure) lives in
 run.
 
 ## Current Day
-Day 10 — Toss Payments Billing Provider
+Day 11 — Usage, Entitlements & Cost Protection
 
 ## Completed
 - Day 1 — Production AI Provider (merged to `main` via PR #1, commit `cea124c`)
@@ -18,9 +18,10 @@ Day 10 — Toss Payments Billing Provider
 - Day 7 — Newsletter Automation + Resend Connector (2026-09-27)
 - Day 8 — Instagram Professional Account Connection (2026-09-28)
 - Day 9 — Instagram Publishing (2026-09-29)
+- Day 10 — Toss Payments Billing Provider (2026-09-30)
 
 ## Current
-- (none — Day 10 not started yet)
+- (none — Day 11 not started yet)
 
 ## Blocked External
 - OPENAI_API_KEY / GEMINI_API_KEY: not present in this environment. Real
@@ -95,17 +96,29 @@ Day 10 — Toss Payments Billing Provider
   same asset as JPEG (still no new dependency needed for a one-time
   conversion) — everything else in the pipeline (Storage bucket, URL
   construction, publish sequence) is format-agnostic and needs no change.
+- TOSS_SECRET_KEY / NEXT_PUBLIC_TOSS_CLIENT_KEY: no live Toss Payments test
+  merchant account exists in this environment. `TossBillingProvider`
+  (`src/server/billing/providers/toss.ts`) and the low-level
+  `TossApiClient` (`src/server/billing/providers/toss-api.ts`) — billing-key
+  issuance, billing-key charge, billing-key deletion — are only verified
+  against a mocked `fetch`/mocked `TossApiClient` (`toss-api.test.ts`,
+  `toss.test.ts`: success, a declined-card `TossApiError`, a payment/amount
+  verification mismatch, a customer-key mismatch, a network failure, and
+  the best-effort billing-key-delete-on-cancel path), never against Toss's
+  real test-mode API. Set both env vars with a Toss test key pair (from the
+  Toss Payments developer center) and complete a real `/billing/toss-checkout`
+  flow to smoke-test end to end; confirm the resulting `billing_checkout_sessions`
+  row shows `status = 'SUCCEEDED'` with a real `provider_payment_key`.
 
 ## Next
-- Day 10 — Toss Payments Billing Provider: see `DAILY_ROUTINE_PLAN.md` Day
-  10 for the full spec (`TossBillingProvider` implementing the existing
-  `BillingProvider` interface, `BILLING_PROVIDER=mock|toss` env switch,
-  test-mode checkout/billing-key auth → callback → payment approval →
-  `subscriptions` row update, secrets stored server-side only per Day 2's
-  Vault pattern, `plans.ts` remaining the single source of truth for
-  pricing/limits, no live Toss merchant credentials in this environment so
-  everything is built against Toss's documented test-mode contract with
-  thorough mocked-HTTP tests).
+- Day 11 — Usage, Entitlements & Cost Protection: see `DAILY_ROUTINE_PLAN.md`
+  Day 11 for the full spec (server-side enforcement of `canExecuteAutomation()`
+  before both automation execution and any AI call inside a handler,
+  exactly-once usage increment per attempt regardless of success/failure,
+  standard `LIMIT_EXCEEDED`/`FEATURE_NOT_AVAILABLE`/`PLAN_REQUIRED` error
+  codes returned before any connector/external API call, and month-boundary
+  correctness tests around `Asia/Seoul` `YYYY-MM` usage keys — including the
+  first run of a new month creating a fresh usage row rather than erroring).
 
 ## Daily History
 
@@ -920,6 +933,108 @@ Blocked External:
 - META_ACCESS_TOKEN / META_IG_USER_ID / a connected Instagram Professional
   account, and whether Meta accepts the marketing card as PNG in
   practice — see "Blocked External" above for detail.
+
+Commit:
+- (see git log for this file's commit)
+
+Push:
+- origin/main
+
+### 2026-09-30 (Day 10)
+Completed Day 10 — Toss Payments Billing Provider:
+- Found this Day's core implementation already on `main` from an earlier
+  teammate commit (`04b324d`, 2026-09-26, predating this routine's Day 10
+  turn) rather than starting from nothing — per this routine's rule 1,
+  verified it against the Day 10 Definition of Done instead of rebuilding
+  it: `TossBillingProvider` (`src/server/billing/providers/toss.ts`)
+  implementing the existing `BillingProvider` interface unchanged,
+  `BILLING_PROVIDER=mock|toss` (`src/lib/env/server.ts`, documented in
+  `.env.example`), a low-level `TossApiClient`
+  (`src/server/billing/providers/toss-api.ts`, Basic-auth + idempotency-key
+  headers, `TossApiError` classification), a server-only
+  `billing_checkout_sessions` table (`0017_billing_checkout_sessions.sql`,
+  RLS enabled with **no** authenticated-user policy — matching Day 2's
+  "read via RLS, write via service role" pattern used for
+  `integration_connections`) and its CRUD layer
+  (`src/server/billing/checkout-sessions.ts`), and the full UI-side flow
+  (`src/app/(app)/billing/`, `src/components/billing/`,
+  `src/app/api/billing/`) — all already using `plans.ts` for pricing,
+  already storing `billingKey`/`paymentKey` server-side only, and already
+  distinguishing a user cancellation (`PAY_PROCESS_CANCELED` →
+  `markCheckoutCanceled()`) from a genuine payment failure
+  (`markCheckoutFailed()`) in `/api/billing/toss/fail/route.ts`. All four
+  DoD criteria were substantively met by the existing code.
+- Found and closed the one real gap: **zero test coverage over the actual
+  billing flow.** Only the low-level `TossApiClient` had tests
+  (`toss-api.test.ts`, pre-existing) — `TossBillingProvider` itself,
+  `MockBillingProvider`, and the `checkout-sessions.ts` state-machine layer
+  they both sit on had none, despite being exactly the kind of
+  money-adjacent logic this Day's own DoD says must be "covered by tests."
+  Added three new suites instead of rebuilding the implementation:
+  - `src/server/billing/checkout-sessions.test.ts` (19 cases) — the
+    `claimCheckoutSession()` state machine (PENDING→PROCESSING, idempotent
+    on already-SUCCEEDED, rejects PROCESSING/CANCELED/expired, and a
+    concurrent-claim race caught at the DB `.in(status, [...])` update
+    itself), `activateSubscription()`'s upsert payload (one-month period,
+    only the opaque session id stored, never a raw Toss key),
+    `markCheckoutFailed()`'s 500-char message truncation, and
+    `getLatestSuccessfulCheckout()`.
+  - `src/server/billing/providers/toss.test.ts` (15 cases) — fail-closed
+    on a missing `TOSS_SECRET_KEY` (asserted it never falls back to mock
+    and never creates a session), the full success path (issues a billing
+    key, charges exactly `getPlanConfig(plan).priceMonthlyKrw`, verifies
+    Toss's response echoes the same orderId/amount/`status=DONE`,
+    activates the subscription), reusing an already-issued billing key on
+    a retried callback instead of re-issuing, a billing-key
+    customer-key mismatch, a payment-verification mismatch, a declined-card
+    `TossApiError` and a network failure each propagating and marking the
+    checkout `FAILED` with the provider's own code (never silently
+    retrying a possible charge), `cancelSubscription()`'s best-effort
+    billing-key deletion (cancels locally even when the Toss delete call
+    fails; skips the call entirely when no billing key was ever issued),
+    and `handleWebhook()`'s documented no-op.
+  - `src/server/billing/providers/mock.test.ts` (6 cases) — checkout
+    creation, idempotent-on-already-succeeded completion, a failed
+    `activateSubscription()` call marking the checkout failed and
+    rethrowing, cancellation, and `handleWebhook()` rejecting an
+    unauthenticated external call (mock completion is only reachable
+    through the authenticated `completeCheckout()` path).
+- Documentation was the other real gap: `docs/ARCHITECTURE.md`'s "Billing
+  Flow" section still described the pre-Toss design (a single generic
+  webhook-driven completion), which no longer matched either provider's
+  actual code path. Rewrote it to describe the real flow — `createCheckout()`
+  → provider-hosted/in-app auth → an authenticated GET callback (not the
+  webhook route) → `completeCheckout()`'s claim → issue/charge →
+  verify → activate sequence — and added explicit subsections on why
+  `handleWebhook()` is a no-op for both providers today, the
+  cancellation-vs-failure distinction, and where secrets live (server-only
+  env vars, `billing_checkout_sessions`' RLS-free table, never the client
+  bundle or the RLS-readable `subscriptions` row). Added
+  `billing_checkout_sessions` to the "Database Overview" table list, which
+  had been missing it since Day 2/Day 7's equivalent entries were added for
+  their own new tables.
+- Did not touch `src/app/`, `src/components/`, `src/server/directory/`, or
+  `src/server/customer-support/` — the existing UI flow needed no changes
+  to satisfy this Day's DoD.
+- Did not add a new migration: `0017_billing_checkout_sessions.sql`
+  already existed with correct RLS (reviewed, not modified) from the
+  earlier teammate commit; Day 10's safety rules only require a new
+  migration when schema actually needs to change.
+
+Tests:
+- lint: pass (`npm run lint`)
+- typecheck: pass (`npm run typecheck`)
+- test: pass, 351/351 (`npm test`, includes 40 new Day 10 tests: 19
+  checkout-sessions + 15 TossBillingProvider + 6 MockBillingProvider)
+- build: pass (`npm run build`) — required a fresh `npm ci` (this
+  session's container had no `node_modules/` at all; installed cleanly
+  with 0 vulnerabilities) and the same local-only `.env.local` placeholder
+  values as prior Days to get past static page collection; not committed
+  (gitignored).
+
+Blocked External:
+- TOSS_SECRET_KEY / NEXT_PUBLIC_TOSS_CLIENT_KEY — see "Blocked External"
+  above for detail.
 
 Commit:
 - (see git log for this file's commit)
