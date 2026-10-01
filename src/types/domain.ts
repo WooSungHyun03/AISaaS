@@ -11,6 +11,7 @@ export type AutomationTemplate = Database["public"]["Tables"]["automation_templa
 export type Automation = Database["public"]["Tables"]["automations"]["Row"];
 export type AutomationRun = Database["public"]["Tables"]["automation_runs"]["Row"];
 export type ContentHistory = Database["public"]["Tables"]["content_history"]["Row"];
+export type CalendarItem = Database["public"]["Tables"]["calendar_items"]["Row"];
 export type Subscription = Database["public"]["Tables"]["subscriptions"]["Row"];
 export type BillingCheckoutSession = Database["public"]["Tables"]["billing_checkout_sessions"]["Row"];
 export type Usage = Database["public"]["Tables"]["usage"]["Row"];
@@ -34,6 +35,8 @@ export type {
   IntegrationProvider,
   ConnectionStatus,
   SubscriberStatus,
+  CalendarPlatform,
+  CalendarItemStatus,
   Json,
 } from "./database.types";
 

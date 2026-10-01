@@ -92,3 +92,28 @@ describe("GeminiProvider", () => {
     expect(url).toContain("test-key");
   });
 });
+
+describe("MockAIProvider", () => {
+  it("returns deterministic structured items for a marketing calendar request", async () => {
+    const { MockAIProvider } = await import("./mock");
+    const provider = new MockAIProvider();
+
+    const result = await provider.generateText({
+      prompt: [
+        "AUTOBIZ_CALENDAR_PLAN_V1",
+        "PLAN_START=2026-03-01",
+        "PLAN_END=2026-03-14",
+        "WEEKS=2",
+        "BUSINESS_NAME=성장 카페",
+      ].join("\n"),
+    });
+    const items = JSON.parse(result.text) as Array<{ date: string; platform: string; topic: string }>;
+
+    expect(items).toHaveLength(6);
+    expect(items.map((item) => item.platform)).toEqual([
+      "blog", "instagram_reels", "youtube_shorts",
+      "blog", "instagram_reels", "youtube_shorts",
+    ]);
+    expect(items[0]).toMatchObject({ date: "2026-03-01", topic: expect.stringContaining("성장 카페") });
+  });
+});

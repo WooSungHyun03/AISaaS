@@ -18,6 +18,8 @@ export type IntegrationProvider = "wordpress" | "instagram" | "email" | "youtube
 export type ConnectionStatus = "CONNECTED" | "EXPIRED" | "ERROR" | "DISCONNECTED";
 export type BillingCheckoutStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "CANCELED";
 export type SubscriberStatus = "ACTIVE" | "UNSUBSCRIBED";
+export type CalendarPlatform = "blog" | "instagram_reels" | "youtube_shorts";
+export type CalendarItemStatus = "PLANNED" | "GENERATED" | "PUBLISHED" | "SKIPPED";
 
 export interface Database {
   public: {
@@ -182,6 +184,42 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["content_history"]["Insert"]>;
+        Relationships: [];
+      };
+      calendar_items: {
+        Row: {
+          id: string;
+          business_id: string;
+          planned_date: string;
+          platform: CalendarPlatform;
+          content_type: string;
+          topic: string;
+          goal: string;
+          summary: string;
+          cta: string;
+          status: CalendarItemStatus;
+          automation_id: string | null;
+          content_history_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          planned_date: string;
+          platform: CalendarPlatform;
+          content_type: string;
+          topic: string;
+          goal: string;
+          summary: string;
+          cta: string;
+          status?: CalendarItemStatus;
+          automation_id?: string | null;
+          content_history_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["calendar_items"]["Insert"]>;
         Relationships: [];
       };
       subscriptions: {
