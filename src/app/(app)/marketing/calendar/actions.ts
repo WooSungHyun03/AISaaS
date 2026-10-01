@@ -33,6 +33,7 @@ export async function generateMarketingCalendar(
 
   try {
     const result = await generateCalendarPlan(parsed.data.businessId, parsed.data.weeks);
+    revalidatePath("/calendar");
     revalidatePath("/marketing/calendar");
     return {
       status: "success",

@@ -24,6 +24,25 @@ import type { AutomationHandler, AutomationHandlerResult, AutomationRunContext }
  * single regeneration attempt (bounded — never a loop).
  */
 async function generateTopic(ctx: AutomationRunContext, config?: BlogAutomationConfig): Promise<BlogTopic> {
+  if (ctx.calendarItem) {
+    const base = buildBlogTopicPrompt(ctx.business, ctx.recentTopics, config);
+    const planned = await generateStructured({
+      system: [
+        base.system,
+        `This calendar item's fixed marketing goal: ${ctx.calendarItem.goal}`,
+        `Preferred closing CTA: ${ctx.calendarItem.cta}`,
+      ].join("\n"),
+      prompt: [
+        `Use exactly this planned topic without replacing it: "${ctx.calendarItem.topic}".`,
+        "Create one compelling Korean blog title for it.",
+        'Return JSON with exactly these fields: { "topic": "the exact supplied topic", "title": "catchy blog title" }',
+      ].join("\n"),
+      schema: blogTopicSchema,
+      maxTokens: 200,
+    });
+    return { topic: ctx.calendarItem.topic, title: planned.title };
+  }
+
   const first = await generateStructured({
     ...buildBlogTopicPrompt(ctx.business, ctx.recentTopics, config),
     schema: blogTopicSchema,
@@ -51,8 +70,16 @@ export const blogAutomationHandler: AutomationHandler = {
     const config = parsed.success ? (ctx.config as unknown as BlogAutomationConfig) : undefined;
 
     const topic = await generateTopic(ctx, config);
+    const bodyPrompt = buildBlogBodyPrompt(ctx.business, topic.topic, topic.title, config);
     const body = await generateStructured({
-      ...buildBlogBodyPrompt(ctx.business, topic.topic, topic.title, config),
+      ...bodyPrompt,
+      system: ctx.calendarItem
+        ? [
+          bodyPrompt.system,
+          `This calendar item's marketing goal: ${ctx.calendarItem.goal}`,
+          `End with a CTA aligned with: ${ctx.calendarItem.cta}`,
+        ].join("\n")
+        : bodyPrompt.system,
       schema: blogBodySchema,
       maxTokens: 1200,
     });

@@ -30,7 +30,7 @@ const FREE_FEATURES: Array<{ title: string; description: string; icon: LucideIco
     title: "마케팅 캘린더",
     description: "설정한 자동화 주기를 날짜별 콘텐츠 계획으로 확인하고, 활성·일시정지 상태를 함께 관리합니다.",
     icon: CalendarDays,
-    href: "/marketing/calendar",
+    href: "/calendar",
   },
 ];
 

@@ -12,7 +12,7 @@ import {
 
 const NAV_LINKS = [
   { href: "/marketing/diagnosis", label: "마케팅 진단" },
-  { href: "/marketing/calendar", label: "마케팅 캘린더" },
+  { href: "/calendar", label: "마케팅 캘린더" },
   { href: "/#marketing-automation", label: "콘텐츠 자동화" },
   { href: "/pricing", label: "요금제" },
 ];

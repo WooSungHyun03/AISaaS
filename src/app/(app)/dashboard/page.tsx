@@ -146,7 +146,7 @@ export default async function DashboardPage() {
             <ArrowRight className="mt-1 size-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </div>
         </Link>
-        <Link href="/marketing/calendar" className="group rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-blue-300 hover:bg-blue-50/30">
+        <Link href="/calendar" className="group rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-blue-300 hover:bg-blue-50/30">
           <div className="flex items-start gap-4">
             <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><CalendarClock className="size-5" /></span>
             <div className="min-w-0 flex-1"><p className="font-semibold text-slate-950">마케팅 캘린더</p><p className="mt-1 text-sm leading-6 text-slate-500">자동화 주기를 날짜별 콘텐츠 계획으로 확인하세요.</p></div>

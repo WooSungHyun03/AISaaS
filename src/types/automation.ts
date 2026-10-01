@@ -1,4 +1,4 @@
-import type { Automation, AutomationTemplateSlug, Business, Json } from "./domain";
+import type { Automation, AutomationTemplateSlug, Business, CalendarPlatform, Json } from "./domain";
 
 /**
  * Shape stored in `automations.schedule`. Kept intentionally simple —
@@ -30,6 +30,20 @@ export interface AutomationRunContext {
    * double-send — see src/server/automations/handlers/newsletter.ts.
    */
   runId: string;
+  /**
+   * A trusted calendar plan selected for this manual run. The Server Action
+   * re-reads it under RLS before the runner receives it; handlers must never
+   * accept topic/goal text directly from a client request.
+   */
+  calendarItem?: {
+    id: string;
+    businessId: string;
+    plannedDate: string;
+    platform: CalendarPlatform;
+    topic: string;
+    goal: string;
+    cta: string;
+  };
 }
 
 export interface AutomationHandlerResult {

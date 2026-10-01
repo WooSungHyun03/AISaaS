@@ -132,6 +132,32 @@ describe("blogAutomationHandler", () => {
     expect(generateStructuredMock).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a calendar topic fixed and injects its goal and CTA into generation", async () => {
+    generateStructuredMock
+      .mockResolvedValueOnce({ topic: "모델이 바꾸려 한 주제", title: "계획 주제에 맞춘 제목" })
+      .mockResolvedValueOnce(bodyResult);
+    const calendarItem = {
+      id: "calendar-1",
+      businessId: "biz-1",
+      plannedDate: "2026-10-01",
+      platform: "blog" as const,
+      topic: "직장인을 위한 아침 소금빵 활용법",
+      goal: "평일 오전 방문 늘리기",
+      cta: "출근길 예약하기",
+    };
+
+    const result = await blogAutomationHandler.run(baseContext({ calendarItem }));
+
+    expect(result.topic).toBe(calendarItem.topic);
+    expect(generateStructuredMock).toHaveBeenCalledTimes(2);
+    const titleRequest = generateStructuredMock.mock.calls[0][0] as { prompt: string; system: string };
+    const bodyRequest = generateStructuredMock.mock.calls[1][0] as { prompt: string; system: string };
+    expect(titleRequest.prompt).toContain(calendarItem.topic);
+    expect(titleRequest.system).toContain(calendarItem.goal);
+    expect(bodyRequest.system).toContain(calendarItem.goal);
+    expect(bodyRequest.system).toContain(calendarItem.cta);
+  });
+
   it("publishes to WordPress with the generated excerpt/bodyHtml when configured for it", async () => {
     generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
     publishMock.mockResolvedValueOnce({ externalUrl: "https://blog.example.com/post-1", externalId: "1" });

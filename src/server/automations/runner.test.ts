@@ -99,7 +99,7 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
       businesses: [{ data: BUSINESS, error: null }],
       automation_templates: [{ data: TEMPLATE, error: null }],
       automation_runs: [noInFlight(), { data: { id: "run-1" }, error: null }, { data: null, error: null }],
-      content_history: [{ data: [], error: null }, { data: null, error: null }],
+      content_history: [{ data: [], error: null }, { data: { id: "content-1" }, error: null }],
     });
     createAdminClientMock.mockReturnValue(admin);
     canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
@@ -107,7 +107,7 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
 
     const result = await runDueAutomation("auto-1");
 
-    expect(result).toEqual({ runId: "run-1", status: "SUCCESS", output: { ok: true } });
+    expect(result).toEqual({ runId: "run-1", status: "SUCCESS", output: { ok: true }, contentHistoryId: "content-1" });
     // The handler gets the automation_runs row id the runner already
     // inserted — newsletter.ts derives its per-recipient idempotency key
     // from this (see types/automation.ts#AutomationRunContext.runId).
@@ -139,6 +139,34 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
     expect(admin.updates.automations).toHaveLength(1);
     expect(admin.updates.automations[0]).not.toHaveProperty("next_run_at");
     expect(admin.updates.automations[0]).toMatchObject({ last_run_at: expect.any(String) });
+  });
+
+  it("passes a trusted calendar item to the handler and records it in the run input", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-calendar" }, error: null }, { data: null, error: null }],
+      content_history: [{ data: [], error: null }, { data: { id: "content-calendar" }, error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    const run = okHandler({ output: { ok: true }, content: "calendar body", topic: "계획 주제" });
+    const calendarItem = {
+      id: "calendar-1",
+      businessId: "biz-1",
+      plannedDate: "2026-10-01",
+      platform: "blog" as const,
+      topic: "계획 주제",
+      goal: "상담 전환",
+      cta: "상담 신청",
+    };
+
+    const result = await runAutomationNow("auto-1", { calendarItem });
+
+    expect(result).toMatchObject({ status: "SUCCESS", contentHistoryId: "content-calendar" });
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ calendarItem }));
+    expect(admin.inserts.automation_runs[0]).toMatchObject({ input: { calendarItem } });
   });
 
   it("advances next_run_at at run START, before the handler is ever called — not at completion", async () => {

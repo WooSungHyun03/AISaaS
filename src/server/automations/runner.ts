@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
 import { canExecuteAutomation, incrementUsage } from "@/server/billing/entitlements";
 import { isAppError } from "@/server/shared/errors";
-import type { AutomationSchedule } from "@/types/automation";
+import type { AutomationRunContext, AutomationSchedule } from "@/types/automation";
 import type { Automation, AutomationRunSource } from "@/types/domain";
 import type { Database } from "@/types/database.types";
 import { getHandler } from "./handlers";
@@ -16,7 +16,12 @@ export interface RunAutomationResult {
   runId: string;
   status: "SUCCESS" | "FAILED";
   output?: unknown;
+  contentHistoryId?: string;
   errorMessage?: string;
+}
+
+export interface RunAutomationOptions {
+  calendarItem?: AutomationRunContext["calendarItem"];
 }
 
 /**
@@ -74,7 +79,11 @@ async function recordRefusedRun(
  * Automation-type differences live entirely inside the handler
  * (src/server/automations/handlers/), never here.
  */
-async function executeAutomation(automationId: string, source: AutomationRunSource): Promise<RunAutomationResult> {
+async function executeAutomation(
+  automationId: string,
+  source: AutomationRunSource,
+  options: RunAutomationOptions = {},
+): Promise<RunAutomationResult> {
   const admin = createAdminClient();
   const advanceSchedule = source === "SCHEDULED";
 
@@ -94,6 +103,9 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
     .single();
   if (businessError || !business) {
     throw new Error(`Business not found for automation ${automationId}`);
+  }
+  if (options.calendarItem && options.calendarItem.businessId !== automation.business_id) {
+    throw new Error("Calendar item does not belong to this automation's business.");
   }
 
   const { data: template, error: templateError } = await admin
@@ -139,7 +151,13 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
 
   const { data: run, error: insertError } = await admin
     .from("automation_runs")
-    .insert({ automation_id: automationId, status: "RUNNING", source, started_at: new Date().toISOString() })
+    .insert({
+      automation_id: automationId,
+      status: "RUNNING",
+      source,
+      input: options.calendarItem ? { calendarItem: options.calendarItem } : {},
+      started_at: new Date().toISOString(),
+    })
     .select()
     .single();
   if (insertError || !run) {
@@ -175,6 +193,7 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
       config: (automation.config as Record<string, never>) ?? {},
       recentTopics: (recent ?? []).map((r) => r.topic).filter((topic): topic is string => Boolean(topic)),
       runId: run.id,
+      calendarItem: options.calendarItem,
     });
 
     // Every write below is checked for a returned `error` and thrown into
@@ -190,17 +209,25 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
       .eq("id", run.id);
     if (markSuccessError) throw markSuccessError;
 
+    let contentHistoryId: string | undefined;
     if (result.content) {
-      const { error: contentHistoryError } = await admin.from("content_history").insert({
-        business_id: automation.business_id,
-        automation_id: automationId,
-        content_type: result.contentType ?? template.slug,
-        title: result.title ?? null,
-        topic: result.topic ?? null,
-        content: result.content,
-        external_url: result.externalUrl ?? null,
-      });
-      if (contentHistoryError) throw contentHistoryError;
+      const { data: contentHistory, error: contentHistoryError } = await admin
+        .from("content_history")
+        .insert({
+          business_id: automation.business_id,
+          automation_id: automationId,
+          content_type: result.contentType ?? template.slug,
+          title: result.title ?? null,
+          topic: result.topic ?? null,
+          content: result.content,
+          external_url: result.externalUrl ?? null,
+        })
+        .select("id")
+        .single();
+      if (contentHistoryError || !contentHistory) {
+        throw contentHistoryError ?? new Error("Failed to persist generated content");
+      }
+      contentHistoryId = contentHistory.id;
     }
 
     const { error: lastRunAtError } = await admin
@@ -212,7 +239,7 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
     await incrementUsage(admin, automation.user_id, { automationRuns: 1, aiGenerations: 1 });
 
     logger.info("automation_run_success", { automationId, runId: run.id });
-    return { runId: run.id, status: "SUCCESS", output: result.output };
+    return { runId: run.id, status: "SUCCESS", output: result.output, contentHistoryId };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
@@ -254,8 +281,11 @@ async function executeAutomation(automationId: string, source: AutomationRunSour
 }
 
 /** Manual "Run Now" trigger from the dashboard — does not touch next_run_at. */
-export async function runAutomationNow(automationId: string): Promise<RunAutomationResult> {
-  return executeAutomation(automationId, "MANUAL");
+export async function runAutomationNow(
+  automationId: string,
+  options: RunAutomationOptions = {},
+): Promise<RunAutomationResult> {
+  return executeAutomation(automationId, "MANUAL", options);
 }
 
 /** Cron-triggered run for a due automation — advances next_run_at on success. */

@@ -40,7 +40,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Marketing",
     items: [
       { href: "/marketing/diagnosis", label: "마케팅 진단", icon: Activity },
-      { href: "/marketing/calendar", label: "마케팅 캘린더", icon: CalendarDays },
+      { href: "/calendar", label: "마케팅 캘린더", icon: CalendarDays },
     ],
   },
   {

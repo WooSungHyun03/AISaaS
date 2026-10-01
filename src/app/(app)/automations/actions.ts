@@ -278,9 +278,22 @@ export async function updateAutomation(automationId: string, formData: FormData)
 export interface RunNowState {
   error?: string;
   success?: boolean;
+  runId?: string;
+  contentHistoryId?: string;
 }
 
-export async function triggerRunNow(automationId: string): Promise<RunNowState> {
+function currentKstDate(): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+export async function triggerRunNow(automationId: string, calendarItemId?: string): Promise<RunNowState> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -289,7 +302,7 @@ export async function triggerRunNow(automationId: string): Promise<RunNowState> 
 
   const { data: automation } = await supabase
     .from("automations")
-    .select("id, user_id, template_id")
+    .select("id, user_id, business_id, template_id")
     .eq("id", automationId)
     .single();
   if (!automation || automation.user_id !== user.id) {
@@ -303,6 +316,41 @@ export async function triggerRunNow(automationId: string): Promise<RunNowState> 
     .single();
   if (!template) return { error: "자동화 템플릿을 찾을 수 없습니다." };
 
+  let calendarItem;
+  if (calendarItemId) {
+    const { data: selectedItem, error: calendarError } = await supabase
+      .from("calendar_items")
+      .select("id,business_id,planned_date,platform,topic,goal,cta,status")
+      .eq("id", calendarItemId)
+      .maybeSingle();
+    if (calendarError || !selectedItem || selectedItem.business_id !== automation.business_id) {
+      return { error: "캘린더 항목을 찾을 수 없습니다." };
+    }
+    if (selectedItem.status !== "PLANNED") return { error: "이미 생성되었거나 건너뛴 캘린더 항목입니다." };
+    if (selectedItem.planned_date !== currentKstDate()) return { error: "예정일이 오늘인 콘텐츠만 바로 생성할 수 있습니다." };
+
+    const expectedTemplate = selectedItem.platform === "blog"
+      ? "blog-marketing"
+      : selectedItem.platform === "youtube_shorts"
+        ? "shorts"
+        : null;
+    if (!expectedTemplate) return { error: "이 채널은 아직 캘린더에서 바로 생성할 수 없습니다." };
+    if (expectedTemplate === "shorts" && AUTOMATION_AVAILABILITY.shorts !== "AVAILABLE") {
+      return { error: "YouTube Shorts 자동화는 Coming Soon입니다." };
+    }
+    if (template.slug !== expectedTemplate) return { error: "캘린더 채널과 자동화 유형이 일치하지 않습니다." };
+
+    calendarItem = {
+      id: selectedItem.id,
+      businessId: selectedItem.business_id,
+      plannedDate: selectedItem.planned_date,
+      platform: selectedItem.platform,
+      topic: selectedItem.topic,
+      goal: selectedItem.goal,
+      cta: selectedItem.cta,
+    };
+  }
+
   const entitlement = await canExecuteAutomation(supabase, user.id, template.slug);
   if (!entitlement.allowed) {
     return { error: entitlement.reason };
@@ -310,18 +358,41 @@ export async function triggerRunNow(automationId: string): Promise<RunNowState> 
 
   let result;
   try {
-    result = await runAutomationNow(automationId);
+    result = await runAutomationNow(automationId, { calendarItem });
   } catch (error) {
     if (error instanceof Error && (error.message.includes("already has a run") || error.message.includes("automation_runs_one_active_run"))) {
       return { error: "이미 실행 중입니다. 완료 후 다시 시도해주세요." };
     }
     return { error: "실행을 시작하지 못했습니다. 잠시 후 다시 시도해주세요." };
   }
-  revalidatePath(`/automations/${automationId}`);
-  revalidatePath("/dashboard");
-
   if (result.status === "FAILED") {
     return { error: describeAutomationRunError(result.errorMessage) };
   }
-  return { success: true };
+
+  if (calendarItem) {
+    if (!result.contentHistoryId) {
+      return { error: "콘텐츠는 실행되었지만 생성 결과를 저장하지 못했습니다. 실행 내역을 확인해주세요." };
+    }
+    const { data: updatedItem, error: updateError } = await supabase
+      .from("calendar_items")
+      .update({
+        status: "GENERATED",
+        automation_id: automationId,
+        content_history_id: result.contentHistoryId,
+      })
+      .eq("id", calendarItem.id)
+      .eq("business_id", automation.business_id)
+      .eq("status", "PLANNED")
+      .select("id")
+      .maybeSingle();
+    if (updateError || !updatedItem) {
+      return { error: "콘텐츠는 생성되었지만 캘린더 상태를 연결하지 못했습니다. 실행 내역을 확인해주세요." };
+    }
+  }
+
+  revalidatePath(`/automations/${automationId}`);
+  revalidatePath("/dashboard");
+  revalidatePath("/calendar");
+  revalidatePath("/marketing/calendar");
+  return { success: true, runId: result.runId, contentHistoryId: result.contentHistoryId };
 }

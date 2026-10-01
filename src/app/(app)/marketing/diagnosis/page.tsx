@@ -188,7 +188,7 @@ export default async function MarketingDiagnosisPage({
             </div>
             <div className="mt-5 flex flex-wrap gap-2">
               <Button asChild size="sm" variant="outline" className="bg-white"><Link href="/business"><Building2 className="size-4" /> 정보 직접 수정</Link></Button>
-              <Button asChild size="sm" className="bg-blue-600 text-white hover:bg-blue-700"><Link href="/marketing/calendar"><CalendarDays className="size-4" /> 캘린더 보기</Link></Button>
+              <Button asChild size="sm" className="bg-blue-600 text-white hover:bg-blue-700"><Link href="/calendar"><CalendarDays className="size-4" /> 캘린더 보기</Link></Button>
             </div>
           </div>
         </CardContent>
