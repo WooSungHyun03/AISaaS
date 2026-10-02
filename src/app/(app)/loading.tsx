@@ -1,5 +1,5 @@
-import { PageLoading } from "@/components/ui/page-state";
+import { BrandLoading } from "@/components/ui/page-state";
 
 export default function AppLoading() {
-  return <PageLoading />;
+  return <BrandLoading />;
 }

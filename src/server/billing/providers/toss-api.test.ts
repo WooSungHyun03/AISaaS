@@ -35,7 +35,7 @@ describe("TossApiClient", () => {
       customerKey: "cus_123",
       amount: 19000,
       orderId: "order_123456",
-      orderName: "AutoBiz Starter 월 구독",
+      orderName: "Easy Marketing Starter 월 구독",
       idempotencyKey: "session-charge",
     });
 
@@ -44,7 +44,7 @@ describe("TossApiClient", () => {
       customerKey: "cus_123",
       amount: 19000,
       orderId: "order_123456",
-      orderName: "AutoBiz Starter 월 구독",
+      orderName: "Easy Marketing Starter 월 구독",
     });
     expect(init.headers).toEqual(expect.objectContaining({ "Idempotency-Key": "session-charge" }));
   });
@@ -69,7 +69,7 @@ describe("TossApiClient", () => {
       customerKey: "cus_123",
       amount: 49000,
       orderId: "order_123456",
-      orderName: "AutoBiz Pro 월 구독",
+      orderName: "Easy Marketing Pro 월 구독",
       idempotencyKey: "session-charge",
     }).catch((caught) => caught);
 

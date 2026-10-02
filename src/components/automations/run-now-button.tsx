@@ -21,9 +21,9 @@ export function RunNowButton({ automationId, hasInFlightRun = false }: { automat
       try {
         const result = await triggerRunNow(automationId);
         if (result.error) toast.error(result.error);
-        else toast.success("자동화가 실행되었습니다. 아래에서 생성 결과를 확인하세요.");
+        else toast.success("콘텐츠를 만들었어요. 아래에서 결과를 확인하세요.");
       } catch {
-        toast.error("실행 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.");
+        toast.error("만들기 상태를 확인하지 못했어요. 잠시 후 다시 시도해주세요.");
       } finally {
         router.refresh();
       }
@@ -31,8 +31,8 @@ export function RunNowButton({ automationId, hasInFlightRun = false }: { automat
   };
 
   return (
-    <Button onClick={handleClick} disabled={isPending || hasInFlightRun}>
-      {isPending || hasInFlightRun ? "실행 중..." : "Run Now"}
+    <Button variant="spark" onClick={handleClick} disabled={isPending || hasInFlightRun}>
+      {isPending || hasInFlightRun ? "만드는 중…" : "지금 만들기"}
     </Button>
   );
 }

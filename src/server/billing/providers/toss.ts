@@ -84,7 +84,7 @@ export class TossBillingProvider implements BillingProvider {
         customerKey: session.customer_key,
         amount: plan.priceMonthlyKrw,
         orderId: session.order_id,
-        orderName: `AutoBiz ${plan.name} 월 구독`,
+        orderName: `Easy Marketing ${plan.name} 월 구독`,
         idempotencyKey: `${session.id}-charge`,
       });
 

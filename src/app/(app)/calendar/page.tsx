@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft, ArrowRight, Building2, CalendarDays, CheckCircle2, CircleAlert, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, CircleAlert } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getMarketingCalendarPageData } from "@/server/marketing/calendar";
 import { CalendarItemDialog } from "@/components/marketing/calendar-item-dialog";
 import { CalendarPlanGenerator } from "@/components/marketing/calendar-plan-generator";
+import { StatCard, StatGroup } from "@/components/dashboard/stat-card";
+import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/page-state";
 import type { CalendarItem } from "@/types/domain";
 
@@ -79,10 +80,10 @@ export default async function CalendarPage({
       <div className="mx-auto max-w-6xl space-y-8">
         <PageHeading />
         <EmptyState
-          icon={<Building2 className="size-5" />}
-          title="계획을 만들 사업체가 없습니다"
-          description="업체명과 기본 마케팅 정보를 등록한 뒤 진단을 완료하면 2~4주 콘텐츠 계획을 만들 수 있습니다."
-          action={<Button asChild><Link href="/onboarding">사업 정보 입력하기</Link></Button>}
+          mascot="guide"
+          title="계획을 세울 가게가 아직 없어요"
+          description="가게 정보를 등록하고 마케팅 진단을 받으면 2~4주치 콘텐츠 계획을 만들어드려요."
+          action={<Button asChild><Link href="/onboarding">가게 정보 입력하기</Link></Button>}
         />
       </div>
     );
@@ -95,8 +96,9 @@ export default async function CalendarPage({
     itemsByDay.set(day, [...(itemsByDay.get(day) ?? []), item]);
   }
   const leadingDays = (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7;
-  const publishedCount = data.items.filter((item) => item.status === "PUBLISHED").length;
+  const doneCount = data.items.filter((item) => item.status === "GENERATED" || item.status === "PUBLISHED").length;
   const today = currentKstDate();
+  const todayItems = data.items.filter((item) => item.planned_date === today && item.status === "PLANNED");
   const todayCount = data.items.filter((item) => item.planned_date === today).length;
   const monthTitle = new Intl.DateTimeFormat("ko-KR", {
     year: "numeric",
@@ -112,118 +114,121 @@ export default async function CalendarPage({
         <nav className="flex flex-wrap gap-2" aria-label="캘린더 사업체 선택">
           {data.businesses.map((business) => (
             <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness.id ? "default" : "outline"}>
-              <Link href={calendarHref(monthValue, business.id)}>{business.name}</Link>
+              <Link href={calendarHref(monthValue, business.id)} aria-current={business.id === selectedBusiness.id ? "page" : undefined}>{business.name}</Link>
             </Button>
           ))}
         </nav>
       ) : null}
 
-      <Card className="border-blue-200 bg-blue-50/60 ring-0">
-        <CardContent className="flex flex-col gap-5 pt-6 lg:flex-row lg:items-center lg:justify-between">
+      <section aria-labelledby="plan-generator-title" className="rounded-2xl bg-brand-soft px-6 py-6 sm:px-8">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
-            <div className="flex items-center gap-2 text-sm font-semibold text-blue-800"><Sparkles className="size-4" /> AI 자동 계획</div>
-            <h2 className="mt-2 text-xl font-semibold text-slate-950">{selectedBusiness.name}의 다음 콘텐츠를 계획하세요</h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              저장된 Business Profile과 최신 마케팅 진단을 바탕으로 블로그, 릴스, 쇼츠 주제와 CTA를 한 번에 만듭니다.
+            <h2 id="plan-generator-title" className="text-xl font-extrabold tracking-[-0.03em]">{selectedBusiness.name}의 다음 콘텐츠 계획 만들기</h2>
+            <p className="mt-2 text-[15px] leading-7 text-muted-foreground">
+              사업 정보와 최근 마케팅 진단을 바탕으로 블로그, 릴스, 쇼츠 주제와 행동 유도 문구(CTA)를 한 번에 짜드려요.
             </p>
             {!data.hasDiagnosis ? (
-              <p className="mt-3 flex items-start gap-2 text-sm font-medium text-amber-800" role="status">
-                <CircleAlert className="mt-0.5 size-4 shrink-0" /> 먼저 최신 마케팅 진단 결과가 필요합니다.
-                <Link className="underline underline-offset-4" href={`/marketing/diagnosis?business=${selectedBusiness.id}`}>진단하러 가기</Link>
+              <p className="mt-3 flex items-start gap-2 text-sm font-semibold text-warning" role="status">
+                <CircleAlert className="mt-1 size-4 shrink-0" aria-hidden="true" />
+                <span>먼저 마케팅 진단이 필요해요. <Link className="underline underline-offset-4" href={`/marketing/diagnosis?business=${selectedBusiness.id}`}>진단하러 가기</Link></span>
               </p>
             ) : (
-              <p className="mt-3 flex items-center gap-2 text-sm font-medium text-emerald-700"><CheckCircle2 className="size-4" /> 최신 진단 결과를 사용할 준비가 됐습니다.</p>
+              <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-success"><CheckCircle2 className="size-4" aria-hidden="true" /> 진단 결과를 바탕으로 계획을 만들 수 있어요.</p>
             )}
           </div>
           <CalendarPlanGenerator businessId={selectedBusiness.id} disabled={!data.hasDiagnosis} />
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <SummaryCard label="이번 달 콘텐츠 계획" value={`${data.items.length}건`} />
-        <SummaryCard label="오늘의 콘텐츠" value={`${todayCount}건`} />
-        <SummaryCard label="게시 완료" value={`${publishedCount}건`} />
-      </div>
+      <StatGroup columns={3}>
+        <StatCard label="이번 달 계획" value={<>{data.items.length}<span className="ml-1 text-sm font-semibold text-muted-foreground">건</span></>} />
+        <StatCard label="오늘 할 콘텐츠" value={<>{todayCount}<span className="ml-1 text-sm font-semibold text-muted-foreground">건</span></>} />
+        <StatCard label="제작 완료" value={<>{doneCount}<span className="ml-1 text-sm font-semibold text-muted-foreground">건</span></>} />
+      </StatGroup>
 
-      <Card className="overflow-hidden ring-0">
-        <CardHeader className="flex flex-row items-center justify-between gap-4 border-b border-slate-100">
-          <Button asChild variant="outline" size="icon" aria-label="이전 달">
-            <Link href={calendarHref(shiftMonth(year, month, -1), selectedBusiness.id)}><ArrowLeft className="size-4" /></Link>
+      {todayItems.length > 0 ? (
+        <section aria-labelledby="today-title">
+          <h2 id="today-title" className="text-lg font-bold tracking-[-0.02em]">오늘 만들 콘텐츠</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {todayItems.map((item) => <CalendarItemDialog key={item.id} item={item} isToday variant="card" />)}
+          </div>
+        </section>
+      ) : null}
+
+      <section aria-labelledby="month-title" className="overflow-hidden rounded-2xl border border-border bg-card">
+        <div className="flex items-center justify-between gap-4 border-b border-border px-4 py-3 sm:px-6">
+          <Button asChild variant="outline" size="icon-sm" aria-label="이전 달">
+            <Link href={calendarHref(shiftMonth(year, month, -1), selectedBusiness.id)}><ArrowLeft aria-hidden="true" /></Link>
           </Button>
-          <div className="text-center"><CardTitle className="text-lg">{monthTitle}</CardTitle><p className="mt-1 text-xs text-slate-500">{selectedBusiness.name}</p></div>
-          <Button asChild variant="outline" size="icon" aria-label="다음 달">
-            <Link href={calendarHref(shiftMonth(year, month, 1), selectedBusiness.id)}><ArrowRight className="size-4" /></Link>
+          <h2 id="month-title" className="text-lg font-extrabold tracking-[-0.03em]">{monthTitle}</h2>
+          <Button asChild variant="outline" size="icon-sm" aria-label="다음 달">
+            <Link href={calendarHref(shiftMonth(year, month, 1), selectedBusiness.id)}><ArrowRight aria-hidden="true" /></Link>
           </Button>
-        </CardHeader>
-        <CardContent className="p-0">
-          {data.items.length === 0 ? (
-            <EmptyState
-              icon={<CalendarDays className="size-5" />}
-              title={`${monthTitle} 계획이 없습니다`}
-              description={data.hasDiagnosis ? "위에서 기간을 선택하고 자동 계획 생성을 누르면 날짜별 콘텐츠 계획이 저장됩니다." : "마케팅 진단을 완료한 뒤 자동 계획을 생성할 수 있습니다."}
-              className="m-5"
-            />
-          ) : (
-            <>
-              <div className="hidden md:block">
-                <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50">
-                  {WEEKDAYS.map((weekday) => <div key={weekday} className="px-2 py-3 text-center text-xs font-semibold text-slate-500">{weekday}</div>)}
-                </div>
-                <div className="grid grid-cols-7">
-                  {Array.from({ length: leadingDays }, (_, index) => <div key={`empty-${index}`} className="min-h-36 border-r border-b border-slate-100 bg-slate-50/40" />)}
-                  {Array.from({ length: daysInMonth }, (_, index) => index + 1).map((day) => (
-                    <CalendarDay key={day} day={day} items={itemsByDay.get(day) ?? []} today={today} />
-                  ))}
-                </div>
+        </div>
+        {data.items.length === 0 ? (
+          <EmptyState
+            className="m-5"
+            mascot="present"
+            title={`${monthTitle}에는 계획이 없어요`}
+            description={data.hasDiagnosis ? "위에서 기간을 고르고 ‘계획 만들기’를 누르면 날짜별 콘텐츠 계획이 만들어져요." : "마케팅 진단을 먼저 받으면 계획을 만들 수 있어요."}
+          />
+        ) : (
+          <>
+            <div className="hidden xl:block">
+              <div className="grid grid-cols-7 border-b border-border bg-muted/50">
+                {WEEKDAYS.map((weekday, index) => (
+                  <div key={weekday} className={`px-2 py-2.5 text-center text-[13px] font-semibold ${index >= 5 ? "text-destructive/80" : "text-muted-foreground"}`}>{weekday}</div>
+                ))}
               </div>
+              <div className="grid grid-cols-7">
+                {Array.from({ length: leadingDays }, (_, index) => <div key={`empty-${index}`} className="min-h-32 border-b border-r border-border bg-muted/30" />)}
+                {Array.from({ length: daysInMonth }, (_, index) => index + 1).map((day) => (
+                  <CalendarDay key={day} day={day} dateKey={`${monthValue}-${String(day).padStart(2, "0")}`} items={itemsByDay.get(day) ?? []} today={today} />
+                ))}
+              </div>
+            </div>
 
-              <div className="divide-y divide-slate-100 md:hidden">
-                {Array.from(itemsByDay.entries()).map(([day, items]) => {
-                  const weekday = WEEKDAYS[(new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7];
-                  return (
-                    <section key={day} className="p-4" aria-labelledby={`calendar-day-${day}`}>
-                      <p id={`calendar-day-${day}`} className="text-sm font-semibold text-slate-900">{month}월 {day}일 · {weekday}요일</p>
-                      <div className="mt-3 space-y-3">{items.map((item) => <CalendarItemDialog key={item.id} item={item} isToday={item.planned_date === today} variant="card" />)}</div>
-                    </section>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+            <div className="divide-y divide-border xl:hidden">
+              {Array.from(itemsByDay.entries()).sort((a, b) => a[0] - b[0]).map(([day, items]) => {
+                const weekday = WEEKDAYS[(new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7];
+                return (
+                  <section key={day} className="p-4" aria-labelledby={`calendar-day-${day}`}>
+                    <p id={`calendar-day-${day}`} className="text-sm font-bold">{month}월 {day}일 · {weekday}요일</p>
+                    <div className="mt-3 space-y-3">{items.map((item) => <CalendarItemDialog key={item.id} item={item} isToday={item.planned_date === today} variant="card" />)}</div>
+                  </section>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
 }
 
 function PageHeading() {
   return (
-    <div className="max-w-2xl">
-      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">Marketing plan</p>
-      <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">마케팅 캘린더</h1>
-      <p className="mt-3 text-sm leading-6 text-slate-600">날짜별 계획을 열어 주제와 목표를 확인하고, 오늘 항목을 실제 콘텐츠 생성으로 연결하세요.</p>
-    </div>
+    <PageHeader
+      title="마케팅 캘린더"
+      description="날짜별 계획을 열어 주제와 목표를 확인하고, 오늘 항목은 바로 콘텐츠로 만들어보세요."
+    />
   );
 }
 
-function CalendarDay({ day, items, today }: { day: number; items: CalendarItem[]; today: string }) {
+function CalendarDay({ day, dateKey, items, today }: { day: number; dateKey: string; items: CalendarItem[]; today: string }) {
+  const isToday = dateKey === today;
   return (
-    <div className="min-h-36 border-r border-b border-slate-100 p-2 last:border-r-0">
-      <p className="text-xs font-semibold text-slate-500">{day}</p>
-      <div className="mt-2 space-y-1.5">
+    <div className={`min-h-32 border-b border-r border-border p-2 ${isToday ? "bg-brand-soft/60" : ""}`}>
+      <p className={`tabular inline-flex size-6 items-center justify-center rounded-full text-[13px] font-semibold ${isToday ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}>
+        {day}
+        {isToday ? <span className="sr-only"> (오늘)</span> : null}
+      </p>
+      <div className="mt-1.5 space-y-1.5">
         {items.slice(0, 3).map((item) => (
           <CalendarItemDialog key={item.id} item={item} isToday={item.planned_date === today} />
         ))}
-        {items.length > 3 ? <p className="px-1 text-[10px] text-slate-400">+{items.length - 3}개 계획</p> : null}
+        {items.length > 3 ? <p className="px-1 text-[11px] font-medium text-muted-foreground">+{items.length - 3}개 더 있어요</p> : null}
       </div>
     </div>
-  );
-}
-
-function SummaryCard({ label, value }: { label: string; value: string }) {
-  return (
-    <Card className="ring-0">
-      <CardContent className="pt-6"><p className="text-xs font-medium text-slate-500">{label}</p><p className="mt-2 text-xl font-semibold text-slate-950">{value}</p></CardContent>
-    </Card>
   );
 }

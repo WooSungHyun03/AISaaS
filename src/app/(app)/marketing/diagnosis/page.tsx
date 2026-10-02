@@ -1,21 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import {
-  Activity,
-  ArrowRight,
-  Building2,
-  CalendarDays,
-  Camera,
-  CheckCircle2,
-  CircleAlert,
-  FileText,
-  Globe2,
-  Settings,
-} from "lucide-react";
+import { ArrowRight, CalendarDays, Check, CircleAlert, Settings } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { Badge } from "@/components/ui/badge";
+import { Mascot } from "@/components/brand/mascot";
+import { PageHeader } from "@/components/layout/page-header";
+import { ScoreRing, scoreTone } from "@/components/marketing/score-ring";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { EmptyState } from "@/components/ui/page-state";
 
@@ -45,13 +35,13 @@ export default async function MarketingDiagnosisPage({
   const selectedBusiness = businesses?.find((business) => business.id === query.business) ?? businesses?.[0];
   if (!selectedBusiness) {
     return (
-      <div className="mx-auto max-w-6xl space-y-8">
+      <div className="mx-auto max-w-5xl space-y-8">
         <PageHeading />
         <EmptyState
-          icon={<Building2 className="size-5" />}
-          title="진단할 사업체가 없습니다"
-          description="업체명과 홈페이지 주소를 등록하면 저장된 정보와 연결 상태를 기준으로 마케팅 준비도를 확인할 수 있습니다."
-          action={<Button asChild><Link href="/onboarding">사업 정보 입력하기</Link></Button>}
+          mascot="point"
+          title="진단할 가게가 아직 없어요"
+          description="업체명과 홈페이지 주소를 알려주시면 지금 마케팅이 얼마나 준비돼 있는지 점수로 알려드려요."
+          action={<Button asChild><Link href="/onboarding">가게 정보 입력하기</Link></Button>}
         />
       </div>
     );
@@ -105,137 +95,91 @@ export default async function MarketingDiagnosisPage({
     + (hasInstagram ? 20 : 0)
     + (activeAutomations.length ? 15 : 0)
     + (recentSuccesses ? 15 : 0);
-  const scoreLabel = score >= 80 ? "운영 준비가 잘 되어 있어요" : score >= 50 ? "핵심 채널을 조금 더 채워보세요" : "기본 정보부터 차근차근 준비해보세요";
-  const missingChannels = [
-    !selectedBusiness.website ? "홈페이지 주소" : null,
-    !hasInstagram ? "Instagram 연결" : null,
-    activeAutomations.length === 0 ? "콘텐츠 자동화" : null,
-  ].filter((item): item is string => Boolean(item));
+  const tone = scoreTone(score);
+
+  const rows = [
+    { label: "사업 정보", ready: completedProfileFields >= 4, detail: `${completedProfileFields}/${profileFields.length}개 항목을 입력했어요`, href: "/business", cta: "정보 채우기", todo: "사업 정보를 더 채우는 것", points: profileScore, max: 30 },
+    { label: "홈페이지", ready: Boolean(selectedBusiness.website), detail: selectedBusiness.website ?? "등록된 주소가 없어요", href: "/business", cta: "주소 등록", todo: "홈페이지 주소를 등록하는 것", points: selectedBusiness.website ? 20 : 0, max: 20 },
+    { label: "Instagram", ready: hasInstagram, detail: hasInstagram ? (instagram?.account_identifier ?? "계정이 연결돼 있어요") : "연결된 계정이 없어요", href: `/settings?business=${selectedBusiness.id}`, cta: "계정 연결", todo: "Instagram 계정을 연결하는 것", points: hasInstagram ? 20 : 0, max: 20 },
+    { label: "콘텐츠 만들기 설정", ready: activeAutomations.length > 0, detail: activeAutomations.length ? `진행 중인 설정 ${activeAutomations.length}개` : "켜 둔 설정이 없어요", href: "/automations/marketplace", cta: "설정하기", todo: "콘텐츠 만들기를 설정하는 것", points: activeAutomations.length ? 15 : 0, max: 15 },
+    { label: "최근 30일 제작", ready: recentSuccesses > 0, detail: recentSuccesses ? `콘텐츠 ${recentSuccesses}개를 만들었어요` : "만든 콘텐츠가 아직 없어요", href: "/automations/marketplace", cta: "만들어보기", todo: "첫 콘텐츠를 만들어보는 것", points: recentSuccesses ? 15 : 0, max: 15 },
+  ];
+  const nextTodo = rows.find((row) => !row.ready);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
+    <div className="mx-auto max-w-5xl space-y-10">
       <PageHeading />
 
       {(businesses?.length ?? 0) > 1 ? (
-        <div className="flex flex-wrap gap-2" aria-label="진단할 사업체 선택">
+        <nav className="flex flex-wrap gap-2" aria-label="진단할 사업체 선택">
           {businesses?.map((business) => (
             <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness.id ? "default" : "outline"}>
-              <Link href={`/marketing/diagnosis?business=${business.id}`}>{business.name}</Link>
+              <Link href={`/marketing/diagnosis?business=${business.id}`} aria-current={business.id === selectedBusiness.id ? "page" : undefined}>{business.name}</Link>
             </Button>
           ))}
-        </div>
+        </nav>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1.95fr)]">
-        <Card className="border-blue-200 bg-blue-50/60 ring-0">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <CardTitle className="text-base">현재 마케팅 점수</CardTitle>
-              <Badge variant="outline" className="border-blue-200 bg-white text-blue-700">{selectedBusiness.name}</Badge>
+      <section aria-labelledby="score-title" className="relative overflow-hidden rounded-2xl bg-brand-soft">
+        <div className="grid items-center gap-8 px-6 py-8 sm:px-10 md:grid-cols-[auto_minmax(0,1fr)_auto]">
+          <ScoreRing score={score} size={164} className="mx-auto md:mx-0" />
+          <div className="text-center md:text-left">
+            <p className="text-sm font-semibold text-muted-foreground">{selectedBusiness.name}의 마케팅 점수</p>
+            <h2 id="score-title" className="mt-1 text-2xl font-extrabold tracking-[-0.04em] sm:text-[1.75rem]">{tone.label}</h2>
+            <p className="mt-3 max-w-md text-[15px] leading-7 text-muted-foreground">
+              {nextTodo
+                ? `가장 먼저 해볼 일은 ${nextTodo.todo}이에요. 여기부터 하면 점수가 가장 빨리 올라요.`
+                : "핵심 항목이 모두 채워졌어요. 이제 캘린더의 계획대로 콘텐츠를 만들어보세요."}
+            </p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2 md:justify-start">
+              {nextTodo ? <Button asChild><Link href={nextTodo.href}>{nextTodo.cta} <ArrowRight aria-hidden="true" /></Link></Button> : null}
+              <Button asChild variant={nextTodo ? "outline" : "default"}><Link href="/calendar"><CalendarDays aria-hidden="true" /> 마케팅 캘린더 보기</Link></Button>
             </div>
-          </CardHeader>
-          <CardContent>
-            <p className="text-5xl font-bold tracking-tight text-slate-950">{score}<span className="ml-1 text-base font-medium text-slate-500">/ 100</span></p>
-            <Progress value={score} className="mt-5" aria-label={`마케팅 준비도 ${score}점`} />
-            <p className="mt-4 text-sm font-medium text-slate-800">{scoreLabel}</p>
-            <p className="mt-2 text-xs leading-5 text-slate-600">저장한 사업 정보, 홈페이지 등록, 외부 채널 연결, 최근 30일 자동화 실행을 기준으로 계산합니다.</p>
-          </CardContent>
-        </Card>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <DiagnosisCard
-            icon={<Globe2 className="size-5" />}
-            title="채널 준비도"
-            value={missingChannels.length ? `${missingChannels.length}개 보완 필요` : "핵심 채널 준비 완료"}
-            description={missingChannels.length ? missingChannels.join(" · ") : "홈페이지와 SNS 연결을 확인했습니다."}
-            ready={missingChannels.length === 0}
-          />
-          <DiagnosisCard
-            icon={<FileText className="size-5" />}
-            title="콘텐츠 운영"
-            value={activeAutomations.length ? `활성 자동화 ${activeAutomations.length}개` : "운영 자동화 없음"}
-            description={recentSuccesses ? `최근 30일 성공 실행 ${recentSuccesses}회` : "최근 30일 성공 실행이 없습니다."}
-            ready={activeAutomations.length > 0 && recentSuccesses > 0}
-          />
-          <DiagnosisCard
-            icon={<Camera className="size-5" />}
-            title="SNS 활성도"
-            value={hasInstagram ? "Instagram 연결됨" : "Instagram 미연결"}
-            description={hasInstagram ? instagram?.account_identifier ?? "연결된 Professional 계정" : "계정을 연결하면 게시 자동화를 사용할 수 있습니다."}
-            ready={hasInstagram}
-          />
+          </div>
+          <Mascot pose={score >= 80 ? "thumbsUp" : "point"} size={170} className="hidden w-[150px] md:block lg:w-[170px]" />
         </div>
-      </div>
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base"><Activity className="size-4 text-blue-700" /> 진단 기준과 다음 할 일</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-5 md:grid-cols-2">
-          <div className="space-y-3">
-            <ReadinessRow label="사업 정보" ready={completedProfileFields >= 4} detail={`${completedProfileFields}/${profileFields.length}개 항목 입력`} href="/business" />
-            <ReadinessRow label="홈페이지" ready={Boolean(selectedBusiness.website)} detail={selectedBusiness.website ?? "등록된 주소 없음"} href="/business" />
-            <ReadinessRow label="Instagram" ready={hasInstagram} detail={hasInstagram ? "연결 상태 정상" : "외부 서비스 연결 필요"} href={`/settings?business=${selectedBusiness.id}`} />
-            <ReadinessRow label="콘텐츠 일정" ready={activeAutomations.length > 0} detail={activeAutomations.length ? `${activeAutomations.length}개 활성 일정` : "활성 일정 없음"} href="/automations/marketplace" />
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
-            <div className="flex items-start gap-3">
-              <CircleAlert className="mt-0.5 size-5 shrink-0 text-amber-600" />
-              <div>
-                <p className="font-semibold text-slate-950">주소 분석 범위 안내</p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">현재 버전은 저장된 홈페이지 주소와 연결 상태를 진단에 반영합니다. 외부 페이지의 본문을 읽어 사업 정보를 자동으로 채우는 기능은 준비 중입니다.</p>
+      <section aria-labelledby="breakdown-title">
+        <h2 id="breakdown-title" className="text-lg font-bold tracking-[-0.02em]">점수는 이렇게 계산했어요</h2>
+        <p className="mt-1 text-[15px] text-muted-foreground">저장된 사업 정보와 연결 상태, 최근 30일 제작 기록을 기준으로 해요.</p>
+        <ul className="mt-5 divide-y divide-border border-y border-border">
+          {rows.map((row) => (
+            <li key={row.label} className="grid items-center gap-x-6 gap-y-2 py-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_auto]">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full ${row.ready ? "bg-success-soft text-success" : "bg-warning-soft text-warning"}`}>
+                  {row.ready ? <Check className="size-3.5" strokeWidth={3} aria-label="준비됨" /> : <CircleAlert className="size-3.5" strokeWidth={3} aria-label="보완 필요" />}
+                </span>
+                <div className="min-w-0">
+                  <p className="font-semibold">{row.label}</p>
+                  <p className="truncate text-sm text-muted-foreground">{row.detail}</p>
+                </div>
               </div>
-            </div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <Button asChild size="sm" variant="outline" className="bg-white"><Link href="/business"><Building2 className="size-4" /> 정보 직접 수정</Link></Button>
-              <Button asChild size="sm" className="bg-blue-600 text-white hover:bg-blue-700"><Link href="/calendar"><CalendarDays className="size-4" /> 캘린더 보기</Link></Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+              <div className="flex items-center gap-3">
+                <Progress value={(row.points / row.max) * 100} className="h-1.5" aria-label={`${row.label} ${row.max}점 중 ${row.points}점`} />
+                <span className="tabular w-12 shrink-0 text-right text-sm font-bold">{row.points}<span className="font-medium text-muted-foreground">/{row.max}</span></span>
+              </div>
+              <div className="md:text-right">
+                {row.ready ? null : <Link href={row.href} className="text-sm font-semibold text-primary hover:underline">{row.cta} →</Link>}
+              </div>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-4 flex items-start gap-2 text-[13px] leading-6 text-muted-foreground">
+          <CircleAlert className="mt-1 size-3.5 shrink-0" aria-hidden="true" />
+          지금은 저장된 홈페이지 주소와 연결 상태를 점수에 반영해요. 홈페이지 본문을 읽어 가게 정보를 자동으로 채워주는 기능은 준비 중이에요.
+        </p>
+      </section>
     </div>
   );
 }
 
 function PageHeading() {
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div className="max-w-2xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">Free marketing check</p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">마케팅 진단</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600">현재 등록된 사업 정보와 채널 연결, 콘텐츠 운영 상태를 한눈에 확인하세요.</p>
-      </div>
-      <Button asChild variant="outline"><Link href="/business"><Settings className="size-4" /> 사업 정보 관리</Link></Button>
-    </div>
-  );
-}
-
-function DiagnosisCard({ icon, title, value, description, ready }: { icon: React.ReactNode; title: string; value: string; description: string; ready: boolean }) {
-  return (
-    <Card className="ring-0">
-      <CardContent className="space-y-4 pt-6">
-        <span className={`flex size-10 items-center justify-center rounded-xl ${ready ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{icon}</span>
-        <div>
-          <p className="text-xs font-medium text-slate-500">{title}</p>
-          <p className="mt-1 font-semibold text-slate-950">{value}</p>
-          <p className="mt-2 text-xs leading-5 text-slate-500">{description}</p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ReadinessRow({ label, ready, detail, href }: { label: string; ready: boolean; detail: string; href: string }) {
-  return (
-    <Link href={href} className="flex items-center gap-3 rounded-xl border border-slate-200 p-3 transition-colors hover:border-blue-300 hover:bg-blue-50/40">
-      <span className={`flex size-8 shrink-0 items-center justify-center rounded-full ${ready ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
-        {ready ? <CheckCircle2 className="size-4" /> : <CircleAlert className="size-4" />}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-slate-900">{label}</span>
-        <span className="block truncate text-xs text-slate-500">{detail}</span>
-      </span>
-      <ArrowRight className="size-4 shrink-0 text-slate-400" />
-    </Link>
+    <PageHeader
+      title="마케팅 진단"
+      description="지금 마케팅이 얼마나 준비돼 있는지 점수로 확인하고, 먼저 채울 것을 알아보세요."
+      actions={<Button asChild variant="outline"><Link href="/business"><Settings aria-hidden="true" /> 사업 정보 관리</Link></Button>}
+    />
   );
 }

@@ -11,8 +11,8 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
   return (
     <div className="py-10 sm:py-16">
       <ErrorState
-        title="요청한 화면을 불러오지 못했습니다"
-        description="연결 상태를 확인한 뒤 다시 시도해주세요. 입력하거나 저장한 데이터는 임의로 변경되지 않습니다."
+        title="화면을 불러오지 못했어요"
+        description="인터넷 연결을 확인하고 다시 시도해주세요. 입력하신 내용은 그대로 안전해요."
         onRetry={reset}
         homeHref="/dashboard"
       />

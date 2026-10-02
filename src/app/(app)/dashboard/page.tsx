@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Activity, ArrowRight, CalendarClock, CircleCheck, CircleX, Clock3, PlayCircle, Store, Wrench, Zap } from "lucide-react";
+import { ArrowRight, Check, CircleCheck, CircleX, PlayCircle, Wrench } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPlanConfig } from "@/server/billing/plans";
 import { getPeriodKey, SERVICE_TIMEZONE, zonedTimeToUtc } from "@/lib/utils/date";
-import { StatCard } from "@/components/dashboard/stat-card";
+import { StatCard, StatGroup } from "@/components/dashboard/stat-card";
+import { Mascot } from "@/components/brand/mascot";
+import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import type { AutomationRun } from "@/types/domain";
@@ -23,8 +24,8 @@ const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
 
 const RUN_STATUS_LABEL = {
   QUEUED: "대기 중",
-  RUNNING: "실행 중",
-  SUCCESS: "성공",
+  RUNNING: "만드는 중",
+  SUCCESS: "완료",
   FAILED: "실패",
 } as const;
 
@@ -39,12 +40,13 @@ export default async function DashboardPage() {
   const periodKey = getPeriodKey();
   const [year, month] = periodKey.split("-").map(Number);
 
-  const [businessResult, automationResult, subscriptionResult, usageResult, setupRequests] = await Promise.all([
+  const [businessResult, automationResult, subscriptionResult, usageResult, setupRequests, profileResult] = await Promise.all([
     supabase.from("businesses").select("id").eq("owner_id", user.id).limit(1).maybeSingle(),
     supabase.from("automations").select("id, name, status, next_run_at").eq("user_id", user.id),
     supabase.from("subscriptions").select("plan, status").eq("user_id", user.id).maybeSingle(),
     supabase.from("usage").select("automation_runs").eq("user_id", user.id).eq("period", periodKey).maybeSingle(),
     getRecentSetupRequests(user.id),
+    supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
   ]);
 
   const readError = businessResult.error || automationResult.error || subscriptionResult.error || usageResult.error;
@@ -87,174 +89,158 @@ export default async function DashboardPage() {
   const quotaRuns = usageResult.data?.automation_runs ?? 0;
   const hasBusiness = Boolean(businessResult.data);
 
+  let calendarCount = 0;
+  if (businessResult.data) {
+    const { count } = await supabase
+      .from("calendar_items")
+      .select("id", { count: "exact", head: true })
+      .eq("business_id", businessResult.data.id);
+    calendarCount = count ?? 0;
+  }
+
+  const displayName = profileResult.data?.display_name?.trim();
+  const hasCreated = automations.length > 0 || recentRuns.some((run) => run.status === "SUCCESS");
+  const steps = [
+    { label: "가게 정보", href: hasBusiness ? "/business" : "/onboarding", done: hasBusiness },
+    { label: "마케팅 진단", href: "/marketing/diagnosis", done: calendarCount > 0 || hasCreated },
+    { label: "마케팅 캘린더", href: "/calendar", done: calendarCount > 0 },
+    { label: "콘텐츠 만들기", href: "/automations/marketplace", done: hasCreated },
+  ];
+  const currentStep = steps.findIndex((step) => !step.done);
+  const nextAction = [
+    { title: "먼저 가게 정보를 알려주세요", description: "업체명만 적어도 시작할 수 있어요. 나머지는 나중에 채워도 괜찮아요.", cta: "가게 정보 입력하기", href: "/onboarding", pose: "welcome" as const },
+    { title: "마케팅 진단부터 받아볼까요?", description: "지금 마케팅이 몇 점인지, 어느 채널이 비어 있는지 알려드려요.", cta: "무료 진단 받기", href: "/marketing/diagnosis", pose: "point" as const },
+    { title: "이번 달 마케팅 계획을 세워볼까요?", description: "진단 결과에 맞춰 날짜별로 어떤 콘텐츠를 올릴지 정해드려요.", cta: "캘린더 만들기", href: "/calendar", pose: "guide" as const },
+    { title: "첫 콘텐츠를 만들어볼까요?", description: "계획한 주제로 블로그 글을 써드려요. 만들고 나면 확인하고 직접 올리시면 돼요.", cta: "콘텐츠 만들기 시작", href: "/automations/marketplace", pose: "guide" as const },
+  ][currentStep] ?? { title: "잘 하고 계세요!", description: "다음 제작 일정과 이번 달 계획을 캘린더에서 확인해보세요.", cta: "캘린더 보기", href: "/calendar", pose: "thumbsUp" as const };
+
   return (
-    <div className="mx-auto max-w-6xl space-y-7">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">Overview</p>
-          <h1 className="mt-1 text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="mt-2 text-sm text-muted-foreground">자동화 운영 현황과 최근 실행 결과를 확인하세요.</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline" className="h-9"><Link href="/setup-request"><Wrench className="size-4" /> 구축 맡기기</Link></Button>
-          <Button asChild className="h-9 bg-blue-600 text-white hover:bg-blue-700"><Link href="/automations/marketplace"><Store className="size-4" /> 자동화 둘러보기</Link></Button>
-        </div>
-      </div>
+    <div className="mx-auto max-w-6xl space-y-8">
+      <PageHeader
+        title={displayName ? `${displayName}님, 안녕하세요` : "안녕하세요"}
+        description="오늘 할 일과 이번 달 진행 상황을 한눈에 확인하세요."
+      />
 
-      {!hasBusiness ? (
-        <Card className="border border-blue-200 bg-blue-50/60 ring-0">
-          <CardContent className="flex flex-col gap-4 py-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-semibold text-slate-950">사업체 정보를 입력하고 자동화를 시작하세요</p>
-              <p className="mt-1 text-sm text-slate-600">업체명만 먼저 입력해도 됩니다. 나머지는 나중에 추가할 수 있어요.</p>
-            </div>
-            <Button asChild variant="outline" className="shrink-0 bg-white">
-              <Link href="/onboarding">사업체 정보 입력 <ArrowRight className="size-4" /></Link>
+      <section aria-labelledby="next-action-title" className="relative overflow-hidden rounded-2xl bg-brand-soft">
+        <div className="grid items-center gap-6 px-6 py-7 sm:px-9 md:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="max-w-xl">
+            <p className="text-sm font-semibold text-primary">다음 할 일</p>
+            <h2 id="next-action-title" className="mt-2 text-2xl font-extrabold tracking-[-0.04em] sm:text-[1.75rem]">{nextAction.title}</h2>
+            <p className="mt-2 text-[15px] leading-7 text-muted-foreground">{nextAction.description}</p>
+            <Button asChild size="lg" className="mt-6">
+              <Link href={nextAction.href}>{nextAction.cta} <ArrowRight aria-hidden="true" /></Link>
             </Button>
-          </CardContent>
-        </Card>
-      ) : automations.length === 0 ? (
-        <Card className="border border-blue-200 bg-blue-50/60 ring-0">
-          <CardContent className="flex flex-col gap-4 py-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-semibold text-slate-950">아직 생성한 자동화가 없습니다</p>
-              <p className="mt-1 text-sm text-slate-600">마켓플레이스에서 첫 자동화를 선택해보세요.</p>
-            </div>
-            <Button asChild variant="outline" className="shrink-0 bg-white">
-              <Link href="/automations/marketplace">자동화 선택 <ArrowRight className="size-4" /></Link>
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
+          </div>
+          <Mascot pose={nextAction.pose} size={190} className="mx-auto hidden w-[170px] md:block lg:w-[190px]" />
+        </div>
+        <ol className="grid border-t border-primary/10 bg-card/60 sm:grid-cols-4" aria-label="시작 단계">
+          {steps.map((step, index) => (
+            <li key={step.label} className="border-b border-primary/10 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+              <Link href={step.href} aria-current={index === currentStep ? "step" : undefined} className="flex min-h-14 items-center gap-3 px-5 py-3 text-sm font-semibold transition-colors hover:bg-card">
+                <span className={`flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? "bg-success text-white" : index === currentStep ? "bg-primary text-white" : "bg-muted text-muted-foreground"}`}>
+                  {step.done ? <Check className="size-3.5" strokeWidth={3} aria-label="완료" /> : index + 1}
+                </span>
+                <span className={step.done ? "text-muted-foreground" : ""}>{step.label}</span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </section>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Active Automations" value={activeAutomations.length} hint={<Link href="/automations" className="hover:underline">전체 {automations.length}개 자동화 보기 →</Link>} />
-        <StatCard label="Monthly Runs" value={monthlyRuns} hint="이번 달 전체 실행 기록 · KST 기준" />
-        <StatCard label="Current Plan" value={planConfig.name} hint={<Link href="/billing" className="hover:underline">플랜 관리 →</Link>} />
+      <StatGroup>
         <StatCard
-          label="Next Scheduled Run"
-          value={nextAutomation?.next_run_at ? <span className="block text-base leading-7">{dateFormatter.format(new Date(nextAutomation.next_run_at))}</span> : "예정 없음"}
-          hint={nextAutomation ? <Link href={`/automations/${nextAutomation.id}`} className="hover:underline">{nextAutomation.name} →</Link> : "활성 자동화의 다음 실행 시각"}
+          label="이번 달 만든 콘텐츠"
+          value={<>{monthlyRuns.toLocaleString()}<span className="ml-1 text-sm font-semibold text-muted-foreground">개</span></>}
+          hint="한국 시간 기준, 이번 달 제작 횟수"
         />
-      </div>
+        <StatCard
+          label="진행 중인 만들기 설정"
+          value={<>{activeAutomations.length}<span className="ml-1 text-sm font-semibold text-muted-foreground">개</span></>}
+          hint={<Link href="/automations" className="font-medium text-primary hover:underline">전체 {automations.length}개 보기</Link>}
+        />
+        <StatCard
+          label="다음 제작 예정"
+          value={nextAutomation?.next_run_at ? <span className="block text-lg leading-8">{dateFormatter.format(new Date(nextAutomation.next_run_at))}</span> : "예정 없음"}
+          hint={nextAutomation ? <Link href={`/automations/${nextAutomation.id}`} className="font-medium text-primary hover:underline">{nextAutomation.name}</Link> : "만들기를 켜면 일정이 표시돼요"}
+        />
+        <StatCard
+          label="이용 중인 플랜"
+          value={planConfig.name}
+          hint={<Link href="/billing" className="font-medium text-primary hover:underline">플랜 관리</Link>}
+        />
+      </StatGroup>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Link href="/marketing/diagnosis" className="group rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-blue-300 hover:bg-blue-50/30">
-          <div className="flex items-start gap-4">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><Activity className="size-5" /></span>
-            <div className="min-w-0 flex-1"><p className="font-semibold text-slate-950">마케팅 진단</p><p className="mt-1 text-sm leading-6 text-slate-500">사업 정보, 홈페이지, SNS 연결과 콘텐츠 운영 준비도를 확인하세요.</p></div>
-            <ArrowRight className="mt-1 size-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.7fr)_minmax(260px,1fr)]">
+        <section aria-labelledby="recent-title">
+          <div className="flex items-end justify-between gap-3 border-b border-border pb-3">
+            <h2 id="recent-title" className="text-lg font-bold tracking-[-0.02em]">최근 제작 기록</h2>
+            <Link href="/automations/history" className="text-sm font-semibold text-primary hover:underline">전체 보기</Link>
           </div>
-        </Link>
-        <Link href="/calendar" className="group rounded-xl border border-slate-200 bg-white p-5 transition-colors hover:border-blue-300 hover:bg-blue-50/30">
-          <div className="flex items-start gap-4">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700"><CalendarClock className="size-5" /></span>
-            <div className="min-w-0 flex-1"><p className="font-semibold text-slate-950">마케팅 캘린더</p><p className="mt-1 text-sm leading-6 text-slate-500">자동화 주기를 날짜별 콘텐츠 계획으로 확인하세요.</p></div>
-            <ArrowRight className="mt-1 size-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
-          </div>
-        </Link>
-      </div>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3">
-          <div><CardTitle className="flex items-center gap-2 text-base"><Wrench className="size-4 text-blue-700" /> 구축 대행 요청</CardTitle><p className="mt-1 text-xs text-muted-foreground">최근 요청의 상담·구축 진행 상태</p></div>
-          <Button asChild variant="outline" size="sm"><Link href="/setup-request">새 요청 <ArrowRight /></Link></Button>
-        </CardHeader>
-        <CardContent>
-          {setupRequests.length === 0 ? (
-            <EmptyState className="border-0 py-7" icon={<Wrench className="size-5" />} title="아직 구축 요청이 없습니다" description="직접 설정하기 어려운 업무가 있다면 전문가 구축을 요청할 수 있습니다." action={<Button asChild size="sm" variant="outline"><Link href="/setup-request">구축 요청하기</Link></Button>} />
+          {recentRuns.length === 0 ? (
+            <EmptyState
+              className="mt-5"
+              mascot={null}
+              title="아직 제작 기록이 없어요"
+              description="블로그 글이나 숏폼 영상을 만들면 여기에서 바로 확인할 수 있어요."
+              action={<Button asChild size="sm"><Link href="/automations/marketplace">콘텐츠 만들기 시작</Link></Button>}
+            />
           ) : (
-            <ul className="divide-y divide-slate-100">
-              {setupRequests.map((request) => (
-                <li key={request.id} className="flex flex-col gap-3 py-3.5 first:pt-0 last:pb-0 sm:flex-row sm:items-center">
-                  <div className="min-w-0 flex-1">
-                    <Link href={`/setup-request/${request.id}`} className="font-medium hover:text-blue-700 hover:underline">{setupAutomationTypeLabel(request.automation_type)}</Link>
-                    <p className="mt-1 text-xs text-muted-foreground">{setupRequestNumber(request.id)} · {dateFormatter.format(new Date(request.created_at))}</p>
-                  </div>
-                  <div className="flex items-center gap-3 sm:justify-end">
-                    <p className="hidden text-xs text-muted-foreground lg:block">{SETUP_REQUEST_STATUS[request.status].description}</p>
-                    <SetupRequestStatusBadge status={request.status} />
-                  </div>
-                </li>
-              ))}
+            <ul className="divide-y divide-border">
+              {recentRuns.map((run) => {
+                const StatusIcon = run.status === "SUCCESS" ? CircleCheck : run.status === "FAILED" ? CircleX : PlayCircle;
+                return (
+                  <li key={run.id} className="flex flex-wrap items-center gap-3 py-4 sm:flex-nowrap">
+                    <span className={`flex size-10 shrink-0 items-center justify-center rounded-full ${run.status === "SUCCESS" ? "bg-success-soft text-success" : run.status === "FAILED" ? "bg-destructive/10 text-destructive" : "bg-brand-soft text-primary"}`}>
+                      <StatusIcon className="size-5" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <Link href={`/automations/${run.automation_id}/runs/${run.id}`} className="block truncate font-semibold hover:text-primary hover:underline">
+                        {automationNames.get(run.automation_id) ?? "콘텐츠 만들기"}
+                      </Link>
+                      <p className="mt-0.5 text-[13px] text-muted-foreground">{dateFormatter.format(new Date(run.created_at))}</p>
+                      {run.status === "FAILED" && run.error_message ? <p className="mt-1 line-clamp-1 text-[13px] text-destructive">{run.error_message}</p> : null}
+                    </div>
+                    <Badge variant={run.status === "FAILED" ? "destructive" : run.status === "SUCCESS" ? "success" : "brand"}>{RUN_STATUS_LABEL[run.status]}</Badge>
+                  </li>
+                );
+              })}
             </ul>
           )}
-        </CardContent>
-      </Card>
+        </section>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.7fr)_minmax(260px,1fr)]">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-base">Recent Activity</CardTitle>
-              <p className="mt-1 text-xs text-muted-foreground">최근 실행 6건</p>
+        <aside className="space-y-8" aria-label="사용량과 도움">
+          <section aria-labelledby="usage-title" className="rounded-xl border border-border bg-card p-5">
+            <h2 id="usage-title" className="text-base font-bold tracking-[-0.02em]">이번 달 사용량</h2>
+            <p className="tabular mt-3 text-2xl font-extrabold tracking-[-0.03em]">
+              {quotaRuns.toLocaleString()}
+              <span className="ml-1 text-sm font-semibold text-muted-foreground">/ {planConfig.monthlyRunLimit?.toLocaleString() ?? "무제한"}회</span>
+            </p>
+            {planConfig.monthlyRunLimit !== null ? <Progress value={Math.min(100, (quotaRuns / planConfig.monthlyRunLimit) * 100)} className="mt-3" aria-label="이번 달 제작 사용량" /> : null}
+            <p className="mt-3 text-[13px] leading-5 text-muted-foreground">플랜의 월 제작 한도에 반영되는 횟수예요.</p>
+          </section>
+
+          <section aria-labelledby="setup-title">
+            <div className="flex items-end justify-between gap-3 border-b border-border pb-3">
+              <h2 id="setup-title" className="flex items-center gap-2 text-base font-bold tracking-[-0.02em]"><Wrench className="size-4 text-primary" aria-hidden="true" /> 대신 설정해드려요</h2>
+              <Link href="/setup-request" className="text-sm font-semibold text-primary hover:underline">새 요청</Link>
             </div>
-            <Link href="/automations/history" className="text-xs font-medium text-blue-700 hover:underline">전체 실행 이력 →</Link>
-          </CardHeader>
-          <CardContent>
-            {recentRuns.length === 0 ? (
-              <EmptyState className="border-0 py-10" icon={<Clock3 className="size-5" />} title="아직 실행 기록이 없습니다" description="자동화를 실행하면 이곳에 결과가 표시됩니다." action={<Button asChild size="sm" variant="outline"><Link href="/automations">자동화 관리</Link></Button>} />
+            {setupRequests.length === 0 ? (
+              <p className="mt-4 text-[15px] leading-7 text-muted-foreground">직접 설정하기 어려우면 전문가에게 맡길 수 있어요.</p>
             ) : (
-              <ul className="divide-y divide-slate-100">
-                {recentRuns.map((run) => {
-                  const StatusIcon = run.status === "SUCCESS" ? CircleCheck : run.status === "FAILED" ? CircleX : PlayCircle;
-                  return (
-                    <li key={run.id} className="flex flex-wrap items-center gap-3 py-3.5 first:pt-0 last:pb-0 sm:flex-nowrap">
-                      <span className={`flex size-9 shrink-0 items-center justify-center rounded-full ${run.status === "SUCCESS" ? "bg-emerald-50 text-emerald-700" : run.status === "FAILED" ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700"}`}>
-                        <StatusIcon className="size-4" />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <Link href={`/automations/${run.automation_id}`} className="block truncate text-sm font-medium hover:text-blue-700 hover:underline">
-                          {automationNames.get(run.automation_id) ?? "자동화"}
-                        </Link>
-                        <p className="mt-0.5 text-xs text-muted-foreground">{dateFormatter.format(new Date(run.created_at))}</p>
-                        {run.status === "FAILED" && run.error_message ? <p className="mt-1 line-clamp-1 text-xs text-red-700">{run.error_message}</p> : null}
-                      </div>
-                      <div className="ml-12 flex items-center gap-3 sm:ml-0">
-                        <Badge variant={run.status === "FAILED" ? "destructive" : run.status === "SUCCESS" ? "secondary" : "outline"}>{RUN_STATUS_LABEL[run.status]}</Badge>
-                        {run.status === "FAILED" ? (
-                          <Link href={`/automations/${run.automation_id}/runs/${run.id}`} className="whitespace-nowrap text-xs font-semibold text-red-700 underline-offset-2 hover:underline">오류 상세</Link>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
+              <ul className="divide-y divide-border">
+                {setupRequests.map((request) => (
+                  <li key={request.id} className="flex items-center justify-between gap-3 py-3.5">
+                    <div className="min-w-0">
+                      <Link href={`/setup-request/${request.id}`} className="block truncate font-semibold hover:text-primary hover:underline">{setupAutomationTypeLabel(request.automation_type)}</Link>
+                      <p className="mt-0.5 text-[13px] text-muted-foreground">{setupRequestNumber(request.id)} · {SETUP_REQUEST_STATUS[request.status].description}</p>
+                    </div>
+                    <SetupRequestStatusBadge status={request.status} />
+                  </li>
+                ))}
               </ul>
             )}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-5">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base"><Zap className="size-4 text-blue-700" /> 이번 달 사용량</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-baseline justify-between text-sm">
-                <span className="text-muted-foreground">성공 실행</span>
-                <span className="font-semibold">{quotaRuns.toLocaleString()} / {planConfig.monthlyRunLimit?.toLocaleString() ?? "무제한"}</span>
-              </div>
-              {planConfig.monthlyRunLimit !== null ? <Progress value={Math.min(100, (quotaRuns / planConfig.monthlyRunLimit) * 100)} aria-label="이번 달 실행 사용량" /> : null}
-              <p className="text-xs text-muted-foreground">플랜의 월간 실행 한도에 반영되는 수치입니다.</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base"><CalendarClock className="size-4 text-blue-700" /> 다음 일정</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {nextAutomation?.next_run_at ? (
-                <>
-                  <p className="text-sm font-medium">{nextAutomation.name}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{dateFormatter.format(new Date(nextAutomation.next_run_at))} KST</p>
-                  <Link href={`/automations/${nextAutomation.id}`} className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-blue-700 hover:underline">설정 보기 <ArrowRight className="size-3" /></Link>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">예약된 실행이 없습니다. 자동화를 활성화하면 다음 일정이 표시됩니다.</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+          </section>
+        </aside>
       </div>
     </div>
   );

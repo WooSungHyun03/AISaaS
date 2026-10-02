@@ -10,7 +10,7 @@ export default function AutomationHistoryError({ error, reset }: { error: Error 
 
   return (
     <div className="py-10 sm:py-16">
-      <ErrorState title="실행 이력을 불러오지 못했습니다" description="잠시 후 다시 시도해주세요. 실행 데이터는 변경되지 않았습니다." onRetry={reset} />
+      <ErrorState title="제작 기록을 불러오지 못했어요" description="잠시 후 다시 시도해주세요. 기록은 그대로 안전해요." onRetry={reset} />
     </div>
   );
 }

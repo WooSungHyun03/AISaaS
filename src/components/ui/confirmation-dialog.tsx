@@ -19,7 +19,7 @@ export function ConfirmationDialog({
   title,
   description,
   confirmLabel = "확인",
-  pendingLabel = "처리 중...",
+  pendingLabel = "처리 중…",
   destructive = false,
   disabled = false,
   onConfirm,

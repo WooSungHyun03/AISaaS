@@ -1,11 +1,14 @@
-import { ArrowDownRight, ArrowUpRight, Check, CreditCard, Gauge, ShieldCheck, Workflow } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env/server";
 import { ALL_PLANS, getPlanConfig } from "@/server/billing/plans";
 import { getBillingOverview } from "@/server/billing/read-model";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { FormMessage } from "@/components/ui/form-message";
+import { PageHeader } from "@/components/layout/page-header";
+import { PLAN_LABEL, planFeatures } from "@/components/billing/plan-copy";
+import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 import { BillingSubmitButton } from "@/components/billing/billing-submit-button";
 import { cancelSubscriptionAction, startCheckout } from "./actions";
@@ -13,7 +16,7 @@ import { cancelSubscriptionAction, startCheckout } from "./actions";
 const ACTIVE_STATUSES = new Set(["ACTIVE", "TRIALING"]);
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return "결제 후 표시";
+  if (!value) return "결제 후 표시돼요";
   return new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long", day: "numeric" }).format(new Date(value));
 }
 
@@ -32,151 +35,121 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
   const monthlyRuns = usage?.automation_runs ?? 0;
   const isPaid = plan !== "FREE";
   const isTestBilling = serverEnv.BILLING_PROVIDER === "mock" || serverEnv.TOSS_SECRET_KEY?.startsWith("test_");
-  const providerLabel = serverEnv.BILLING_PROVIDER === "toss" ? "Toss Payments" : "Mock";
+  const providerLabel = serverEnv.BILLING_PROVIDER === "toss" ? "토스페이먼츠" : "모의 결제";
 
   return (
-    <div className="space-y-8 pb-10">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Billing</h1>
-        <p className="mt-1 text-sm text-muted-foreground">현재 플랜, 이번 달 사용량, 업그레이드와 구독 취소를 한곳에서 관리하세요.</p>
-      </div>
+    <div className="mx-auto max-w-5xl space-y-10 pb-10">
+      <PageHeader title="요금제·결제" description="지금 쓰는 요금제와 이번 달 사용량을 확인하고, 요금제를 바꾸거나 해지할 수 있어요." />
 
       {isTestBilling ? (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
-          <ShieldCheck className="mt-0.5 size-5 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold">테스트 결제 환경 · 실제 청구 없음</p>
-            <p className="mt-0.5 text-xs text-amber-800">현재 결제 제공자: {providerLabel}. 결제 완료 흐름과 플랜 반영을 안전하게 확인할 수 있습니다.</p>
-          </div>
-        </div>
+        <FormMessage variant="info"><strong>테스트 결제 환경이에요. 실제로 청구되지 않아요.</strong> 결제 제공자: {providerLabel}. 결제 흐름과 요금제 반영을 안전하게 확인할 수 있어요.</FormMessage>
       ) : null}
 
       {selectedPlan && selectedPlan !== plan ? (
-        <Card className="border-blue-200 bg-blue-50/60">
-          <CardContent className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-semibold">{getPlanConfig(selectedPlan).name} 플랜을 선택했습니다</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                월 ₩{getPlanConfig(selectedPlan).priceMonthlyKrw.toLocaleString()} · 자동화 {getPlanConfig(selectedPlan).automationLimit}개 · 월 {getPlanConfig(selectedPlan).monthlyRunLimit}회
-              </p>
-            </div>
-            <form action={startCheckout.bind(null, selectedPlan)}>
-              <BillingSubmitButton className="w-full bg-blue-600 text-white hover:bg-blue-700 sm:w-auto" pendingLabel="결제 준비 중...">
-                결제 계속하기 <ArrowUpRight />
-              </BillingSubmitButton>
-            </form>
-          </CardContent>
-        </Card>
+        <div className="flex flex-col gap-4 rounded-2xl bg-brand-soft px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-extrabold tracking-[-0.02em]">{PLAN_LABEL[selectedPlan]} 요금제를 골랐어요</p>
+            <p className="mt-1 text-sm text-muted-foreground tabular">
+              월 {getPlanConfig(selectedPlan).priceMonthlyKrw.toLocaleString()}원 · 만들기 설정 {getPlanConfig(selectedPlan).automationLimit}개 · 월 {getPlanConfig(selectedPlan).monthlyRunLimit}회
+            </p>
+          </div>
+          <form action={startCheckout.bind(null, selectedPlan)}>
+            <BillingSubmitButton className="w-full sm:w-auto" pendingLabel="결제 준비 중…">
+              결제 이어서 하기 <ArrowUpRight />
+            </BillingSubmitButton>
+          </form>
+        </div>
       ) : null}
 
-      <section aria-labelledby="current-plan-heading">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 id="current-plan-heading" className="text-lg font-semibold">Current Plan</h2>
-          <Badge variant={hasActiveSubscription ? "default" : "secondary"}>{hasActiveSubscription ? subscription?.status ?? "ACTIVE" : "FREE"}</Badge>
-        </div>
-        <Card>
-          <CardContent className="grid gap-6 py-6 lg:grid-cols-[1.1fr_1fr]">
-            <div>
-              <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-blue-50 p-2.5 text-blue-700"><CreditCard className="size-5" /></div>
-                <div>
-                  <p className="text-2xl font-bold">{planConfig.name}</p>
-                  <p className="text-sm text-muted-foreground">{planConfig.priceMonthlyKrw === 0 ? "무료" : `월 ₩${planConfig.priceMonthlyKrw.toLocaleString()}`}</p>
-                </div>
-              </div>
-              <p className="mt-5 text-sm text-muted-foreground">현재 이용 기간 종료일</p>
-              <p className="mt-1 font-medium">{isPaid ? formatDate(subscription?.current_period_end) : "무료 플랜은 만료되지 않습니다"}</p>
+      <section aria-labelledby="current-plan-heading" className="space-y-4">
+        <h2 id="current-plan-heading" className="text-lg font-extrabold tracking-[-0.03em]">지금 이용 중인 요금제</h2>
+        <div className="grid gap-px overflow-hidden rounded-2xl border bg-border lg:grid-cols-[1.1fr_1fr]">
+          <div className="bg-card px-6 py-6">
+            <div className="flex items-center gap-3">
+              <p className="text-3xl font-extrabold tracking-[-0.04em]">{PLAN_LABEL[plan]}</p>
+              <Badge variant={hasActiveSubscription ? "success" : "secondary"}>{hasActiveSubscription ? "이용 중" : "기본"}</Badge>
             </div>
-            <ul className="grid content-center gap-2 text-sm sm:grid-cols-2 lg:grid-cols-1">
-              {planConfig.features.map((feature) => (
-                <li key={feature} className="flex items-start gap-2"><Check className="mt-0.5 size-4 shrink-0 text-emerald-600" />{feature}</li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      </section>
-
-      <section aria-labelledby="usage-heading">
-        <h2 id="usage-heading" className="mb-3 text-lg font-semibold">Usage</h2>
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Workflow className="size-4 text-blue-600" />활성 자동화</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-end justify-between"><p className="text-3xl font-bold">{automationCount}</p><p className="text-sm text-muted-foreground">/ {planConfig.automationLimit ?? "무제한"}개</p></div>
-              {planConfig.automationLimit ? <Progress value={Math.min(100, (automationCount / planConfig.automationLimit) * 100)} /> : null}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Gauge className="size-4 text-violet-600" />이번 달 실행</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-end justify-between"><p className="text-3xl font-bold">{monthlyRuns}</p><p className="text-sm text-muted-foreground">/ {planConfig.monthlyRunLimit ?? "무제한"}회</p></div>
-              {planConfig.monthlyRunLimit ? <Progress value={Math.min(100, (monthlyRuns / planConfig.monthlyRunLimit) * 100)} /> : null}
-            </CardContent>
-          </Card>
+            <p className="mt-1 text-sm text-muted-foreground tabular">{planConfig.priceMonthlyKrw === 0 ? "무료" : `월 ${planConfig.priceMonthlyKrw.toLocaleString()}원`}</p>
+            <p className="mt-6 text-[13px] font-semibold text-muted-foreground">{isPaid ? "이용 기간 종료일" : "이용 기간"}</p>
+            <p className="mt-1 font-bold">{isPaid ? formatDate(subscription?.current_period_end) : "무료 요금제는 끝나지 않아요"}</p>
+          </div>
+          <ul className="grid content-center gap-2.5 bg-card px-6 py-6 text-[15px]">
+            {planFeatures(planConfig).map((feature) => (
+              <li key={feature} className="flex items-start gap-2.5"><Check className="mt-1 size-4 shrink-0 text-success" aria-hidden="true" />{feature}</li>
+            ))}
+          </ul>
         </div>
       </section>
 
-      <section aria-labelledby="plans-heading">
-        <div className="mb-3">
-          <h2 id="plans-heading" className="text-lg font-semibold">Upgrade / Downgrade</h2>
-          <p className="text-sm text-muted-foreground">플랜별 한도와 기능을 비교한 뒤 변경하세요.</p>
+      <section aria-labelledby="usage-heading" className="space-y-4">
+        <h2 id="usage-heading" className="text-lg font-extrabold tracking-[-0.03em]">이번 달 사용량</h2>
+        <div className="grid gap-px overflow-hidden rounded-2xl border bg-border md:grid-cols-2">
+          {[
+            { label: "만들기 설정", value: automationCount, limit: planConfig.automationLimit, unit: "개" },
+            { label: "이번 달 제작", value: monthlyRuns, limit: planConfig.monthlyRunLimit, unit: "회" },
+          ].map((item) => (
+            <div key={item.label} className="space-y-3 bg-card px-6 py-5">
+              <p className="text-[13px] font-semibold text-muted-foreground">{item.label}</p>
+              <p className="tabular flex items-baseline gap-1.5"><span className="text-3xl font-extrabold tracking-[-0.04em]">{item.value}</span><span className="text-sm text-muted-foreground">/ {item.limit ?? "무제한"}{item.limit ? item.unit : ""}</span></p>
+              {item.limit ? <Progress value={Math.min(100, (item.value / item.limit) * 100)} aria-label={`${item.label} 사용량`} /> : null}
+            </div>
+          ))}
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
+      </section>
+
+      <section aria-labelledby="plans-heading" className="space-y-4">
+        <div>
+          <h2 id="plans-heading" className="text-lg font-extrabold tracking-[-0.03em]">요금제 바꾸기</h2>
+          <p className="mt-1 text-sm text-muted-foreground">요금제별 한도와 기능을 비교해 보세요.</p>
+        </div>
+        <div className="grid gap-px overflow-hidden rounded-2xl border bg-border lg:grid-cols-3">
           {ALL_PLANS.map((option) => {
             const isCurrent = option.id === plan;
             const isUpgrade = option.priceMonthlyKrw > planConfig.priceMonthlyKrw;
             return (
-              <Card key={option.id} className={isCurrent ? "border-blue-300 ring-1 ring-blue-200" : ""}>
-                <CardHeader>
+              <div key={option.id} className={cn("flex flex-col gap-5 px-6 py-6", isCurrent ? "bg-brand-soft" : "bg-card")}>
+                <div>
                   <div className="flex items-center justify-between gap-2">
-                    <CardTitle>{option.name}</CardTitle>
-                    {isCurrent ? <Badge>현재 플랜</Badge> : null}
+                    <h3 className="text-xl font-extrabold tracking-[-0.03em]">{PLAN_LABEL[option.id]}</h3>
+                    {isCurrent ? <Badge variant="brand">현재</Badge> : null}
                   </div>
-                  <div className="pt-2"><span className="text-3xl font-bold">{option.priceMonthlyKrw === 0 ? "무료" : `₩${option.priceMonthlyKrw.toLocaleString()}`}</span>{option.priceMonthlyKrw > 0 ? <span className="text-sm text-muted-foreground"> / 월</span> : null}</div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <p className="text-sm font-medium">자동화 {option.automationLimit}개 · 월 {option.monthlyRunLimit}회</p>
-                  <ul className="space-y-2 text-sm text-muted-foreground">
-                    {option.features.map((feature) => <li key={feature} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-emerald-600" />{feature}</li>)}
-                  </ul>
-                </CardContent>
-                <CardFooter>
-                  {isCurrent ? (
-                    <Button className="w-full" disabled variant="outline">현재 이용 중</Button>
-                  ) : option.id === "FREE" ? (
-                    <form action={cancelSubscriptionAction} className="w-full">
-                      <BillingSubmitButton className="w-full" variant="outline" pendingLabel="변경 중..." confirmMessage="구독을 취소하고 Free 플랜으로 변경하시겠습니까?">
-                        <ArrowDownRight /> Free로 다운그레이드
-                      </BillingSubmitButton>
-                    </form>
-                  ) : (
-                    <form action={startCheckout.bind(null, option.id)} className="w-full">
-                      <BillingSubmitButton className="w-full" variant={isUpgrade ? "default" : "outline"} pendingLabel="결제 준비 중...">
-                        {isUpgrade ? <ArrowUpRight /> : <ArrowDownRight />}
-                        {isUpgrade ? `${option.name}로 업그레이드` : `${option.name}로 변경`}
-                      </BillingSubmitButton>
-                    </form>
-                  )}
-                </CardFooter>
-              </Card>
+                  <p className="tabular mt-2"><span className="text-3xl font-extrabold tracking-[-0.04em]">{option.priceMonthlyKrw === 0 ? "무료" : `${option.priceMonthlyKrw.toLocaleString()}원`}</span>{option.priceMonthlyKrw > 0 ? <span className="text-sm text-muted-foreground"> / 월</span> : null}</p>
+                  <p className="mt-2 text-sm font-semibold">만들기 설정 {option.automationLimit}개 · 월 {option.monthlyRunLimit}회</p>
+                </div>
+                <ul className="flex-1 space-y-2 text-sm text-muted-foreground">
+                  {planFeatures(option).map((feature) => <li key={feature} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" />{feature}</li>)}
+                </ul>
+                {isCurrent ? (
+                  <Button className="w-full" disabled variant="outline">이용 중</Button>
+                ) : option.id === "FREE" ? (
+                  <form action={cancelSubscriptionAction} className="w-full">
+                    <BillingSubmitButton className="w-full" variant="outline" pendingLabel="바꾸는 중…" confirmMessage="구독을 해지하고 무료 요금제로 바꿀까요?">
+                      <ArrowDownRight /> 무료로 바꾸기
+                    </BillingSubmitButton>
+                  </form>
+                ) : (
+                  <form action={startCheckout.bind(null, option.id)} className="w-full">
+                    <BillingSubmitButton className="w-full" variant={isUpgrade ? "default" : "outline"} pendingLabel="결제 준비 중…">
+                      {isUpgrade ? <ArrowUpRight /> : <ArrowDownRight />}
+                      {PLAN_LABEL[option.id]}로 {isUpgrade ? "올리기" : "바꾸기"}
+                    </BillingSubmitButton>
+                  </form>
+                )}
+              </div>
             );
           })}
         </div>
       </section>
 
       {isPaid ? (
-        <section aria-labelledby="cancel-heading">
-          <Card className="border-red-200">
-            <CardContent className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 id="cancel-heading" className="font-semibold">Cancel subscription</h2>
-                <p className="mt-1 text-sm text-muted-foreground">취소하면 자동 갱신이 중단되고 Free 플랜 한도가 적용됩니다.</p>
-              </div>
-              <form action={cancelSubscriptionAction}>
-                <BillingSubmitButton variant="destructive" pendingLabel="취소 중..." confirmMessage="구독을 취소하시겠습니까?">구독 취소</BillingSubmitButton>
-              </form>
-            </CardContent>
-          </Card>
+        <section aria-labelledby="cancel-heading" className="flex flex-col gap-4 rounded-2xl border border-destructive/30 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 id="cancel-heading" className="font-bold">구독 해지</h2>
+            <p className="mt-1 text-sm text-muted-foreground">해지하면 자동 갱신이 멈추고 무료 요금제 한도가 적용돼요.</p>
+          </div>
+          <form action={cancelSubscriptionAction}>
+            <BillingSubmitButton variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/5 hover:text-destructive" pendingLabel="해지하는 중…" confirmMessage="구독을 해지할까요?">구독 해지</BillingSubmitButton>
+          </form>
         </section>
       ) : null}
     </div>

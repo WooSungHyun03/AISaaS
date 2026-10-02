@@ -26,7 +26,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <AppSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <AppHeader email={user.email ?? ""} plan={subscription?.plan ?? "FREE"} />
-        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 bg-muted/10 p-4 sm:p-6 lg:p-8">{children}</main>
+        <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 bg-background px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">{children}</main>
       </div>
     </div>
   );

@@ -18,17 +18,17 @@ export function MockCheckoutConfirm({ sessionId, plan }: { sessionId: string; pl
       });
 
       if (response.ok) {
-        toast.success(`${plan} 플랜으로 업그레이드되었습니다.`);
+        toast.success(`${plan === "PRO" ? "프로" : "스타터"} 요금제로 바뀌었어요.`);
         router.push(`/billing/success?session=${encodeURIComponent(sessionId)}`);
       } else {
-        toast.error("결제 시뮬레이션에 실패했습니다.");
+        toast.error("결제 시뮬레이션에 실패했어요.");
       }
     });
   };
 
   return (
-    <Button onClick={handleConfirm} disabled={isPending} className="w-full">
-      {isPending ? "처리 중..." : "결제 완료 처리 (Mock)"}
+    <Button onClick={handleConfirm} disabled={isPending} size="lg" className="w-full">
+      {isPending ? "처리하는 중…" : "결제 완료 처리 (모의)"}
     </Button>
   );
 }

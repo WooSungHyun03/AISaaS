@@ -1,26 +1,27 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, Bot, CheckCircle2, CircleX, Clock3, ExternalLink, FileText, LoaderCircle } from "lucide-react";
+import { ExternalLink, LoaderCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getAutomationRunDetail } from "@/server/automations/history";
 import { describeAutomationRunError } from "@/server/shared/errors";
 import { RunSourceBadge, RunStatusBadge } from "@/components/automations/run-badges";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { FormMessage } from "@/components/ui/form-message";
+import { PageHeader } from "@/components/layout/page-header";
+import { Mascot } from "@/components/brand/mascot";
 
 const formatter = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
-  timeStyle: "medium",
+  timeStyle: "short",
   timeZone: "Asia/Seoul",
 });
 
-function formatDate(value: string | null, fallback = "기록 없음") {
-  return value ? `${formatter.format(new Date(value))} KST` : fallback;
+function formatDate(value: string | null, fallback = "-") {
+  return value ? formatter.format(new Date(value)) : fallback;
 }
 
 function durationLabel(startedAt: string | null, completedAt: string | null) {
-  if (!startedAt || !completedAt) return "계산 중";
+  if (!startedAt || !completedAt) return "-";
   const seconds = Math.max(0, Math.round((Date.parse(completedAt) - Date.parse(startedAt)) / 1000));
   if (seconds < 60) return `${seconds}초`;
   const minutes = Math.floor(seconds / 60);
@@ -37,97 +38,73 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
   if (!detail) notFound();
   const { automation, run } = detail;
   const output = run.output;
-  const StatusIcon = run.status === "SUCCESS" ? CheckCircle2 : run.status === "FAILED" ? CircleX : run.status === "RUNNING" ? LoaderCircle : Clock3;
-  const statusColor = run.status === "SUCCESS" ? "bg-emerald-50 text-emerald-700" : run.status === "FAILED" ? "bg-red-50 text-red-700" : "bg-blue-50 text-blue-700";
+  const field = "bg-card px-5 py-4";
+  const label = "text-[13px] font-semibold text-muted-foreground";
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button asChild variant="ghost" className="-ml-2"><Link href="/automations/history"><ArrowLeft /> 실행 이력</Link></Button>
-        <span className="text-muted-foreground">/</span>
-        <Link href={`/automations/${automation.id}`} className="text-sm font-medium text-muted-foreground hover:text-foreground hover:underline">{automation.name}</Link>
-      </div>
-
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-4">
-          <span className={`flex size-12 shrink-0 items-center justify-center rounded-xl ${statusColor}`}>
-            <StatusIcon className={`size-6 ${run.status === "RUNNING" ? "animate-spin" : ""}`} />
-          </span>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Automation run</p>
-            <h1 className="mt-1 text-2xl font-bold tracking-tight">실행 상세</h1>
-            <p className="mt-1 text-sm text-muted-foreground">{automation.name}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2"><RunSourceBadge source={run.source} /><RunStatusBadge status={run.status} /></div>
-      </div>
-
-      <Card>
-        <CardHeader><CardTitle className="text-base">실행 정보</CardTitle></CardHeader>
-        <CardContent className="grid gap-5 text-sm sm:grid-cols-2 lg:grid-cols-4">
-          <div><p className="text-muted-foreground">요청 시각</p><p className="mt-1 font-medium">{formatDate(run.createdAt)}</p></div>
-          <div><p className="text-muted-foreground">시작 시각</p><p className="mt-1 font-medium">{formatDate(run.startedAt, "대기 중")}</p></div>
-          <div><p className="text-muted-foreground">완료 시각</p><p className="mt-1 font-medium">{formatDate(run.completedAt, run.status === "RUNNING" ? "진행 중" : "기록 없음")}</p></div>
-          <div><p className="text-muted-foreground">실행 시간</p><p className="mt-1 font-medium">{durationLabel(run.startedAt, run.completedAt)}</p></div>
-          <div className="sm:col-span-2 lg:col-span-4"><p className="text-muted-foreground">실행 ID</p><p className="mt-1 break-all font-mono text-xs">{run.id}</p></div>
-        </CardContent>
-      </Card>
+    <div className="mx-auto max-w-4xl space-y-8">
+      <PageHeader
+        back={{ href: `/automations/${automation.id}`, label: automation.name }}
+        title="만든 결과"
+        description={<span className="flex flex-wrap items-center gap-2"><RunStatusBadge status={run.status} /><RunSourceBadge source={run.source} /><span>{formatDate(run.createdAt)}</span></span>}
+      />
 
       {run.status === "FAILED" ? (
-        <Card className="border border-red-200 bg-red-50/40 ring-0">
-          <CardHeader><CardTitle className="flex items-center gap-2 text-base text-red-900"><CircleX className="size-4" /> 오류 메시지</CardTitle></CardHeader>
-          <CardContent>
-            <p className="whitespace-pre-wrap break-words text-sm leading-6 text-red-900">{describeAutomationRunError(run.errorMessage)}</p>
-            <p className="mt-3 text-xs text-red-800">연결 정보와 자동화 설정을 확인한 뒤 다시 실행해주세요. 문제가 반복되면 실행 ID와 함께 문의해주세요.</p>
-          </CardContent>
-        </Card>
+        <FormMessage>
+          <strong className="block">만들지 못했어요</strong>
+          {describeAutomationRunError(run.errorMessage)}
+          <span className="mt-1 block text-[13px] opacity-90">연결 정보와 설정을 확인하고 다시 만들어보세요. 계속되면 아래 번호와 함께 문의해주세요.</span>
+        </FormMessage>
       ) : null}
 
       {run.status === "RUNNING" || run.status === "QUEUED" ? (
-        <Card className="border border-blue-200 bg-blue-50/40 ring-0">
-          <CardContent className="flex items-center gap-3 py-5 text-blue-900">
-            <LoaderCircle className={`size-5 ${run.status === "RUNNING" ? "animate-spin" : ""}`} />
-            <div><p className="font-medium">{run.status === "RUNNING" ? "자동화를 실행하고 있습니다" : "실행 순서를 기다리고 있습니다"}</p><p className="mt-1 text-xs text-blue-800">완료 후 새로고침하면 AI 결과와 게시 URL을 확인할 수 있습니다.</p></div>
-          </CardContent>
-        </Card>
+        <div role="status" className="flex items-center gap-4 rounded-2xl bg-brand-soft px-6 py-5">
+          <Mascot pose="cheer" size={72} className="mascot-bob shrink-0" />
+          <div>
+            <p className="flex items-center gap-2 font-bold"><LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{run.status === "RUNNING" ? "콘텐츠를 만드는 중이에요" : "순서를 기다리고 있어요"}</p>
+            <p className="mt-1 text-sm text-muted-foreground">끝나면 새로고침해서 결과를 확인하세요.</p>
+          </div>
+        </div>
       ) : null}
 
       {run.status === "SUCCESS" ? (
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Bot className="size-4 text-blue-700" /> AI 실행 결과</CardTitle></CardHeader>
-          <CardContent className="space-y-5">
-            {!output ? <p className="text-sm text-muted-foreground">이 실행에서 표시할 수 있는 AI 결과가 없습니다.</p> : (
-              <>
-                {output.title ? <div><p className="text-xs font-medium text-muted-foreground">생성 제목</p><p className="mt-1 text-lg font-semibold">{output.title}</p></div> : null}
-                {output.topic ? <div><p className="text-xs font-medium text-muted-foreground">선택 주제</p><p className="mt-1 text-sm leading-6">{output.topic}</p></div> : null}
-                {output.summary ? <div><p className="text-xs font-medium text-muted-foreground">요약</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{output.summary}</p></div> : null}
-                {output.body ? (
-                  <div>
-                    <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><FileText className="size-3.5" /> 생성 본문</p>
-                    <div className="mt-2 max-h-[480px] overflow-y-auto rounded-xl border bg-muted/20 p-4 text-sm leading-7 whitespace-pre-wrap">{output.body}</div>
-                  </div>
-                ) : null}
-                {output.callToAction ? <div><p className="text-xs font-medium text-muted-foreground">행동 유도 문구</p><p className="mt-1 text-sm leading-6">{output.callToAction}</p></div> : null}
-                {output.keywords.length ? <div><p className="text-xs font-medium text-muted-foreground">키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.keywords.map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>)}</div></div> : null}
-              </>
-            )}
-          </CardContent>
-        </Card>
+        <section aria-labelledby="result-heading" className="space-y-5">
+          <h2 id="result-heading" className="text-lg font-extrabold tracking-[-0.03em]">결과</h2>
+          {!output ? <p className="rounded-2xl bg-muted px-5 py-6 text-[15px] text-muted-foreground">이번에는 보여줄 결과가 없어요.</p> : (
+            <div className="space-y-6 rounded-2xl border bg-card px-5 py-6 sm:px-8">
+              {output.title ? <div><p className={label}>제목</p><p className="mt-1 text-xl font-extrabold leading-8 tracking-[-0.03em]">{output.title}</p></div> : null}
+              {output.topic ? <div><p className={label}>주제</p><p className="mt-1 text-[15px] leading-7">{output.topic}</p></div> : null}
+              {output.summary ? <div><p className={label}>요약</p><p className="mt-1 whitespace-pre-wrap text-[15px] leading-7">{output.summary}</p></div> : null}
+              {output.body ? (
+                <div>
+                  <p className={label}>본문</p>
+                  <div className="mt-2 max-h-[520px] overflow-y-auto rounded-xl bg-muted px-5 py-4 text-[15px] leading-8 whitespace-pre-wrap">{output.body}</div>
+                </div>
+              ) : null}
+              {output.callToAction ? <div><p className={label}>행동 유도 문구</p><p className="mt-1 text-[15px] leading-7">{output.callToAction}</p></div> : null}
+              {output.keywords.length ? <div><p className={label}>키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.keywords.map((keyword) => <Badge key={keyword} variant="brand">{keyword}</Badge>)}</div></div> : null}
+            </div>
+          )}
+          {output?.externalUrl ? (
+            <div className="flex flex-col gap-3 rounded-2xl bg-brand-soft px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0"><p className="font-bold">WordPress {output.destinationStatus === "draft" ? "초안으로 저장했어요" : "에 올라갔어요"}</p><p className="mt-0.5 break-all text-sm text-muted-foreground">{output.externalUrl}</p></div>
+              <Button asChild variant="outline" className="shrink-0"><a href={output.externalUrl} target="_blank" rel="noopener noreferrer">열기 <ExternalLink aria-hidden="true" /></a></Button>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">이지 마케팅에 저장돼 있어요. 본문을 복사해서 직접 올려주세요.</p>
+          )}
+        </section>
       ) : null}
 
-      {run.status === "SUCCESS" ? (
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ExternalLink className="size-4 text-blue-700" /> 외부 게시 결과</CardTitle></CardHeader>
-          <CardContent>
-            {output?.externalUrl ? (
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div><p className="font-medium">WordPress {output.destinationStatus === "draft" ? "초안이 저장되었습니다" : "게시가 완료되었습니다"}</p><p className="mt-1 break-all text-sm text-muted-foreground">{output.externalUrl}</p></div>
-                <Button asChild variant="outline"><a href={output.externalUrl} target="_blank" rel="noopener noreferrer">게시물 열기 <ExternalLink /></a></Button>
-              </div>
-            ) : <p className="text-sm text-muted-foreground">외부 게시 URL이 없습니다. 생성 결과는 앱에 저장되었습니다.</p>}
-          </CardContent>
-        </Card>
-      ) : null}
+      <section aria-labelledby="info-heading" className="space-y-3">
+        <h2 id="info-heading" className="text-lg font-extrabold tracking-[-0.03em]">진행 정보</h2>
+        <dl className="grid gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-3">
+          <div className={field}><dt className={label}>시작</dt><dd className="tabular mt-1 font-medium">{formatDate(run.startedAt, "대기 중")}</dd></div>
+          <div className={field}><dt className={label}>완료</dt><dd className="tabular mt-1 font-medium">{formatDate(run.completedAt, run.status === "RUNNING" ? "만드는 중" : "-")}</dd></div>
+          <div className={field}><dt className={label}>걸린 시간</dt><dd className="mt-1 font-medium">{durationLabel(run.startedAt, run.completedAt)}</dd></div>
+          <div className={`${field} sm:col-span-3`}><dt className={label}>문의용 번호</dt><dd className="mt-1 break-all font-mono text-xs text-muted-foreground">{run.id}</dd></div>
+        </dl>
+      </section>
     </div>
   );
 }

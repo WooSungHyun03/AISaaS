@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { connectWordPress, disconnectIntegration, type SettingsActionState } from "@/app/(app)/settings/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { FormMessage } from "@/components/ui/form-message";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,11 +24,11 @@ export interface SafeConnection {
   updated_at: string;
 }
 
-const STATUS_COPY: Record<ConnectionStatus, { label: string; className: string; icon: ReactNode }> = {
-  CONNECTED: { label: "CONNECTED", className: "border-emerald-200 bg-emerald-50 text-emerald-700", icon: <CheckCircle2 className="size-3.5" /> },
-  EXPIRED: { label: "EXPIRED", className: "border-amber-200 bg-amber-50 text-amber-700", icon: <AlertTriangle className="size-3.5" /> },
-  ERROR: { label: "ERROR", className: "border-red-200 bg-red-50 text-red-700", icon: <AlertTriangle className="size-3.5" /> },
-  DISCONNECTED: { label: "연결 안 됨", className: "border-slate-200 bg-slate-50 text-slate-600", icon: <CircleOff className="size-3.5" /> },
+const STATUS_COPY: Record<ConnectionStatus, { label: string; variant: "success" | "warning" | "destructive" | "secondary"; icon: ReactNode }> = {
+  CONNECTED: { label: "연결됨", variant: "success", icon: <CheckCircle2 className="size-3.5" aria-hidden="true" /> },
+  EXPIRED: { label: "다시 연결 필요", variant: "warning", icon: <AlertTriangle className="size-3.5" aria-hidden="true" /> },
+  ERROR: { label: "오류", variant: "destructive", icon: <AlertTriangle className="size-3.5" aria-hidden="true" /> },
+  DISCONNECTED: { label: "연결 안 됨", variant: "secondary", icon: <CircleOff className="size-3.5" aria-hidden="true" /> },
 };
 
 function metadata(value: Json): Record<string, Json | undefined> {
@@ -45,17 +45,17 @@ function displayStatus(connection?: SafeConnection): ConnectionStatus {
 function StatusBadge({ connection }: { connection?: SafeConnection }) {
   const status = displayStatus(connection);
   const copy = STATUS_COPY[status];
-  return <Badge variant="outline" className={copy.className}>{copy.icon}{copy.label}</Badge>;
+  return <Badge variant={copy.variant}>{copy.icon}{copy.label}</Badge>;
 }
 
 function DisconnectButton({ businessId, provider }: { businessId: string; provider: IntegrationProvider }) {
   const router = useRouter();
   return <ConfirmationDialog
-    trigger={<Button type="button" variant="ghost" size="sm"><Unplug />연결 해제</Button>}
-    title="외부 서비스 연결을 해제할까요?"
-    description="예약된 자동화가 이 연결을 사용하면 다음 외부 게시가 실패할 수 있습니다. 언제든 다시 연결할 수 있습니다."
-    confirmLabel="연결 해제"
-    pendingLabel="해제 중..."
+    trigger={<Button type="button" variant="ghost" size="sm"><Unplug aria-hidden="true" />연결 해제</Button>}
+    title="연결을 해제할까요?"
+    description="이 연결을 쓰는 만들기 설정은 다음부터 WordPress로 글을 보내지 못할 수 있어요. 언제든 다시 연결할 수 있어요."
+    confirmLabel="해제하기"
+    pendingLabel="해제하는 중…"
     destructive
     onConfirm={async () => {
       let errorShown = false;
@@ -66,10 +66,10 @@ function DisconnectButton({ businessId, provider }: { businessId: string; provid
           errorShown = true;
           throw new Error(result.error);
         }
-        toast.success("외부 서비스 연결을 해제했습니다.");
+        toast.success("연결을 해제했어요.");
         router.refresh();
       } catch (error) {
-        if (!errorShown) toast.error("연결을 해제하지 못했습니다. 잠시 후 다시 시도해주세요.");
+        if (!errorShown) toast.error("연결을 해제하지 못했어요. 잠시 후 다시 시도해주세요.");
         throw error;
       }
     }}
@@ -91,47 +91,48 @@ function WordPressDialog({ businessId, connection }: { businessId: string; conne
       try {
         const result: SettingsActionState = await connectWordPress({}, formData);
         if (result.error) { setError(result.error); return; }
-        toast.success("WordPress 연결을 확인하고 저장했습니다.");
+        toast.success("WordPress 연결을 확인하고 저장했어요.");
         setOpen(false);
         router.refresh();
       } catch {
-        setError("WordPress 연결을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.");
+        setError("WordPress 연결을 저장하지 못했어요. 잠시 후 다시 시도해주세요.");
       }
     });
   }
 
   return <Dialog open={open} onOpenChange={(value) => { if (!isPending) { setOpen(value); setError(""); } }}>
-    <DialogTrigger asChild><Button size="sm" variant={connection ? "outline" : "default"}>{connection ? <RefreshCw /> : null}{connection ? "다시 연결" : "WordPress 연결"}</Button></DialogTrigger>
+    <DialogTrigger asChild><Button size="sm" variant={connection ? "outline" : "default"}>{connection ? <RefreshCw aria-hidden="true" /> : null}{connection ? "다시 연결" : "WordPress 연결"}</Button></DialogTrigger>
     <DialogContent>
       <DialogHeader>
         <DialogTitle>WordPress 연결</DialogTitle>
-        <DialogDescription>WordPress 사용자 프로필에서 Application Password를 만든 뒤 입력하세요. 저장 전에 연결과 글 작성 권한을 확인합니다.</DialogDescription>
+        <DialogDescription>WordPress 사용자 프로필에서 Application Password를 만들어 입력하세요. 저장하기 전에 연결과 글 작성 권한을 확인해요.</DialogDescription>
       </DialogHeader>
       <form onSubmit={handleSubmit} className="space-y-4">
         <input type="hidden" name="businessId" value={businessId} />
-        <div className="space-y-2"><Label htmlFor="wp-site-url">사이트 주소</Label><Input id="wp-site-url" name="siteUrl" type="url" defaultValue={connection?.account_identifier ?? ""} placeholder="https://example.com" required /></div>
+        <div className="space-y-2"><Label htmlFor="wp-site-url">사이트 주소</Label><Input id="wp-site-url" name="siteUrl" type="url" autoComplete="url" spellCheck={false} defaultValue={connection?.account_identifier ?? ""} placeholder="https://example.com" required /></div>
         <div className="space-y-2"><Label htmlFor="wp-username">사용자명</Label><Input id="wp-username" name="username" defaultValue={typeof meta.username === "string" ? meta.username : ""} autoComplete="username" required /></div>
-        <div className="space-y-2"><Label htmlFor="wp-app-password">Application Password</Label><Input id="wp-app-password" name="appPassword" type="password" autoComplete="new-password" required /><p className="text-xs text-muted-foreground">기존 비밀번호는 표시하지 않습니다. 다시 연결할 때 새 값을 입력해주세요.</p></div>
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <DialogFooter><DialogClose asChild><Button type="button" variant="outline" disabled={isPending}>취소</Button></DialogClose><Button type="submit" disabled={isPending}>{isPending ? "연결 확인 중..." : "확인 후 저장"}</Button></DialogFooter>
+        <div className="space-y-2"><Label htmlFor="wp-app-password">Application Password</Label><Input id="wp-app-password" name="appPassword" type="password" autoComplete="new-password" required /><p className="text-xs text-muted-foreground">저장된 비밀번호는 보여주지 않아요. 다시 연결할 땐 새로 입력해주세요.</p></div>
+        {error && <FormMessage>{error}</FormMessage>}
+        <DialogFooter><DialogClose asChild><Button type="button" variant="outline" disabled={isPending}>취소</Button></DialogClose><Button type="submit" disabled={isPending}>{isPending ? "연결 확인하는 중…" : "확인하고 저장"}</Button></DialogFooter>
       </form>
     </DialogContent>
   </Dialog>;
 }
 
-function IntegrationCard({ icon, title, description, connection, children }: { icon: ReactNode; title: string; description: string; connection?: SafeConnection; children: ReactNode }) {
-  return <Card className="flex h-full flex-col">
-    <CardHeader className="space-y-4">
-      <div className="flex items-start justify-between gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700">{icon}</span><StatusBadge connection={connection} /></div>
-      <div><CardTitle className="text-base">{title}</CardTitle><p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p></div>
-    </CardHeader>
-    <CardContent className="mt-auto space-y-4">
-      <div className="min-h-10 text-sm">
-        {connection && connection.status !== "DISCONNECTED" ? <><p className="font-medium">{connection.account_identifier ?? "계정 연결됨"}</p><p className="text-xs text-muted-foreground">최근 확인 {new Date(connection.updated_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} KST</p></> : <p className="text-muted-foreground">연결된 계정이 없습니다.</p>}
+function IntegrationRow({ icon, title, description, connection, children }: { icon: ReactNode; title: string; description: string; connection?: SafeConnection; children: ReactNode }) {
+  return <li className="grid gap-4 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-center lg:gap-6">
+    <div className="flex items-start gap-4">
+      <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-primary">{icon}</span>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2"><h3 className="font-bold">{title}</h3><StatusBadge connection={connection} /></div>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
       </div>
-      <div className="flex flex-wrap items-center gap-2">{children}</div>
-    </CardContent>
-  </Card>;
+    </div>
+    <div className="min-w-0 text-sm">
+      {connection && connection.status !== "DISCONNECTED" ? <><p className="truncate font-semibold">{connection.account_identifier ?? "계정 연결됨"}</p><p className="text-[13px] text-muted-foreground">마지막 확인 {new Date(connection.updated_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</p></> : <p className="text-muted-foreground">연결된 계정이 없어요.</p>}
+    </div>
+    <div className="flex flex-wrap items-center gap-2">{children}</div>
+  </li>;
 }
 
 export function IntegrationSettings({ businessId, connections }: { businessId: string; connections: SafeConnection[] }) {
@@ -140,17 +141,17 @@ export function IntegrationSettings({ businessId, connections }: { businessId: s
   const instagram = get("instagram");
   const email = get("email");
 
-  return <div className="grid gap-4 md:grid-cols-3">
-    <IntegrationCard icon={<Globe2 className="size-5" />} title="WordPress" description="AI가 만든 블로그 글을 초안으로 저장하거나 바로 발행합니다." connection={wordpress}>
+  return <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
+    <IntegrationRow icon={<Globe2 className="size-5" aria-hidden="true" />} title="WordPress" description="만든 블로그 글을 내 WordPress에 초안으로 보내고 싶을 때 연결해요." connection={wordpress}>
       <WordPressDialog businessId={businessId} connection={wordpress} />
       {wordpress && <DisconnectButton businessId={businessId} provider="wordpress" />}
-    </IntegrationCard>
-    <IntegrationCard icon={<Camera className="size-5" />} title="Instagram" description="Professional 계정을 연결해 게시 자동화를 준비합니다." connection={instagram}>
-      <Button asChild size="sm" variant={instagram ? "outline" : "default"}><a href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`}>{instagram ? <RefreshCw /> : null}{instagram ? "다시 연결" : "Connect Instagram"}</a></Button>
+    </IntegrationRow>
+    <IntegrationRow icon={<Camera className="size-5" aria-hidden="true" />} title="인스타그램" description="비즈니스·크리에이터 계정을 연결해 두면 콘텐츠를 만들 때 참고해요." connection={instagram}>
+      <Button asChild size="sm" variant={instagram ? "outline" : "default"}><a href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`}>{instagram ? <RefreshCw aria-hidden="true" /> : null}{instagram ? "다시 연결" : "인스타그램 연결"}</a></Button>
       {instagram && <DisconnectButton businessId={businessId} provider="instagram" />}
-    </IntegrationCard>
-    <IntegrationCard icon={<Mail className="size-5" />} title="Email" description="뉴스레터 발송용 이메일 서비스의 연결 상태를 확인합니다." connection={email}>
-      {email ? <DisconnectButton businessId={businessId} provider="email" /> : <Button size="sm" variant="outline" disabled>연결 준비 중</Button>}
-    </IntegrationCard>
-  </div>;
+    </IntegrationRow>
+    <IntegrationRow icon={<Mail className="size-5" aria-hidden="true" />} title="이메일" description="뉴스레터용 이메일 서비스 연결 상태를 확인해요." connection={email}>
+      {email ? <DisconnectButton businessId={businessId} provider="email" /> : <Button size="sm" variant="outline" disabled>준비 중</Button>}
+    </IntegrationRow>
+  </ul>;
 }

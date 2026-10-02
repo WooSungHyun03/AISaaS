@@ -21,11 +21,11 @@ export const SETUP_CONTACT_METHODS: Array<{ value: SetupRequestContactMethod; la
 ];
 
 export const SETUP_REQUEST_STATUS: Record<SetupRequestStatus, { label: string; description: string }> = {
-  REQUESTED: { label: "접수 완료", description: "요청 내용을 확인하고 있습니다." },
-  CONTACTED: { label: "연락 완료", description: "담당자가 상담을 위해 연락드렸습니다." },
-  IN_PROGRESS: { label: "구축 진행 중", description: "협의한 내용으로 자동화를 구성하고 있습니다." },
-  COMPLETED: { label: "구축 완료", description: "자동화 구축과 검수가 완료되었습니다." },
-  CANCELLED: { label: "요청 취소", description: "구축 요청이 취소되었습니다." },
+  REQUESTED: { label: "접수 완료", description: "요청 내용을 확인하고 있어요." },
+  CONTACTED: { label: "연락 완료", description: "담당자가 상담을 위해 연락드렸어요." },
+  IN_PROGRESS: { label: "세팅 진행 중", description: "협의한 내용으로 세팅하고 있어요." },
+  COMPLETED: { label: "세팅 완료", description: "세팅과 확인이 끝났어요." },
+  CANCELLED: { label: "요청 취소", description: "요청이 취소됐어요." },
 };
 
 export function setupAutomationTypeLabel(value: string) {

@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleAlert } from "lucide-react";
+import { CheckCircle2, CircleAlert, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function FormMessage({
@@ -9,22 +9,24 @@ export function FormMessage({
 }: {
   id?: string;
   children: React.ReactNode;
-  variant?: "error" | "success";
+  variant?: "error" | "success" | "info";
   className?: string;
 }) {
-  const Icon = variant === "error" ? CircleAlert : CheckCircle2;
+  const Icon = variant === "error" ? CircleAlert : variant === "success" ? CheckCircle2 : Info;
   return (
     <p
       id={id}
       role={variant === "error" ? "alert" : "status"}
       aria-live="polite"
       className={cn(
-        "flex items-start gap-2 rounded-lg border px-3 py-2 text-sm leading-5",
-        variant === "error" ? "border-destructive/25 bg-destructive/5 text-destructive" : "border-emerald-200 bg-emerald-50 text-emerald-800",
+        "flex items-start gap-2.5 rounded-lg px-3.5 py-3 text-sm leading-6",
+        variant === "error" && "bg-destructive/[0.08] text-destructive",
+        variant === "success" && "bg-success-soft text-success",
+        variant === "info" && "bg-brand-soft text-secondary-foreground",
         className,
       )}
     >
-      <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <Icon className="mt-1 size-4 shrink-0" aria-hidden="true" />
       <span>{children}</span>
     </p>
   );

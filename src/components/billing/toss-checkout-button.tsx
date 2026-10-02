@@ -40,7 +40,7 @@ export function TossCheckoutButton({
 
   async function handleCheckout() {
     if (!window.TossPayments) {
-      toast.error("결제 모듈을 불러오는 중입니다. 잠시 후 다시 시도해 주세요.");
+      toast.error("결제 모듈을 불러오는 중이에요. 잠시 후 다시 시도해 주세요.");
       return;
     }
 
@@ -54,7 +54,7 @@ export function TossCheckoutButton({
         customerEmail,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "결제창을 열지 못했습니다.";
+      const message = error instanceof Error ? error.message : "결제창을 열지 못했어요.";
       toast.error(message);
       setIsPending(false);
     }
@@ -66,11 +66,11 @@ export function TossCheckoutButton({
         src="https://js.tosspayments.com/v2/standard"
         strategy="afterInteractive"
         onReady={() => setIsSdkReady(true)}
-        onError={() => toast.error("토스페이먼츠 SDK를 불러오지 못했습니다.")}
+        onError={() => toast.error("결제 모듈을 불러오지 못했어요.")}
       />
-      <Button className="w-full bg-[#3182f6] text-white hover:bg-[#1b64da]" onClick={handleCheckout} disabled={!isSdkReady || isPending}>
-        {isPending ? <Loader2 className="animate-spin" /> : <CreditCard />}
-        {isPending ? "결제창 여는 중..." : isSdkReady ? "카드 등록 후 테스트 결제" : "결제 모듈 준비 중..."}
+      <Button size="lg" className="w-full" onClick={handleCheckout} disabled={!isSdkReady || isPending}>
+        {isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <CreditCard aria-hidden="true" />}
+        {isPending ? "결제창을 여는 중…" : isSdkReady ? "카드 등록하고 결제하기" : "결제 준비 중…"}
       </Button>
     </>
   );

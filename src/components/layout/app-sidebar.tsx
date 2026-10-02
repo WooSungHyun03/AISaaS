@@ -2,100 +2,62 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  Store,
-  ListChecks,
-  History,
-  Activity,
-  CalendarDays,
-  Compass,
-  BookOpen,
-  Building2,
-  CreditCard,
-  Settings,
-  LogOut,
-  type LucideIcon,
-} from "lucide-react";
+import { LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { signOut } from "@/app/(auth)/actions";
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-  exact?: boolean;
-}
-
-interface NavSection {
-  label?: string;
-  items: NavItem[];
-}
-
-const NAV_SECTIONS: NavSection[] = [
-  {
-    items: [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
-  },
-  {
-    label: "Marketing",
-    items: [
-      { href: "/marketing/diagnosis", label: "마케팅 진단", icon: Activity },
-      { href: "/calendar", label: "마케팅 캘린더", icon: CalendarDays },
-    ],
-  },
-  {
-    label: "Automations",
-    items: [
-      { href: "/automations/marketplace", label: "Marketplace", icon: Store },
-      { href: "/automations", label: "My Automations", icon: ListChecks, exact: true },
-      { href: "/automations/history", label: "Execution History", icon: History },
-    ],
-  },
-  {
-    items: [
-      { href: "/directory", label: "AI Directory", icon: Compass },
-      { href: "/guides", label: "Guides", icon: BookOpen },
-    ],
-  },
-  {
-    items: [
-      { href: "/business", label: "Business", icon: Building2 },
-      { href: "/billing", label: "Billing", icon: CreditCard },
-      { href: "/settings", label: "Settings", icon: Settings },
-    ],
-  },
-];
+import { Logo } from "@/components/brand/logo";
+import { APP_NAV, isNavActive } from "./nav-config";
 
 export function AppSidebar() {
   const pathname = usePathname();
+  // "/automations" 는 하위 경로(/marketplace, /history)를 별도 메뉴로 가지므로,
+  // 더 구체적인 메뉴가 일치하면 상위 메뉴는 활성 표시하지 않는다.
+  const allItems = APP_NAV.flatMap((section) => section.items);
+  const mostSpecific = allItems
+    .filter((item) => !item.comingSoon && isNavActive(pathname, item))
+    .sort((a, b) => b.href.length - a.href.length)[0];
 
   return (
-    <aside className="hidden w-60 shrink-0 border-r bg-muted/20 md:flex md:flex-col">
-      <div className="flex h-16 items-center border-b px-6">
-        <Link href="/dashboard" className="text-lg font-semibold tracking-tight">
-          AutoBiz
-        </Link>
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
+      <div className="flex h-16 shrink-0 items-center px-5">
+        <Logo href="/dashboard" tone="dark" />
       </div>
-      <nav className="flex-1 space-y-6 overflow-y-auto px-3 py-6" aria-label="앱 주요 메뉴">
-        {NAV_SECTIONS.map((section, index) => (
-          <div key={section.label ?? index} className="space-y-1">
+      <nav className="flex-1 space-y-6 overflow-y-auto px-3 pb-6 pt-3" aria-label="앱 주요 메뉴">
+        {APP_NAV.map((section, index) => (
+          <div key={section.label ?? index} className="space-y-0.5">
             {section.label ? (
-              <p className="px-3 text-xs font-medium uppercase text-muted-foreground">{section.label}</p>
+              <p className="px-3 pb-1.5 text-xs font-semibold text-sidebar-foreground/60">{section.label}</p>
             ) : null}
             {section.items.map((item) => {
-              const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href);
               const Icon = item.icon;
+              if (item.comingSoon) {
+                return (
+                  <div
+                    key={item.href}
+                    aria-disabled="true"
+                    className="flex min-h-10 items-center gap-3 rounded-lg px-3 text-[15px] font-medium text-sidebar-foreground/45"
+                  >
+                    <Icon className="size-[18px]" aria-hidden="true" />
+                    {item.label}
+                    <span className="ml-auto rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-sidebar-foreground/70">준비 중</span>
+                  </div>
+                );
+              }
+              const isActive = mostSpecific?.href === item.href;
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   aria-current={isActive ? "page" : undefined}
                   className={cn(
-                    "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                    isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    "relative flex min-h-10 items-center gap-3 rounded-lg px-3 text-[15px] font-medium transition-colors",
+                    isActive
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                      : "text-sidebar-foreground hover:bg-white/[0.06] hover:text-white",
                   )}
                 >
-                  <Icon className="h-4 w-4" aria-hidden="true" />
+                  {isActive ? <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-spark" aria-hidden="true" /> : null}
+                  <Icon className="size-[18px]" aria-hidden="true" />
                   {item.label}
                 </Link>
               );
@@ -103,12 +65,12 @@ export function AppSidebar() {
           </div>
         ))}
       </nav>
-      <form action={signOut} className="border-t p-3">
+      <form action={signOut} className="shrink-0 border-t border-sidebar-border p-3">
         <button
           type="submit"
-          className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="flex min-h-10 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-[15px] font-medium text-sidebar-foreground transition-colors hover:bg-white/[0.06] hover:text-white"
         >
-          <LogOut className="h-4 w-4" aria-hidden="true" />
+          <LogOut className="size-[18px]" aria-hidden="true" />
           로그아웃
         </button>
       </form>

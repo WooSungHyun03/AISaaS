@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { describeAutomationRunError } from "@/server/shared/errors";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { FormMessage } from "@/components/ui/form-message";
+import { PageHeader } from "@/components/layout/page-header";
+import { templateTitle } from "@/components/automations/template-card";
+import { AutomationStatusBadge, RunStatusBadge } from "@/components/automations/run-badges";
 import { RunNowButton } from "@/components/automations/run-now-button";
 import { AutomationStatusActions } from "@/components/automations/automation-status-actions";
 import { AutomationSettingsDialog } from "@/components/automations/automation-settings-dialog";
@@ -12,13 +13,7 @@ import type { AutomationSchedule } from "@/types/automation";
 import { BLOG_DELIVERY_LABEL, blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
 import type { Json } from "@/types/domain";
 
-const STATUS_LABEL: Record<string, string> = { DRAFT: "초안", ACTIVE: "실행중", PAUSED: "일시정지", ERROR: "오류" };
-const RUN_STATUS_LABEL: Record<string, string> = {
-  QUEUED: "대기중",
-  RUNNING: "실행중",
-  SUCCESS: "성공",
-  FAILED: "실패",
-};
+const fmt = (value: string) => new Date(value).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
 const WEEKDAY_LABEL = ["일", "월", "화", "수", "목", "금", "토"];
 
 function resultOutput(value: Json | null): Record<string, Json | undefined> | null {
@@ -33,7 +28,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
 
   const { data: automation, error: automationError } = await supabase.from("automations")
     .select("*").eq("id", id).eq("user_id", user.id).maybeSingle();
-  if (automationError) throw new Error("자동화 정보를 불러오지 못했습니다.", { cause: automationError });
+  if (automationError) throw new Error("만들기 설정을 불러오지 못했습니다.", { cause: automationError });
   if (!automation) notFound();
 
   const [businessResult, businessesResult, templateResult, runsResult, contentResult, inFlightResult] = await Promise.all([
@@ -56,7 +51,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
       .in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle(),
   ]);
   if (businessResult.error || businessesResult.error || templateResult.error || runsResult.error || contentResult.error || inFlightResult.error) {
-    throw new Error("자동화 상세 정보를 불러오지 못했습니다.");
+    throw new Error("만들기 설정 상세를 불러오지 못했습니다.");
   }
   const business = businessResult.data;
   const businesses = businessesResult.data ?? [];
@@ -82,133 +77,96 @@ export default async function AutomationDetailPage({ params }: { params: Promise
     legacy: !blogConfig,
   } : undefined;
 
+  const scheduleText = schedule?.frequency === "WEEKLY"
+    ? `매주 ${(schedule.daysOfWeek ?? []).map((d) => WEEKDAY_LABEL[d]).join("·")}요일 ${schedule.timeOfDay}`
+    : `매일 ${schedule?.timeOfDay}`;
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight">{automation.name}</h1>
-            <Badge variant={automation.status === "ERROR" ? "destructive" : "secondary"}>{STATUS_LABEL[automation.status]}</Badge>
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {business?.name} · {template?.name}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="mx-auto max-w-5xl space-y-8">
+      <PageHeader
+        back={{ href: "/automations", label: "만들기 설정" }}
+        title={automation.name}
+        description={<span className="flex flex-wrap items-center gap-x-3 gap-y-1"><AutomationStatusBadge status={automation.status} /><span>{business?.name} · {template ? templateTitle(template.slug, template.name) : "콘텐츠"}</span></span>}
+        actions={<>
           <AutomationSettingsDialog key={automation.updated_at} automationId={automation.id} name={automation.name} businessId={automation.business_id} businesses={businesses} schedule={schedule} blogSettings={blogSettings} hasInFlightRun={hasInFlightRun} />
           <RunNowButton automationId={automation.id} hasInFlightRun={hasInFlightRun} />
           <AutomationStatusActions automationId={automation.id} status={automation.status} primary={Boolean(blogConfig)} hasInFlightRun={hasInFlightRun} />
-        </div>
-      </div>
+        </>}
+      />
 
-      {latestRun?.status === "FAILED" && <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
-        <p className="font-medium text-destructive">최근 실행이 실패했습니다.</p>
-        <p className="mt-1">{describeAutomationRunError(latestRun.error_message)}</p>
-        <Link href={`/automations/${automation.id}/runs/${latestRun.id}`} className="mt-2 inline-block text-primary underline underline-offset-2">실행 상세 보기</Link>
-      </div>}
+      {latestRun?.status === "FAILED" && (
+        <FormMessage>
+          최근에 만들다가 실패했어요. {describeAutomationRunError(latestRun.error_message)}{" "}
+          <Link href={`/automations/${automation.id}/runs/${latestRun.id}`} className="font-semibold underline underline-offset-2">자세히 보기</Link>
+        </FormMessage>
+      )}
+      {automation.status === "DRAFT" && blogConfig && (
+        <FormMessage variant="info">설정을 저장했어요. 내용을 확인하고 <strong>켜기</strong>를 누르면 정해진 때마다 글 초안을 만들어요. ‘지금 만들기’는 바로 1회 만들어요. 만든 글은 직접 올려주세요.</FormMessage>
+      )}
 
-      {blogConfig && <Card>
-        <CardHeader><CardTitle className="text-base">블로그 자동화 설정 요약</CardTitle></CardHeader>
-        <CardContent className="space-y-4 text-sm">
-          {automation.status === "DRAFT" && <p className="rounded-md bg-primary/5 p-3 text-foreground">설정이 저장되었습니다. 내용을 확인한 뒤 <strong>활성화</strong>를 누르면 예약 실행이 시작됩니다. Run Now를 누르면 즉시 1회 실행됩니다. 바로 발행을 선택했다면 글이 공개 게시됩니다.</p>}
-          <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-            <div><dt className="text-muted-foreground">사업체</dt><dd className="font-medium">{business?.name ?? "-"}</dd></div>
-            <div><dt className="text-muted-foreground">게시 목적</dt><dd className="font-medium">{blogConfig.objective}</dd></div>
-            <div><dt className="text-muted-foreground">키워드</dt><dd className="font-medium">{blogConfig.keywords.join(", ")}</dd></div>
-            <div><dt className="text-muted-foreground">글의 톤</dt><dd className="font-medium">{blogConfig.tone}</dd></div>
-            <div><dt className="text-muted-foreground">저장 위치</dt><dd className="font-medium">{BLOG_DELIVERY_LABEL[blogConfig.deliveryMode]}</dd></div>
-            {blogConfig.wordpress && <div><dt className="text-muted-foreground">WordPress 연결</dt><dd className="font-medium">{blogConfig.wordpress.siteUrl} · {blogConfig.wordpress.username}</dd></div>}
-          </dl>
-        </CardContent>
-      </Card>}
+      <section aria-labelledby="summary-heading" className="space-y-4">
+        <h2 id="summary-heading" className="text-lg font-extrabold tracking-[-0.03em]">설정 요약</h2>
+        <dl className="grid gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-2">
+          <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">만드는 주기</dt><dd className="mt-1 font-bold">{scheduleText} <span className="font-normal text-muted-foreground">(한국 시간)</span></dd></div>
+          <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">다음 제작</dt><dd className="mt-1 font-bold">{automation.next_run_at && automation.status === "ACTIVE" ? fmt(automation.next_run_at) : "꺼져 있어요"}</dd></div>
+          {blogConfig && <>
+            <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">글의 목적</dt><dd className="mt-1 font-medium">{blogConfig.objective}</dd></div>
+            <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">키워드</dt><dd className="mt-1 font-medium">{blogConfig.keywords.join(", ")}</dd></div>
+            <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">말투</dt><dd className="mt-1 font-medium">{blogConfig.tone}</dd></div>
+            <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">저장 위치</dt><dd className="mt-1 font-medium">{BLOG_DELIVERY_LABEL[blogConfig.deliveryMode]}{blogConfig.wordpress ? ` · ${blogConfig.wordpress.siteUrl}` : ""}</dd></div>
+          </>}
+        </dl>
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">실행 주기</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          {schedule?.frequency === "WEEKLY"
-            ? `매주 ${(schedule.daysOfWeek ?? []).map((d) => WEEKDAY_LABEL[d]).join(", ")}요일 ${schedule.timeOfDay}`
-            : `매일 ${schedule?.timeOfDay}`}{" "}
-          (KST)
-          {automation.next_run_at ? (
-            <span className="block">다음 실행: {new Date(automation.next_run_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} (KST)</span>
-          ) : null}
-        </CardContent>
-      </Card>
+      {latestOutput && (
+        <section aria-labelledby="latest-heading" className="space-y-3">
+          <h2 id="latest-heading" className="text-lg font-extrabold tracking-[-0.03em]">가장 최근에 만든 결과</h2>
+          <div className="rounded-2xl border bg-card px-5 py-5 sm:px-6">
+            <p className="text-[13px] text-muted-foreground">{fmt(latestSuccessfulRun!.created_at)}</p>
+            {typeof latestOutput.title === "string" && <p className="mt-2 text-lg font-bold leading-7">{latestOutput.title}</p>}
+            {typeof latestOutput.topic === "string" && <p className="mt-1 text-sm text-muted-foreground">주제 · {latestOutput.topic}</p>}
+            <p className="mt-3 text-sm">
+              {typeof latestOutput.externalUrl === "string" && latestOutput.externalUrl
+                ? <>WordPress {latestOutput.wordpressStatus === "draft" ? "초안" : "글"} · <a href={latestOutput.externalUrl} target="_blank" rel="noreferrer" className="break-all font-semibold text-primary underline underline-offset-2">{latestOutput.externalUrl}</a></>
+                : <span className="text-muted-foreground">이지 마케팅에 저장돼 있어요. 아래 ‘만든 콘텐츠’에서 복사해 쓰세요.</span>}
+            </p>
+          </div>
+        </section>
+      )}
 
-      {latestOutput && <Card>
-        <CardHeader><CardTitle className="text-base">최근 성공한 실행 결과</CardTitle></CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <p className="text-xs text-muted-foreground">{new Date(latestSuccessfulRun!.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} (KST)</p>
-          {typeof latestOutput.title === "string" && <div><span className="text-muted-foreground">AI 생성 제목</span><p className="font-medium">{latestOutput.title}</p></div>}
-          {typeof latestOutput.topic === "string" && <div><span className="text-muted-foreground">AI 선택 주제</span><p className="font-medium">{latestOutput.topic}</p></div>}
-          {typeof latestOutput.externalUrl === "string" && latestOutput.externalUrl ? <div><span className="text-muted-foreground">WordPress {latestOutput.wordpressStatus === "draft" ? "초안 URL (WordPress 로그인 필요)" : "게시 URL"}</span><p><a href={latestOutput.externalUrl} target="_blank" rel="noreferrer" className="break-all text-primary underline">{latestOutput.externalUrl}</a></p></div> : <p className="text-muted-foreground">WordPress URL 없음 · 앱에 콘텐츠가 저장되었습니다.</p>}
-        </CardContent>
-      </Card>}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">실행 히스토리</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {runs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">아직 실행 기록이 없습니다. Run Now를 눌러 테스트해보세요.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>시각</TableHead>
-                  <TableHead>상태</TableHead>
-                  <TableHead>결과 / 오류</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {runs.map((run) => (
-                  <TableRow key={run.id}>
-                    <TableCell>{new Date(run.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} KST</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={run.status === "SUCCESS" ? "default" : run.status === "FAILED" ? "destructive" : "secondary"}
-                      >
-                        {RUN_STATUS_LABEL[run.status]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <div className="max-w-md space-y-1">
-                        <p>{run.status === "FAILED" ? describeAutomationRunError(run.error_message) : run.status === "SUCCESS" ? "완료" : "진행 중"}</p>
-                        <Link href={`/automations/${automation.id}/runs/${run.id}`} className="text-primary underline-offset-2 hover:underline">상세 보기</Link>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {(contentHistory ?? []).length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">생성된 콘텐츠</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {(contentHistory ?? []).map((item) => (
-              <div key={item.id} className="border-b pb-4 last:border-0 last:pb-0">
-                <p className="font-medium">{item.title}</p>
-                {item.topic && <p className="text-xs text-muted-foreground">주제: {item.topic}</p>}
-                <p className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString("ko-KR")}</p>
-                <p className="mt-2 whitespace-pre-line text-sm text-muted-foreground">{item.content}</p>
-                {item.external_url ? (
-                  <a href={item.external_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm text-primary underline">
-                    WordPress 글 보기
-                  </a>
-                ) : null}
-              </div>
+      <section aria-labelledby="runs-heading" className="space-y-3">
+        <h2 id="runs-heading" className="text-lg font-extrabold tracking-[-0.03em]">제작 기록</h2>
+        {runs.length === 0 ? (
+          <p className="rounded-2xl bg-muted px-5 py-6 text-[15px] text-muted-foreground">아직 만든 기록이 없어요. ‘지금 만들기’를 눌러 먼저 한 번 만들어보세요.</p>
+        ) : (
+          <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
+            {runs.map((run) => (
+              <li key={run.id}>
+                <Link href={`/automations/${automation.id}/runs/${run.id}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3.5 transition-colors hover:bg-brand-soft/50 focus-visible:outline-offset-[-2px] sm:px-6">
+                  <span className="tabular w-32 shrink-0 text-sm font-medium">{fmt(run.created_at)}</span>
+                  <RunStatusBadge status={run.status} />
+                  <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{run.status === "FAILED" ? describeAutomationRunError(run.error_message) : run.status === "SUCCESS" ? "완료" : "진행 중"}</span>
+                </Link>
+              </li>
             ))}
-          </CardContent>
-        </Card>
+          </ul>
+        )}
+      </section>
+
+      {contentHistory.length > 0 ? (
+        <section aria-labelledby="content-heading" className="space-y-3">
+          <h2 id="content-heading" className="text-lg font-extrabold tracking-[-0.03em]">만든 콘텐츠</h2>
+          <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
+            {contentHistory.map((item) => (
+              <li key={item.id} className="px-5 py-5 sm:px-6">
+                <p className="font-bold leading-7">{item.title}</p>
+                <p className="mt-0.5 text-[13px] text-muted-foreground">{item.topic ? `주제 ${item.topic} · ` : ""}{fmt(item.created_at)}</p>
+                <p className="mt-3 whitespace-pre-line text-[15px] leading-7 text-muted-foreground">{item.content}</p>
+                {item.external_url ? <a href={item.external_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-semibold text-primary underline underline-offset-2">WordPress 글 보기</a> : null}
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
     </div>
   );

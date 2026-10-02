@@ -37,16 +37,16 @@ export function CalendarPlanGenerator({
           name="weeks"
           defaultValue="2"
           disabled={disabled || isPending}
-          className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 sm:w-32"
+          className="h-11 w-full cursor-pointer rounded-lg border border-input bg-card px-3.5 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50 sm:w-32"
         >
           <option value="2">2주</option>
           <option value="3">3주</option>
           <option value="4">4주</option>
         </select>
       </div>
-      <Button type="submit" size="lg" disabled={disabled || isPending} className="h-9 bg-blue-600 text-white hover:bg-blue-700">
-        {isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}
-        {isPending ? "계획 생성 중..." : "자동 계획 생성"}
+      <Button type="submit" disabled={disabled || isPending}>
+        {isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Sparkles aria-hidden="true" />}
+        {isPending ? "계획을 짜는 중…" : "계획 만들기"}
       </Button>
       {state.status === "error" ? <p id="calendar-plan-error" className="sr-only" role="alert">{state.message}</p> : null}
       {state.status === "success" ? <span className="sr-only" role="status">{state.message}</span> : null}

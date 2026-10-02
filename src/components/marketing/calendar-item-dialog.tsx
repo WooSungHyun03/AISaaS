@@ -23,8 +23,8 @@ import { AUTOMATION_AVAILABILITY } from "@/types/automation";
 
 const PLATFORM_LABEL: Record<CalendarPlatform, string> = {
   blog: "블로그",
-  instagram_reels: "Instagram 릴스",
-  youtube_shorts: "YouTube 쇼츠",
+  instagram_reels: "인스타 릴스",
+  youtube_shorts: "유튜브 쇼츠",
 };
 const STATUS_LABEL: Record<CalendarItemStatus, string> = {
   PLANNED: "계획",
@@ -34,24 +34,23 @@ const STATUS_LABEL: Record<CalendarItemStatus, string> = {
 };
 
 function platformTone(platform: CalendarPlatform) {
-  if (platform === "blog") return "border-blue-200 bg-blue-50 text-blue-800";
-  if (platform === "instagram_reels") return "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-800";
-  return "border-red-200 bg-red-50 text-red-800";
+  if (platform === "blog") return "border-transparent bg-brand-soft text-primary";
+  if (platform === "instagram_reels") return "border-transparent bg-warning-soft text-warning";
+  return "border-transparent bg-destructive/10 text-destructive";
 }
 
 function statusTone(status: CalendarItemStatus) {
-  if (status === "PUBLISHED") return "border-emerald-200 bg-emerald-50 text-emerald-800";
-  if (status === "GENERATED") return "border-violet-200 bg-violet-50 text-violet-800";
-  if (status === "SKIPPED") return "border-slate-200 bg-slate-100 text-slate-600";
-  return "border-amber-200 bg-amber-50 text-amber-800";
+  if (status === "PUBLISHED" || status === "GENERATED") return "border-transparent bg-success-soft text-success";
+  if (status === "SKIPPED") return "border-transparent bg-muted text-muted-foreground";
+  return "border-border bg-card text-muted-foreground";
 }
 
 function disabledReason(item: CalendarItem, isToday: boolean): string | null {
-  if (item.status !== "PLANNED") return "이 항목은 이미 처리되었습니다.";
-  if (!isToday) return "예정일이 오늘인 콘텐츠만 바로 생성할 수 있습니다.";
-  if (item.platform === "instagram_reels") return "Instagram 릴스 생성 연결은 준비 중입니다.";
+  if (item.status !== "PLANNED") return "이미 처리된 항목이에요.";
+  if (!isToday) return "예정일이 오늘인 콘텐츠만 바로 만들 수 있어요.";
+  if (item.platform === "instagram_reels") return "인스타 릴스 제작은 준비 중이에요.";
   if (item.platform === "youtube_shorts" && AUTOMATION_AVAILABILITY.shorts !== "AVAILABLE") {
-    return "YouTube Shorts 자동화는 Coming Soon입니다.";
+    return "유튜브 쇼츠 제작은 준비 중이에요.";
   }
   return null;
 }
@@ -81,11 +80,11 @@ export function CalendarItemDialog({
           toast.error(result.error);
           return;
         }
-        toast.success("오늘의 콘텐츠를 생성하고 캘린더에 연결했습니다.");
+        toast.success("오늘 콘텐츠를 만들고 캘린더에 연결했어요.");
         setOpen(false);
         router.refresh();
       } catch {
-        const message = "콘텐츠를 생성하지 못했습니다. 잠시 후 다시 시도해주세요.";
+        const message = "콘텐츠를 만들지 못했어요. 잠시 후 다시 시도해주세요.";
         setError(message);
         toast.error(message);
       }
@@ -96,60 +95,59 @@ export function CalendarItemDialog({
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!isPending) { setOpen(nextOpen); if (!nextOpen) setError(""); } }}>
       <DialogTrigger asChild>
         {variant === "compact" ? (
-          <button type="button" className={`block w-full rounded-md border px-2 py-1.5 text-left text-[11px] leading-4 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${platformTone(item.platform)}`}>
-            <span className="block truncate font-semibold">{item.topic}</span>
-            <span className="block truncate opacity-75">{PLATFORM_LABEL[item.platform]} · {STATUS_LABEL[item.status]}</span>
+          <button type="button" className={`block w-full cursor-pointer rounded-md border px-2 py-1.5 text-left text-xs leading-4 transition-[filter] hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring ${platformTone(item.platform)}`}>
+            <span className="block truncate font-bold">{item.topic}</span>
+            <span className="block truncate opacity-80">{PLATFORM_LABEL[item.platform]} · {STATUS_LABEL[item.status]}</span>
           </button>
         ) : (
-          <button type="button" className="block w-full rounded-xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+          <button type="button" className="block w-full cursor-pointer rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/50 hover:bg-brand-soft/40 focus-visible:ring-2 focus-visible:ring-ring">
             <span className="flex flex-wrap items-center gap-2">
               <Badge variant="outline" className={platformTone(item.platform)}>{PLATFORM_LABEL[item.platform]}</Badge>
               <Badge variant="outline" className={statusTone(item.status)}>{STATUS_LABEL[item.status]}</Badge>
-              <span className="text-xs text-slate-500">{item.content_type}</span>
             </span>
-            <span className="mt-3 block text-sm font-semibold text-slate-950">{item.topic}</span>
-            <span className="mt-1.5 line-clamp-2 block text-xs leading-5 text-slate-600">{item.summary}</span>
+            <span className="mt-3 block font-bold leading-6">{item.topic}</span>
+            <span className="mt-1.5 line-clamp-2 block text-sm leading-6 text-muted-foreground">{item.summary}</span>
           </button>
         )}
       </DialogTrigger>
 
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <div className="flex flex-wrap items-center gap-2 pr-8">
             <Badge variant="outline" className={platformTone(item.platform)}>{PLATFORM_LABEL[item.platform]}</Badge>
             <Badge variant="outline" className={statusTone(item.status)}>{STATUS_LABEL[item.status]}</Badge>
           </div>
-          <DialogTitle className="pt-1 text-xl leading-7">{item.topic}</DialogTitle>
-          <DialogDescription>{item.planned_date} · {item.content_type}</DialogDescription>
+          <DialogTitle className="pt-1 text-xl font-extrabold leading-8 tracking-[-0.03em]">{item.topic}</DialogTitle>
+          <DialogDescription>{item.planned_date.replaceAll("-", ".")} · {item.content_type}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5 py-2">
           <section>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">콘텐츠 개요</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-700">{item.summary}</p>
+            <h3 className="text-sm font-bold">콘텐츠 개요</h3>
+            <p className="mt-2 text-[15px] leading-7 text-muted-foreground">{item.summary}</p>
           </section>
-          <dl className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
-            <div><dt className="text-xs font-medium text-slate-500">마케팅 목표</dt><dd className="mt-1.5 text-sm leading-6 text-slate-900">{item.goal}</dd></div>
-            <div><dt className="text-xs font-medium text-slate-500">CTA</dt><dd className="mt-1.5 text-sm leading-6 text-slate-900">{item.cta}</dd></div>
+          <dl className="grid gap-4 rounded-xl bg-muted p-4 sm:grid-cols-2">
+            <div><dt className="text-[13px] font-semibold text-muted-foreground">마케팅 목표</dt><dd className="mt-1 text-[15px] leading-7">{item.goal}</dd></div>
+            <div><dt className="text-[13px] font-semibold text-muted-foreground">행동 유도 문구 (CTA)</dt><dd className="mt-1 text-[15px] leading-7">{item.cta}</dd></div>
           </dl>
           {reason && item.status === "PLANNED" ? (
-            <p className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800"><CalendarClock className="mt-0.5 size-4 shrink-0" />{reason}</p>
+            <p className="flex items-start gap-2 rounded-lg bg-warning-soft p-3 text-sm leading-6 text-warning"><CalendarClock className="mt-1 size-4 shrink-0" aria-hidden="true" />{reason}</p>
           ) : null}
           {item.status === "GENERATED" ? (
-            <p className="flex items-start gap-2 rounded-lg bg-emerald-50 p-3 text-xs leading-5 text-emerald-800"><CheckCircle2 className="mt-0.5 size-4 shrink-0" />생성 결과가 콘텐츠 기록에 저장되고 자동화와 연결되었습니다.</p>
+            <p className="flex items-start gap-2 rounded-lg bg-success-soft p-3 text-sm leading-6 text-success"><CheckCircle2 className="mt-1 size-4 shrink-0" aria-hidden="true" />만든 결과가 제작 기록에 저장돼 있어요.</p>
           ) : null}
-          {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+          {error ? <p role="alert" className="text-sm font-medium text-destructive">{error}</p> : null}
         </div>
 
         <DialogFooter>
           <DialogClose asChild><Button type="button" variant="outline" disabled={isPending}>닫기</Button></DialogClose>
           {item.status === "GENERATED" && item.automation_id ? (
-            <Button asChild variant="outline"><Link href={`/automations/${item.automation_id}`}><WandSparkles /> 생성 결과 보기</Link></Button>
+            <Button asChild variant="outline"><Link href={`/automations/${item.automation_id}`}><WandSparkles aria-hidden="true" /> 만든 결과 보기</Link></Button>
           ) : null}
           {item.status === "PLANNED" ? (
-            <Button type="button" onClick={handleGenerate} disabled={Boolean(reason) || isPending} className="bg-blue-600 text-white hover:bg-blue-700">
-              {isPending ? <Loader2 className="animate-spin" /> : <Play />}
-              {isPending ? "콘텐츠 생성 중..." : "오늘 콘텐츠 생성"}
+            <Button type="button" onClick={handleGenerate} disabled={Boolean(reason) || isPending}>
+              {isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Play aria-hidden="true" />}
+              {isPending ? "콘텐츠를 만드는 중…" : "오늘 콘텐츠 만들기"}
             </Button>
           ) : null}
         </DialogFooter>

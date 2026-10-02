@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { MarketplaceCatalog } from "@/components/automations/marketplace-catalog";
+import { PageHeader } from "@/components/layout/page-header";
 import { AUTOMATION_AVAILABILITY } from "@/types/automation";
 
 export default async function MarketplacePage() {
@@ -19,17 +20,11 @@ export default async function MarketplacePage() {
   });
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
-      <div className="max-w-2xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-blue-700">Automations</p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Automation Marketplace</h1>
-        <p className="mt-3 text-sm leading-6 text-slate-600">마케팅 콘텐츠에 맞는 자동화를 살펴보세요. 네이버 블로그용 원고 생성, Instagram 베타 게시와 준비 중인 기능을 카드 상태로 구분했습니다.</p>
-      </div>
-      <div className="flex flex-wrap gap-x-5 gap-y-2 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-xs text-blue-900">
-        <span><strong>Available</strong> · 지금 설정 가능</span>
-        <span><strong>Beta</strong> · 시험 제공</span>
-        <span><strong>Coming Soon</strong> · 준비 중, 생성 불가</span>
-      </div>
+    <div className="mx-auto max-w-4xl space-y-8">
+      <PageHeader
+        title="어떤 콘텐츠를 만들까요?"
+        description="블로그 글과 숏폼 영상을 만들어드려요. 만든 콘텐츠는 확인하고 고친 뒤 직접 올리시면 돼요."
+      />
       <MarketplaceCatalog templates={sortedTemplates} />
     </div>
   );

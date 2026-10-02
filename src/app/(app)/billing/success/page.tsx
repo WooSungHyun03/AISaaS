@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CheckCircle2, Gauge, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Mascot } from "@/components/brand/mascot";
+import { PLAN_LABEL } from "@/components/billing/plan-copy";
 import { createClient } from "@/lib/supabase/server";
 import { getCheckoutSession } from "@/server/billing/checkout-sessions";
 import { getPlanConfig } from "@/server/billing/plans";
@@ -28,33 +28,18 @@ export default async function BillingSuccessPage({ searchParams }: PageProps<"/b
 
   const plan = getPlanConfig(subscription.plan);
   return (
-    <div className="mx-auto max-w-2xl py-10 sm:py-16">
-      <Card className="overflow-hidden border-emerald-200">
-        <div className="h-1.5 bg-emerald-500" />
-        <CardHeader className="items-center text-center">
-          <CheckCircle2 className="mb-2 size-12 text-emerald-600" />
-          <CardTitle className="text-2xl">{plan.name} 플랜이 적용되었습니다</CardTitle>
-          <p className="text-sm text-muted-foreground">구독 상태를 다시 확인했으며 지금부터 새 한도를 사용할 수 있습니다.</p>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border p-4">
-              <Workflow className="mb-2 size-5 text-blue-600" />
-              <p className="text-sm text-muted-foreground">자동화 한도</p>
-              <p className="font-semibold">최대 {plan.automationLimit}개</p>
-            </div>
-            <div className="rounded-xl border p-4">
-              <Gauge className="mb-2 size-5 text-blue-600" />
-              <p className="text-sm text-muted-foreground">월 실행 한도</p>
-              <p className="font-semibold">{plan.monthlyRunLimit}회</p>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
-            <Button asChild><Link href="/automations/marketplace">자동화 선택하기</Link></Button>
-            <Button asChild variant="outline"><Link href="/billing">Billing으로 돌아가기</Link></Button>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="mx-auto max-w-xl py-8 text-center sm:py-14">
+      <Mascot pose="thumbsUp" size={168} priority className="mx-auto" />
+      <h1 className="mt-6 text-3xl font-extrabold tracking-[-0.04em]">{PLAN_LABEL[plan.id]} 요금제가 시작됐어요</h1>
+      <p className="mt-2 text-[15px] text-muted-foreground">구독 상태를 다시 확인했어요. 지금부터 새 한도로 쓸 수 있어요.</p>
+      <dl className="mt-8 grid gap-px overflow-hidden rounded-2xl border bg-border text-left sm:grid-cols-2">
+        <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">만들기 설정</dt><dd className="tabular mt-1 text-xl font-extrabold">최대 {plan.automationLimit}개</dd></div>
+        <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">한 달 제작 횟수</dt><dd className="tabular mt-1 text-xl font-extrabold">{plan.monthlyRunLimit}회</dd></div>
+      </dl>
+      <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:justify-center">
+        <Button asChild size="lg"><Link href="/automations/marketplace">콘텐츠 만들러 가기</Link></Button>
+        <Button asChild size="lg" variant="outline"><Link href="/billing">요금제·결제 보기</Link></Button>
+      </div>
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 
 export function BillingSubmitButton({
   children,
-  pendingLabel = "처리 중...",
+  pendingLabel = "처리 중…",
   variant = "default",
   className,
   confirmMessage,
@@ -31,9 +31,9 @@ export function BillingSubmitButton({
             {pending ? pendingLabel : children}
           </Button>
         }
-        title="변경 내용을 확인해주세요"
+        title="한 번 더 확인해주세요"
         description={confirmMessage}
-        confirmLabel="변경 계속하기"
+        confirmLabel="계속하기"
         pendingLabel={pendingLabel}
         destructive={variant === "destructive"}
         disabled={pending}
