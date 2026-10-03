@@ -56,3 +56,15 @@ export function getPeriodKey(date: Date = new Date(), timeZone: string = SERVICE
   const { year, month } = getZonedParts(date, timeZone);
   return `${year}-${String(month).padStart(2, "0")}`;
 }
+
+/**
+ * [start, end) UTC instants for the calendar month `date` falls in, in
+ * `timeZone` — the same month `getPeriodKey` would label. Used to bound
+ * per-content-type usage queries against `automation_runs.completed_at`.
+ */
+export function getPeriodRange(date: Date = new Date(), timeZone: string = SERVICE_TIMEZONE): { start: Date; end: Date } {
+  const { year, month } = getZonedParts(date, timeZone);
+  const start = zonedTimeToUtc(year, month, 1, 0, 0, timeZone);
+  const end = month === 12 ? zonedTimeToUtc(year + 1, 1, 1, 0, 0, timeZone) : zonedTimeToUtc(year, month + 1, 1, 0, 0, timeZone);
+  return { start, end };
+}

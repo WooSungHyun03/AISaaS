@@ -2,10 +2,21 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
 import type { SubscriptionPlan } from "@/types/domain";
-import { getPeriodKey } from "@/lib/utils/date";
+import { getPeriodKey, getPeriodRange } from "@/lib/utils/date";
 import { getPlanConfig } from "./plans";
 
 type DbClient = SupabaseClient<Database>;
+
+/** Template slugs that have their own sub-limit, and which PlanConfig field holds it. */
+const CONTENT_TYPE_LIMIT_FIELD = {
+  "blog-marketing": "monthlyBlogLimit",
+  shorts: "monthlyShortsLimit",
+} as const;
+
+const CONTENT_TYPE_LABEL: Record<keyof typeof CONTENT_TYPE_LIMIT_FIELD, string> = {
+  "blog-marketing": "블로그",
+  shorts: "숏폼",
+};
 
 export interface EntitlementCheck {
   allowed: boolean;
@@ -82,7 +93,64 @@ export async function canExecuteAutomation(
       reason: `${config.name} 플랜의 이번 달 실행 한도(${config.monthlyRunLimit}회)를 모두 사용했습니다.`,
     };
   }
+
+  const contentLimitKey = (CONTENT_TYPE_LIMIT_FIELD as Record<string, "monthlyBlogLimit" | "monthlyShortsLimit">)[templateSlug];
+  if (contentLimitKey) {
+    const contentLimit = config[contentLimitKey];
+    if (contentLimit !== null) {
+      const usedForType = await getContentTypeUsage(supabase, userId, templateSlug);
+      if (usedForType >= contentLimit) {
+        const label = CONTENT_TYPE_LABEL[templateSlug as keyof typeof CONTENT_TYPE_LABEL];
+        return {
+          allowed: false,
+          reason: `${config.name} 플랜의 이번 달 ${label} 실행 한도(${contentLimit}회)를 모두 사용했습니다.`,
+        };
+      }
+    }
+  }
+
   return { allowed: true };
+}
+
+/**
+ * Counts this user's SUCCESS automation_runs for the given template slug
+ * within the current calendar month. No FK embedding is available on these
+ * generated types (see other two-step lookups in this codebase, e.g.
+ * src/app/(app)/automations/actions.ts), so this resolves template -> the
+ * user's automation ids for that template -> a count over automation_runs,
+ * mirroring the same "SUCCESS only" counting rule incrementUsage uses for
+ * monthlyRunLimit (see src/server/automations/runner.ts).
+ */
+async function getContentTypeUsage(supabase: DbClient, userId: string, templateSlug: string): Promise<number> {
+  const { data: template, error: templateError } = await supabase
+    .from("automation_templates")
+    .select("id")
+    .eq("slug", templateSlug)
+    .maybeSingle();
+  if (templateError) throw templateError;
+  if (!template) return 0;
+
+  const { data: automations, error: automationsError } = await supabase
+    .from("automations")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("template_id", template.id);
+  if (automationsError) throw automationsError;
+
+  const automationIds = (automations ?? []).map((a) => a.id);
+  if (automationIds.length === 0) return 0;
+
+  const { start, end } = getPeriodRange();
+  const { count, error: runsError } = await supabase
+    .from("automation_runs")
+    .select("id", { count: "exact", head: true })
+    .in("automation_id", automationIds)
+    .eq("status", "SUCCESS")
+    .gte("completed_at", start.toISOString())
+    .lt("completed_at", end.toISOString());
+  if (runsError) throw runsError;
+
+  return count ?? 0;
 }
 
 export async function getAutomationLimit(plan: SubscriptionPlan): Promise<number | null> {

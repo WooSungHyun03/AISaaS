@@ -13,6 +13,8 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     priceMonthlyKrw: 0,
     automationLimit: 1,
     monthlyRunLimit: 3,
+    monthlyBlogLimit: 1,
+    monthlyShortsLimit: 0,
     allowedTemplateSlugs: ["blog-marketing"],
     features: [
       "AI 툴 디렉토리 & 자동화 가이드 열람",
@@ -27,6 +29,8 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     priceMonthlyKrw: 19000,
     automationLimit: 2,
     monthlyRunLimit: 30,
+    monthlyBlogLimit: 8,
+    monthlyShortsLimit: 4,
     allowedTemplateSlugs: null,
     features: [
       "자동화 최대 2개",
@@ -41,6 +45,8 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     priceMonthlyKrw: 49000,
     automationLimit: 10,
     monthlyRunLimit: 300,
+    monthlyBlogLimit: 30,
+    monthlyShortsLimit: 12,
     allowedTemplateSlugs: null,
     features: [
       "자동화 최대 10개",
