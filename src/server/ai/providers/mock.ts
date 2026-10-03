@@ -9,6 +9,27 @@ export class MockAIProvider implements AIProvider {
   readonly name = "mock";
 
   async generateText({ prompt }: GenerateTextParams): Promise<GenerateTextResult> {
+    if (prompt.includes("AUTOBIZ_SHORTS_TOPIC_V1")) {
+      return { text: JSON.stringify({ topic: "고객의 시간을 아껴주는 우리 서비스 활용법" }) };
+    }
+
+    if (prompt.includes("AUTOBIZ_SHORTS_CONTENT_V1")) {
+      return {
+        text: JSON.stringify({
+          hook: "아직도 이 일에 매일 시간을 쓰고 계신가요?",
+          script: "반복 업무 때문에 중요한 고객을 놓치고 있나요? 필요한 정보를 한 번 정리하면 매일 해야 했던 일을 더 빠르게 처리할 수 있습니다. 오늘부터 반복 업무를 줄이고 고객에게 집중해보세요.",
+          scenes: [
+            { text: "아직도 매일 반복하세요?", visualPrompt: "바쁜 소상공인이 책상 위 할 일 목록을 보며 놀라는 모습, 세로 9:16 클로즈업, 밝은 자연광", durationSec: 3 },
+            { text: "반복 업무가 고객 시간을 빼앗습니다", visualPrompt: "알림과 문서가 쌓인 화면을 빠르게 넘기는 손, 세로 9:16 오버헤드 샷", durationSec: 4 },
+            { text: "정보를 한 번 정리하면 달라집니다", visualPrompt: "복잡한 메모가 깔끔한 한 장의 업무 화면으로 정리되는 장면, 세로 9:16", durationSec: 5 },
+            { text: "반복은 줄이고 고객에게 집중하세요", visualPrompt: "사업자가 고객과 편안하게 대화하는 모습, 세로 9:16 미디엄 샷, 따뜻한 조명", durationSec: 5 },
+          ],
+          caption: "매일 반복하던 업무를 줄이고 고객에게 더 집중해보세요. #업무자동화 #소상공인마케팅 #생산성",
+          privacy: "private",
+        }),
+      };
+    }
+
     if (prompt.includes("AUTOBIZ_CALENDAR_PLAN_V1")) {
       const startDate = prompt.match(/^PLAN_START=(\d{4}-\d{2}-\d{2})$/m)?.[1];
       const rawWeeks = Number(prompt.match(/^WEEKS=(\d+)$/m)?.[1]);

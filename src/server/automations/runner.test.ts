@@ -32,12 +32,16 @@ type Result = { data: unknown; error?: unknown };
 function makeAdmin(tableQueues: Record<string, Result[]>) {
   const inserts: Record<string, unknown[]> = {};
   const updates: Record<string, unknown[]> = {};
+  const filters: Record<string, Array<[string, unknown]>> = {};
   const from = vi.fn((table: string) => {
     const queue = tableQueues[table];
     const result: Result = queue && queue.length > 0 ? queue.shift()! : { data: null, error: null };
     const builder: Record<string, unknown> = {
       select: vi.fn(() => builder),
-      eq: vi.fn(() => builder),
+      eq: vi.fn((column: string, value: unknown) => {
+        (filters[table] ??= []).push([column, value]);
+        return builder;
+      }),
       in: vi.fn(() => builder),
       order: vi.fn(() => builder),
       limit: vi.fn(() => builder),
@@ -55,7 +59,7 @@ function makeAdmin(tableQueues: Record<string, Result[]>) {
     };
     return builder;
   });
-  return { from, inserts, updates };
+  return { from, inserts, updates, filters };
 }
 
 const SCHEDULE = { frequency: "DAILY" as const, timeOfDay: "09:00", timezone: "Asia/Seoul" };
@@ -112,6 +116,10 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
     // inserted — newsletter.ts derives its per-recipient idempotency key
     // from this (see types/automation.ts#AutomationRunContext.runId).
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ runId: "run-1" }));
+    expect(admin.filters.content_history).toEqual(expect.arrayContaining([
+      ["automation_id", "auto-1"],
+      ["content_type", "blog-marketing"],
+    ]));
     expect(admin.inserts.automation_runs[0]).toMatchObject({ automation_id: "auto-1", status: "RUNNING", source: "SCHEDULED" });
     const expectedNext = computeNextRunAt(SCHEDULE).toISOString();
     expect(admin.updates.automations[0]).toMatchObject({ next_run_at: expectedNext });

@@ -116,4 +116,19 @@ describe("MockAIProvider", () => {
     ]);
     expect(items[0]).toMatchObject({ date: "2026-03-01", topic: expect.stringContaining("성장 카페") });
   });
+
+  it("returns deterministic structured Shorts topic and scene responses", async () => {
+    const { MockAIProvider } = await import("./mock");
+    const provider = new MockAIProvider();
+
+    const topic = await provider.generateText({ prompt: "AUTOBIZ_SHORTS_TOPIC_V1" });
+    const content = await provider.generateText({ prompt: "AUTOBIZ_SHORTS_CONTENT_V1" });
+    const parsedTopic = JSON.parse(topic.text) as { topic: string };
+    const parsedContent = JSON.parse(content.text) as { scenes: unknown[]; caption: string; privacy: string };
+
+    expect(parsedTopic.topic).toBeTruthy();
+    expect(parsedContent.scenes).toHaveLength(4);
+    expect(parsedContent.caption).toContain("#업무자동화");
+    expect(parsedContent.privacy).toBe("private");
+  });
 });

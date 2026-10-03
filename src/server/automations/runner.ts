@@ -184,6 +184,7 @@ async function executeAutomation(
       .from("content_history")
       .select("topic")
       .eq("automation_id", automationId)
+      .eq("content_type", template.slug)
       .order("created_at", { ascending: false })
       .limit(5);
 
