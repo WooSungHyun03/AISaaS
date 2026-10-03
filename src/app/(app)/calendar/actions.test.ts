@@ -71,13 +71,14 @@ describe("triggerCalendarItemNow", () => {
     expect(triggerRunNowMock).not.toHaveBeenCalled();
   });
 
-  it("keeps Shorts disabled while its registered handler is Coming Soon", async () => {
+  it("finds the active shorts automation and delegates with the trusted calendar item id, now that Shorts is AVAILABLE", async () => {
     createClientMock.mockResolvedValue(makeClient({ platform: "youtube_shorts" }));
+    triggerRunNowMock.mockResolvedValue({ success: true, runId: "run-2", contentHistoryId: "content-2" });
 
     const result = await triggerCalendarItemNow("11111111-1111-4111-8111-111111111111");
 
-    expect(result.error).toContain("Coming Soon");
-    expect(triggerRunNowMock).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: true, contentHistoryId: "content-2" });
+    expect(triggerRunNowMock).toHaveBeenCalledWith("automation-1", "11111111-1111-4111-8111-111111111111");
   });
 
   it("requires an active matching automation", async () => {

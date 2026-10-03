@@ -21,7 +21,7 @@ vi.mock("@/server/billing/entitlements", () => ({
 }));
 vi.mock("@/server/automations/runner", () => ({ runAutomationNow: runAutomationNowMock }));
 
-const { triggerRunNow } = await import("./actions");
+const { createAutomation, triggerRunNow } = await import("./actions");
 
 type QueryResult = { data: unknown; error: unknown };
 
@@ -113,5 +113,36 @@ describe("triggerRunNow with a calendar item", () => {
       content_history_id: "content-1",
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/calendar");
+  });
+});
+
+describe("createAutomation — availability gate", () => {
+  it("rejects creating an automation for a COMING_SOON template, even if requested directly (not just hidden in the UI)", async () => {
+    const queues: Record<string, QueryResult[]> = {
+      businesses: [{ data: { id: "business-1" }, error: null }],
+      automation_templates: [{ data: { slug: "newsletter", is_active: true }, error: null }],
+    };
+    const from = vi.fn((table: string) => {
+      const result = queues[table]?.shift() ?? { data: null, error: null };
+      const builder = {
+        select: vi.fn(() => builder),
+        eq: vi.fn(() => builder),
+        maybeSingle: vi.fn().mockResolvedValue(result),
+      };
+      return builder;
+    });
+    createClientMock.mockResolvedValue({
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) },
+      from,
+    });
+
+    const formData = new FormData();
+    formData.set("businessId", "business-1");
+    formData.set("templateId", "template-newsletter");
+    formData.set("name", "뉴스레터 자동화");
+
+    const result = await createAutomation({}, formData);
+
+    expect(result).toEqual({ error: "아직 생성할 수 없는 자동화입니다." });
   });
 });
