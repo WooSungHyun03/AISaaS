@@ -15,6 +15,15 @@ export interface SafeAutomationRunOutput {
   hook: string | null;
   seoKeywords: string[];
   imageSuggestion: string | null;
+  videoUrl: string | null;
+  caption: string | null;
+  script: string | null;
+  scenes: Array<{ text: string; durationSec: number }>;
+  publicationResults: Partial<Record<"instagram" | "youtube", {
+    externalId: string | null;
+    externalUrl: string | null;
+    privacy: "private" | null;
+  }>>;
 }
 
 function asRecord(value: Json): Record<string, Json | undefined> | null {
@@ -56,6 +65,22 @@ function safeExternalUrl(value: Json | undefined): string | null {
   }
 }
 
+function safePublicationResults(value: Json | undefined): SafeAutomationRunOutput["publicationResults"] {
+  const record = asRecord(value ?? null);
+  if (!record) return {};
+  const results: SafeAutomationRunOutput["publicationResults"] = {};
+  for (const platform of ["instagram", "youtube"] as const) {
+    const item = asRecord(record[platform] ?? null);
+    if (!item) continue;
+    results[platform] = {
+      externalId: safeText(item.externalId, 500),
+      externalUrl: safeExternalUrl(item.externalUrl),
+      privacy: item.privacy === "private" ? "private" : null,
+    };
+  }
+  return results;
+}
+
 /**
  * Converts a provider-owned JSON payload into a small display model. This is
  * an allowlist: unknown fields (including token, password, credential, input,
@@ -90,7 +115,26 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
     hook: safeText(output.hook, 500),
     seoKeywords,
     imageSuggestion: safeText(output.imageSuggestion, 500),
+    videoUrl: safeExternalUrl(output.videoUrl),
+    caption: safeText(output.caption, 2_000),
+    script: safeText(output.script, 5_000),
+    scenes: Array.isArray(output.scenes)
+      ? output.scenes.slice(0, 20).flatMap((scene) => {
+        const item = asRecord(scene);
+        const text = item ? safeText(item.text, 500) : null;
+        const durationSec = item && typeof item.durationSec === "number" && Number.isFinite(item.durationSec)
+          ? Math.max(0, Math.min(60, item.durationSec))
+          : null;
+        return text && durationSec !== null ? [{ text, durationSec }] : [];
+      })
+      : [],
+    publicationResults: safePublicationResults(output.publicationResults),
   };
 
-  return Object.values(safe).some((item) => Array.isArray(item) ? item.length > 0 : item !== null) ? safe : null;
+  const hasVisibleValue = Object.entries(safe).some(([key, item]) => {
+    if (Array.isArray(item)) return item.length > 0;
+    if (key === "publicationResults") return Object.keys(item as object).length > 0;
+    return item !== null;
+  });
+  return hasVisibleValue ? safe : null;
 }

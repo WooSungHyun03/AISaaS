@@ -9,12 +9,10 @@ import {
 } from "@/server/ai/prompts/shorts";
 import { isNearDuplicateTopic } from "@/server/ai/similarity";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { InstagramConnector } from "@/server/connectors/instagram";
-import { loadInstagramConnector } from "@/server/connectors/instagram/connect";
-import { getConnection, updateConnectionStatus } from "@/server/connectors/integrations";
+import { publishShortsToPlatforms } from "@/server/automations/shorts-publishing";
 import { renderShortVideo } from "@/server/connectors/video";
-import { isConnectorError } from "@/server/shared/errors";
-import type { AutomationHandler, AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
+import type { AutomationHandler, AutomationHandlerResult, AutomationRunContext, ShortsPublishPlatform } from "@/types/automation";
+import type { Json } from "@/types/domain";
 
 /**
  * Selects a topic before writing the full video so a near-duplicate only
@@ -36,20 +34,67 @@ async function generateTopic(ctx: AutomationRunContext): Promise<ShortsTopic> {
   });
 }
 
+function scheduledPlatforms(config: AutomationRunContext["config"]): ShortsPublishPlatform[] {
+  if (!Array.isArray(config.platforms)) return ["instagram"];
+  const platforms = config.platforms.filter(
+    (value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube",
+  );
+  return [...new Set(platforms)];
+}
+
+async function publishExistingPreview(ctx: AutomationRunContext): Promise<AutomationHandlerResult> {
+  const request = ctx.shorts?.publish;
+  if (!request) throw new Error("게시할 Shorts 미리보기를 확인할 수 없습니다.");
+  const admin = createAdminClient();
+  const { data: sourceRun, error } = await admin
+    .from("automation_runs")
+    .select("output,status")
+    .eq("id", request.sourceRunId)
+    .eq("automation_id", ctx.automation.id)
+    .maybeSingle();
+  if (error || !sourceRun || sourceRun.status !== "SUCCESS") {
+    throw new Error("게시할 Shorts 미리보기를 찾을 수 없습니다. 영상을 다시 만들어주세요.");
+  }
+  const output = sourceRun.output && typeof sourceRun.output === "object" && !Array.isArray(sourceRun.output)
+    ? sourceRun.output as Record<string, unknown>
+    : null;
+  const content = shortsContentSchema.safeParse(output);
+  const videoUrl = typeof output?.videoUrl === "string" ? output.videoUrl : "";
+  const topic = typeof output?.topic === "string" ? output.topic : content.success ? content.data.hook : "";
+  if (!content.success || !/^https:\/\//i.test(videoUrl)) {
+    throw new Error("게시할 영상 정보가 올바르지 않습니다. 영상을 다시 만들어주세요.");
+  }
+
+  const publicationResults = await publishShortsToPlatforms({
+    userId: ctx.automation.user_id,
+    businessId: ctx.business.id,
+    title: content.data.hook,
+    caption: content.data.caption,
+    videoUrl,
+    platforms: request.platforms,
+  });
+  return {
+    output: {
+      operation: "PUBLISH",
+      sourceRunId: request.sourceRunId,
+      ...content.data,
+      topic,
+      videoUrl,
+      publicationResults,
+    } as unknown as Json,
+    externalUrl: videoUrl,
+    title: content.data.hook,
+    topic,
+    contentType: "shorts-publish",
+    aiGenerationCount: 0,
+  };
+}
+
 export const shortsAutomationHandler: AutomationHandler = {
   templateSlug: "shorts",
 
   async run(ctx: AutomationRunContext): Promise<AutomationHandlerResult> {
-    const admin = createAdminClient();
-    const sharedConnection = await getConnection(admin, ctx.automation.user_id, ctx.business.id, "instagram");
-    const connector = sharedConnection
-      ? await loadInstagramConnector(admin, ctx.automation.user_id, ctx.business.id)
-      : new InstagramConnector();
-
-    if (!connector || !connector.isConfigured()) {
-      if (sharedConnection?.status === "CONNECTED") await updateConnectionStatus(admin, sharedConnection.id, "ERROR");
-      throw new Error("Instagram 연결이 해제되었거나 설정되지 않았습니다. 설정에서 다시 연결해주세요.");
-    }
+    if (ctx.shorts?.publish) return publishExistingPreview(ctx);
 
     const { topic } = await generateTopic(ctx);
     const content = await generateStructured({
@@ -58,24 +103,20 @@ export const shortsAutomationHandler: AutomationHandler = {
       maxTokens: 1_600,
     });
     const videoUrl = await renderShortVideo(content.scenes, content.script);
-    let mediaId: string | undefined;
-    try {
-      const result = await connector.publish({
-        content: content.caption,
-        mediaType: "REELS",
+    const platforms = ctx.shorts?.previewOnly ? [] : scheduledPlatforms(ctx.config);
+    const publicationResults = platforms.length > 0
+      ? await publishShortsToPlatforms({
+        userId: ctx.automation.user_id,
+        businessId: ctx.business.id,
+        title: content.hook,
+        caption: content.caption,
         videoUrl,
-      });
-      mediaId = result.externalId;
-    } catch (error) {
-      if (sharedConnection) {
-        const status = isConnectorError(error) && (error.code === "AUTH_FAILED" || error.code === "PERMISSION_DENIED") ? "EXPIRED" : "ERROR";
-        await updateConnectionStatus(admin, sharedConnection.id, status);
-      }
-      throw error;
-    }
+        platforms,
+      })
+      : {};
 
     return {
-      output: { ...content, videoUrl, instagramMediaId: mediaId ?? null },
+      output: { ...content, topic, videoUrl, publicationResults } as unknown as Json,
       externalUrl: videoUrl,
       title: content.hook,
       topic,

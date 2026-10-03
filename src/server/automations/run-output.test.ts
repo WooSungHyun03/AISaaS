@@ -43,6 +43,11 @@ describe("toSafeAutomationRunOutput", () => {
       hook: null,
       seoKeywords: [],
       imageSuggestion: null,
+      videoUrl: null,
+      caption: null,
+      script: null,
+      scenes: [],
+      publicationResults: {},
     }));
     expect(JSON.stringify(result)).not.toContain("secret");
   });
@@ -76,5 +81,28 @@ describe("toSafeAutomationRunOutput", () => {
     const result = toSafeAutomationRunOutput({ title: "구버전 결과", bodyHtml: "<p>본문</p>" });
 
     expect(result).toMatchObject({ hook: null, seoKeywords: [], imageSuggestion: null });
+  });
+
+  it("allowlists Shorts preview and platform publication fields", () => {
+    const result = toSafeAutomationRunOutput({
+      hook: "첫 3초 후킹",
+      script: "짧은 대본",
+      caption: "게시 설명 #태그1 #태그2 #태그3",
+      videoUrl: "https://cdn.example.com/short.mp4",
+      scenes: [{ text: "첫 장면", visualPrompt: "render prompt", durationSec: 3 }],
+      publicationResults: {
+        youtube: { externalId: "video-1", externalUrl: "https://youtube.com/watch?v=video-1", privacy: "private", token: "never" },
+      },
+    });
+
+    expect(result).toMatchObject({
+      hook: "첫 3초 후킹",
+      script: "짧은 대본",
+      videoUrl: "https://cdn.example.com/short.mp4",
+      scenes: [{ text: "첫 장면", durationSec: 3 }],
+      publicationResults: { youtube: { externalId: "video-1", privacy: "private" } },
+    });
+    expect(JSON.stringify(result)).not.toContain("visualPrompt");
+    expect(JSON.stringify(result)).not.toContain("never");
   });
 });

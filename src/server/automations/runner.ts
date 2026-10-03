@@ -5,7 +5,7 @@ import { logger } from "@/lib/logger";
 import { canExecuteAutomation, incrementUsage } from "@/server/billing/entitlements";
 import { isAppError } from "@/server/shared/errors";
 import type { AutomationRunContext, AutomationSchedule } from "@/types/automation";
-import type { Automation, AutomationRunSource } from "@/types/domain";
+import type { Automation, AutomationRunSource, Json } from "@/types/domain";
 import type { Database } from "@/types/database.types";
 import { getHandler } from "./handlers";
 import { computeNextRunAt } from "./scheduler";
@@ -22,6 +22,7 @@ export interface RunAutomationResult {
 
 export interface RunAutomationOptions {
   calendarItem?: AutomationRunContext["calendarItem"];
+  shorts?: AutomationRunContext["shorts"];
 }
 
 /**
@@ -155,7 +156,10 @@ async function executeAutomation(
       automation_id: automationId,
       status: "RUNNING",
       source,
-      input: options.calendarItem ? { calendarItem: options.calendarItem } : {},
+      input: {
+        ...(options.calendarItem ? { calendarItem: options.calendarItem } : {}),
+        ...(options.shorts ? { shorts: options.shorts } : {}),
+      } as unknown as Json,
       started_at: new Date().toISOString(),
     })
     .select()
@@ -195,6 +199,7 @@ async function executeAutomation(
       recentTopics: (recent ?? []).map((r) => r.topic).filter((topic): topic is string => Boolean(topic)),
       runId: run.id,
       calendarItem: options.calendarItem,
+      shorts: options.shorts,
     });
 
     // Every write below is checked for a returned `error` and thrown into
@@ -243,7 +248,7 @@ async function executeAutomation(
       .eq("id", automationId);
     if (lastRunAtError) throw lastRunAtError;
 
-    await incrementUsage(admin, automation.user_id, { automationRuns: 1, aiGenerations: 1 });
+    await incrementUsage(admin, automation.user_id, { automationRuns: 1, aiGenerations: result.aiGenerationCount ?? 1 });
 
     logger.info("automation_run_success", { automationId, runId: run.id });
     return { runId: run.id, status: "SUCCESS", output: result.output, contentHistoryId };

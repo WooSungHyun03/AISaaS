@@ -14,6 +14,18 @@ export interface AutomationSchedule {
   timezone?: string;
 }
 
+export type ShortsPublishPlatform = "instagram" | "youtube";
+
+export interface ShortsRunOptions {
+  /** Preview runs generate and render the video without posting it. */
+  previewOnly?: boolean;
+  /** Publish a previously rendered, server-verified preview. */
+  publish?: {
+    sourceRunId: string;
+    platforms: ShortsPublishPlatform[];
+  };
+}
+
 /** Everything a handler needs to do its work for a single run. */
 export interface AutomationRunContext {
   automation: Automation;
@@ -44,6 +56,8 @@ export interface AutomationRunContext {
     goal: string;
     cta: string;
   };
+  /** Trusted execution options supplied by the authenticated Shorts UI. */
+  shorts?: ShortsRunOptions;
 }
 
 export interface AutomationHandlerResult {
@@ -55,6 +69,8 @@ export interface AutomationHandlerResult {
   title?: string;
   topic?: string;
   content?: string;
+  /** Defaults to 1; publish-only operations can report 0. */
+  aiGenerationCount?: number;
 }
 
 /**

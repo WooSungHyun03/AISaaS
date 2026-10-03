@@ -119,8 +119,11 @@ describe("shortsAutomationHandler", () => {
     expect(generateStructuredMock).toHaveBeenCalledTimes(2);
     expect(result.output).toEqual({
       ...generatedContent,
+      topic: "출근길 소금빵 예약 팁",
       videoUrl: "https://cdn.example.com/shorts/result.mp4",
-      instagramMediaId: "reel-media-1",
+      publicationResults: {
+        instagram: { externalId: "reel-media-1", externalUrl: null, privacy: null },
+      },
     });
     expect(result.output).toMatchObject({
       scenes: expect.arrayContaining([
@@ -189,6 +192,22 @@ describe("shortsAutomationHandler", () => {
 
     await expect(shortsAutomationHandler.run(baseContext())).rejects.toThrow("generation failed");
     expect(renderShortVideoMock).not.toHaveBeenCalled();
+    expect(instagramPublishMock).not.toHaveBeenCalled();
+  });
+
+  it("renders a preview without requiring or calling a publishing connector", async () => {
+    generateStructuredMock
+      .mockResolvedValueOnce({ topic: "출근길 소금빵 예약 팁" })
+      .mockResolvedValueOnce(generatedContent);
+    getConnectionMock.mockResolvedValue(null);
+    instagramIsConfiguredMock.mockReturnValue(false);
+
+    const result = await shortsAutomationHandler.run(baseContext({ shorts: { previewOnly: true } }));
+
+    expect(result.output).toMatchObject({
+      videoUrl: "https://cdn.example.com/shorts/result.mp4",
+      publicationResults: {},
+    });
     expect(instagramPublishMock).not.toHaveBeenCalled();
   });
 });

@@ -11,6 +11,7 @@ import {
   Settings,
   Sparkles,
   TrendingUp,
+  Video,
   type LucideIcon,
 } from "lucide-react";
 
@@ -48,6 +49,7 @@ export const APP_NAV: NavSection[] = [
     label: "콘텐츠 만들기",
     items: [
       { href: "/automations/marketplace", label: "블로그·숏폼 시작", icon: Sparkles },
+      { href: "/shorts", label: "숏폼 스튜디오", icon: Video },
       { href: "/automations", label: "만들기 설정", icon: ListChecks, exact: true },
       { href: "/automations/history", label: "제작 기록", icon: History },
       { href: "#growth-report", label: "성장 리포트", icon: TrendingUp, comingSoon: true },
