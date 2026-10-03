@@ -20,7 +20,7 @@ export default async function DiagnosisPage({
 
   const { data: businesses, error: businessError } = await supabase
     .from("businesses")
-    .select("id, name, website")
+    .select("*")
     .eq("owner_id", user.id)
     .order("created_at");
   if (businessError) throw new Error("사업체 정보를 불러오지 못했습니다.", { cause: businessError });
@@ -56,7 +56,7 @@ export default async function DiagnosisPage({
         </nav>
       ) : null}
 
-      <DiagnosisForm key={selectedBusiness.id} businessId={selectedBusiness.id} defaultUrl={selectedBusiness.website} />
+      <DiagnosisForm key={selectedBusiness.id} business={selectedBusiness} />
     </div>
   );
 }

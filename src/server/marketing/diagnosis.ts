@@ -9,7 +9,7 @@ import { generateStructured } from "@/server/ai/generate";
 import { AppError } from "@/server/shared/errors";
 import { stripHtml } from "@/server/shared/html";
 import { isPrivateAddress } from "@/server/shared/ssrf";
-import type { Business } from "@/types/domain";
+import type { Business, BusinessSnsLinks } from "@/types/domain";
 
 export type DiagnosisErrorCode =
   | "INVALID_URL"
@@ -238,12 +238,42 @@ function hasRecentPostSignal(html: string): boolean {
   );
 }
 
+const SNS_LINK_PATTERNS: Array<{ key: keyof BusinessSnsLinks; pattern: RegExp }> = [
+  { key: "instagram", pattern: /https?:\/\/(?:www\.)?instagram\.com\/[^\s"'<>]+/i },
+  { key: "facebook", pattern: /https?:\/\/(?:www\.)?facebook\.com\/[^\s"'<>]+/i },
+  { key: "youtube", pattern: /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s"'<>]+/i },
+  { key: "blog", pattern: /https?:\/\/(?:[^\s"'<>]*\.)?(?:blog\.naver\.com|tistory\.com)\/[^\s"'<>]+/i },
+];
+
+/**
+ * Deterministically finds social/blog links in `<a href>` attributes —
+ * unlike the AI-judged fields below, these are either present in the HTML
+ * or not, so they're the clearest case of "a value we're sure about" for
+ * the Business Profile prefill (ticket 2).
+ */
+function extractSnsLinks(html: string): BusinessSnsLinks {
+  const hrefs = Array.from(html.matchAll(/<a\b[^>]*\bhref\s*=\s*["']([^"']+)["']/gi)).map((match) => match[1]);
+  const links: BusinessSnsLinks = {};
+  for (const { key, pattern } of SNS_LINK_PATTERNS) {
+    if (links[key]) continue;
+    const found = hrefs.find((href) => pattern.test(href));
+    if (found) links[key] = decodeHtmlEntities(found);
+  }
+  return links;
+}
+
 export const websiteDiagnosisSchema = z.object({
   score: z.number().int().min(0).max(100),
   missingChannels: z.array(z.string()),
   contentStatus: z.string().min(1),
   snsActivity: z.string().min(1),
   recommendations: z.array(z.string()),
+  // Business Profile prefill (ticket 2) — nullable because the AI should
+  // only fill these in when confident; "AI가 확신할 수 있는 값만 프리필"
+  // means the UI treats null as "don't suggest anything for this field".
+  mainOffering: z.string().nullable(),
+  strengths: z.string().nullable(),
+  marketingGoal: z.string().nullable(),
 });
 export type WebsiteDiagnosisResult = z.infer<typeof websiteDiagnosisSchema>;
 
@@ -266,6 +296,7 @@ function buildDiagnosisPrompt(business: Pick<Business, "name" | "industry">, dat
     business.industry ? `업종: ${business.industry}` : null,
     "다음 홈페이지 내용을 분석해 마케팅 준비도를 평가하세요.",
     "score는 0~100 사이의 정수, missingChannels와 recommendations는 한국어 문자열 배열, contentStatus와 snsActivity는 한두 문장의 한국어 설명이어야 합니다.",
+    "mainOffering(주요 상품/서비스), strengths(강점), marketingGoal(마케팅 목표)은 홈페이지 내용만으로 확신할 수 있을 때만 한두 문장으로 채우고, 확신할 수 없으면 반드시 null을 반환하세요. 추측해서 채우지 마세요.",
     "===WEBPAGE_DATA_START===",
     `title: ${data.title ?? "(없음)"}`,
     `meta description: ${data.description ?? "(없음)"}`,
@@ -282,6 +313,8 @@ function buildDiagnosisPrompt(business: Pick<Business, "name" | "industry">, dat
 export interface WebsiteDiagnosisOutcome extends WebsiteDiagnosisResult {
   sourceUrl: string;
   rawSummary: string | null;
+  /** Deterministically found on the page — see extractSnsLinks. Never persisted to marketing_diagnoses; only used for the Business Profile prefill (ticket 2). */
+  snsLinks: BusinessSnsLinks;
 }
 
 /**
@@ -306,11 +339,11 @@ export async function diagnoseWebsite(
 
   let result: WebsiteDiagnosisResult;
   try {
-    result = await generateStructured({ system, prompt, schema: websiteDiagnosisSchema, maxTokens: 600 });
+    result = await generateStructured({ system, prompt, schema: websiteDiagnosisSchema, maxTokens: 700 });
   } catch (cause) {
     throw new DiagnosisError("AI_INVALID_RESPONSE", "AI 진단 결과를 처리하지 못했습니다. 잠시 후 다시 시도해주세요.", { cause });
   }
 
   const rawSummary = [data.title, data.description].filter(Boolean).join(" — ").slice(0, 1000) || null;
-  return { ...result, sourceUrl: finalUrl, rawSummary };
+  return { ...result, sourceUrl: finalUrl, rawSummary, snsLinks: extractSnsLinks(html) };
 }

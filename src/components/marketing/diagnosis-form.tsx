@@ -1,18 +1,20 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Search, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { runDiagnosis, type DiagnosisActionState } from "@/app/(app)/diagnosis/actions";
+import { BusinessFormDialog } from "@/components/business/business-form-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FormMessage } from "@/components/ui/form-message";
 import { ScoreRing, scoreTone } from "@/components/marketing/score-ring";
+import type { Business } from "@/types/domain";
 
 const initialState: DiagnosisActionState = {};
 
-export function DiagnosisForm({ businessId, defaultUrl }: { businessId: string; defaultUrl?: string | null }) {
+export function DiagnosisForm({ business }: { business: Business }) {
   const [state, formAction, isPending] = useActionState(runDiagnosis, initialState);
   const lastResultId = useRef<string | undefined>(undefined);
 
@@ -25,7 +27,7 @@ export function DiagnosisForm({ businessId, defaultUrl }: { businessId: string; 
   return (
     <div className="space-y-6">
       <form action={formAction} className="flex flex-col gap-3 sm:flex-row sm:items-end" aria-describedby={state.error ? "diagnosis-form-error" : undefined}>
-        <input type="hidden" name="businessId" value={businessId} />
+        <input type="hidden" name="businessId" value={business.id} />
         <div className="flex-1 space-y-1.5">
           <Label htmlFor="diagnosis-url">홈페이지 주소</Label>
           <Input
@@ -36,7 +38,7 @@ export function DiagnosisForm({ businessId, defaultUrl }: { businessId: string; 
             autoComplete="url"
             spellCheck={false}
             placeholder="https://example.com"
-            defaultValue={defaultUrl ?? ""}
+            defaultValue={business.website ?? ""}
             required
             disabled={isPending}
           />
@@ -48,12 +50,19 @@ export function DiagnosisForm({ businessId, defaultUrl }: { businessId: string; 
       </form>
       {state.error ? <FormMessage id="diagnosis-form-error">{state.error}</FormMessage> : null}
 
-      {state.result ? <DiagnosisResultCard result={state.result} /> : null}
+      {state.result ? <DiagnosisResultCard result={state.result} business={business} /> : null}
     </div>
   );
 }
 
-function DiagnosisResultCard({ result }: { result: NonNullable<DiagnosisActionState["result"]> }) {
+function DiagnosisResultCard({ result, business }: { result: NonNullable<DiagnosisActionState["result"]>; business: Business }) {
+  const { profileSuggestions } = result;
+  const hasProfileSuggestions = Boolean(
+    profileSuggestions.mainOffering ||
+      profileSuggestions.strengths ||
+      profileSuggestions.marketingGoal ||
+      Object.values(profileSuggestions.snsLinks).some(Boolean),
+  );
   const tone = scoreTone(result.score);
   return (
     <section aria-label="진단 결과" className="rounded-2xl border border-border bg-card p-6">
@@ -85,6 +94,20 @@ function DiagnosisResultCard({ result }: { result: NonNullable<DiagnosisActionSt
                   <li key={index}>{recommendation}</li>
                 ))}
               </ul>
+            </div>
+          ) : null}
+          {hasProfileSuggestions ? (
+            <div>
+              <BusinessFormDialog
+                business={business}
+                prefill={profileSuggestions}
+                trigger={
+                  <Button type="button" variant="outline">
+                    <Sparkles aria-hidden="true" /> Business Profile 자동 채우기
+                  </Button>
+                }
+              />
+              <p className="mt-1.5 text-[13px] text-muted-foreground">진단에서 확인한 정보로 사업 정보 양식을 채워 열어요. 확인하고 수정한 뒤 직접 저장해야 반영돼요.</p>
             </div>
           ) : null}
         </div>

@@ -16,15 +16,37 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { FormMessage } from "@/components/ui/form-message";
-import type { Business } from "@/types/domain";
+import type { Business, BusinessSnsLinks } from "@/types/domain";
 import { createBusiness, updateBusiness, type BusinessActionState } from "@/app/(app)/business/actions";
+import { mergeBusinessDefault, mergeSnsLinks } from "./prefill";
 
 const initialState: BusinessActionState = {};
 
-export function BusinessFormDialog({ business, trigger }: { business?: Business; trigger: React.ReactNode }) {
+/** AI diagnosis suggestions (ticket 2) — only ever used to compute defaultValues below; see src/components/business/prefill.ts. */
+export interface BusinessProfilePrefill {
+  mainOffering?: string | null;
+  strengths?: string | null;
+  marketingGoal?: string | null;
+  snsLinks?: BusinessSnsLinks;
+}
+
+export function BusinessFormDialog({
+  business,
+  trigger,
+  prefill,
+  defaultOpen = false,
+}: {
+  business?: Business;
+  trigger: React.ReactNode;
+  /** Values a diagnosis suggested — fills a field only when the business doesn't already have one. Never auto-saved: the user still has to submit this form. */
+  prefill?: BusinessProfilePrefill;
+  defaultOpen?: boolean;
+}) {
   const action = business ? updateBusiness.bind(null, business.id) : createBusiness;
   const [state, formAction, isPending] = useActionState(action, initialState);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const currentSnsLinks = (business?.sns_links as BusinessSnsLinks | null) ?? null;
+  const snsLinks = mergeSnsLinks(currentSnsLinks, prefill?.snsLinks);
 
   useEffect(() => {
     if (!state.success) return;
@@ -81,6 +103,43 @@ export function BusinessFormDialog({ business, trigger }: { business?: Business;
           <div className="space-y-2">
             <Label htmlFor="website">홈페이지</Label>
             <Input id="website" name="website" type="url" autoComplete="url" spellCheck={false} defaultValue={business?.website ?? ""} maxLength={500} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="mainOffering">주요 상품/서비스</Label>
+            <Input
+              id="mainOffering"
+              name="mainOffering"
+              defaultValue={mergeBusinessDefault(business?.main_offering, prefill?.mainOffering)}
+              maxLength={300}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="strengths">강점</Label>
+            <Input
+              id="strengths"
+              name="strengths"
+              defaultValue={mergeBusinessDefault(business?.strengths, prefill?.strengths)}
+              maxLength={300}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="marketingGoal">마케팅 목표</Label>
+            <Input
+              id="marketingGoal"
+              name="marketingGoal"
+              placeholder="예: 신규 고객 유입"
+              defaultValue={mergeBusinessDefault(business?.marketing_goal, prefill?.marketingGoal)}
+              maxLength={200}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>SNS 링크</Label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Input aria-label="Instagram" name="snsLinks.instagram" type="url" placeholder="Instagram" spellCheck={false} defaultValue={snsLinks.instagram ?? ""} maxLength={500} />
+              <Input aria-label="Facebook" name="snsLinks.facebook" type="url" placeholder="Facebook" spellCheck={false} defaultValue={snsLinks.facebook ?? ""} maxLength={500} />
+              <Input aria-label="YouTube" name="snsLinks.youtube" type="url" placeholder="YouTube" spellCheck={false} defaultValue={snsLinks.youtube ?? ""} maxLength={500} />
+              <Input aria-label="블로그" name="snsLinks.blog" type="url" placeholder="블로그" spellCheck={false} defaultValue={snsLinks.blog ?? ""} maxLength={500} />
+            </div>
           </div>
           {state.error ? <FormMessage id="business-form-error">{state.error}</FormMessage> : null}
           <DialogFooter>

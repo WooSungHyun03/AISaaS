@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import type { BusinessSnsLinks } from "@/types/domain";
 
 export interface BusinessActionState {
   error?: string;
@@ -13,6 +14,17 @@ function parseKeywords(raw: string): string[] {
     .split(",")
     .map((keyword) => keyword.trim())
     .filter(Boolean);
+}
+
+const SNS_LINK_KEYS = ["instagram", "facebook", "youtube", "blog"] as const;
+
+function snsLinksFromForm(formData: FormData): BusinessSnsLinks {
+  const links: BusinessSnsLinks = {};
+  for (const key of SNS_LINK_KEYS) {
+    const value = String(formData.get(`snsLinks.${key}`) ?? "").trim();
+    if (value) links[key] = value;
+  }
+  return links;
 }
 
 function businessFieldsFromForm(formData: FormData) {
@@ -27,6 +39,10 @@ function businessFieldsFromForm(formData: FormData) {
     brand_tone: String(formData.get("brandTone") ?? "").trim() || null,
     keywords: parseKeywords(String(formData.get("keywords") ?? "")),
     website: String(formData.get("website") ?? "").trim() || null,
+    main_offering: String(formData.get("mainOffering") ?? "").trim() || null,
+    strengths: String(formData.get("strengths") ?? "").trim() || null,
+    marketing_goal: String(formData.get("marketingGoal") ?? "").trim() || null,
+    sns_links: snsLinksFromForm(formData),
   };
 }
 
@@ -36,12 +52,24 @@ function validateBusinessFields(fields: ReturnType<typeof businessFieldsFromForm
   if ((fields.industry?.length ?? 0) > 100 || (fields.location?.length ?? 0) > 200) return "업종과 위치 입력이 너무 깁니다.";
   if ((fields.description?.length ?? 0) > 2500 || (fields.target_customer?.length ?? 0) > 500 || (fields.brand_tone?.length ?? 0) > 200) return "사업 정보 입력 길이를 확인해주세요.";
   if (fields.keywords.length > 20 || fields.keywords.some((keyword) => keyword.length > 50)) return "키워드는 각각 50자 이하로 최대 20개까지 입력해주세요.";
+  if ((fields.main_offering?.length ?? 0) > 300 || (fields.strengths?.length ?? 0) > 300 || (fields.marketing_goal?.length ?? 0) > 200) {
+    return "주요 상품/서비스, 강점, 마케팅 목표 입력 길이를 확인해주세요.";
+  }
   if (fields.website) {
     try {
       const url = new URL(fields.website);
       if (url.protocol !== "http:" && url.protocol !== "https:") return "웹사이트 주소는 http 또는 https 주소로 입력해주세요.";
     } catch {
       return "웹사이트 주소 형식을 확인해주세요.";
+    }
+  }
+  for (const link of Object.values(fields.sns_links)) {
+    if (!link) continue;
+    try {
+      const url = new URL(link);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return "SNS 링크는 http 또는 https 주소로 입력해주세요.";
+    } catch {
+      return "SNS 링크 형식을 확인해주세요.";
     }
   }
   return null;

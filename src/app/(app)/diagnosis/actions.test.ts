@@ -68,15 +68,52 @@ describe("runDiagnosis", () => {
       recommendations: ["인스타그램을 연결하세요."],
       sourceUrl: "https://example.com/",
       rawSummary: "우리가게 — 소개",
+      mainOffering: "핸드드립 커피",
+      strengths: null,
+      marketingGoal: null,
+      snsLinks: { instagram: "https://instagram.com/ourcafe" },
     });
 
     const result = await runDiagnosis({}, formData({ businessId: "business-1", url: "https://example.com" }));
 
     expect(result.error).toBeUndefined();
     expect(result.result).toMatchObject({ id: "diagnosis-1", score: 70, sourceUrl: "https://example.com/" });
+    // Profile suggestions pass through for client-side prefill, but are not
+    // among the columns written to marketing_diagnoses below — see the
+    // next assertion and the "never writes to businesses" test.
+    expect(result.result?.profileSuggestions).toEqual({
+      mainOffering: "핸드드립 커피",
+      strengths: null,
+      marketingGoal: null,
+      snsLinks: { instagram: "https://instagram.com/ourcafe" },
+    });
     expect(diagnoseWebsiteMock).toHaveBeenCalledWith({ id: "business-1", name: "우리가게", industry: "카페" }, "https://example.com");
     expect(inserted[0]).toMatchObject({ business_id: "business-1", source_type: "website", score: 70 });
+    expect(inserted[0]).not.toHaveProperty("main_offering");
     expect(revalidatePathMock).toHaveBeenCalledWith("/diagnosis");
+  });
+
+  it("never writes to the businesses table — the mocked client only exposes select() on it, so any write attempt would throw", async () => {
+    const { client, inserted } = makeClient();
+    createClientMock.mockResolvedValue(client);
+    diagnoseWebsiteMock.mockResolvedValue({
+      score: 70,
+      missingChannels: [],
+      contentStatus: "ok",
+      snsActivity: "ok",
+      recommendations: [],
+      sourceUrl: "https://example.com/",
+      rawSummary: null,
+      mainOffering: "핸드드립 커피",
+      strengths: "직접 로스팅",
+      marketingGoal: "신규 고객 유입",
+      snsLinks: {},
+    });
+
+    const result = await runDiagnosis({}, formData({ businessId: "business-1", url: "https://example.com" }));
+
+    expect(result.error).toBeUndefined();
+    expect(inserted).toHaveLength(1); // only the marketing_diagnoses insert — businesses was never written to
   });
 
   it("refuses to run when the business doesn't belong to the caller, and never calls diagnoseWebsite", async () => {

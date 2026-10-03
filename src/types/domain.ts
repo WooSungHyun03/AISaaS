@@ -25,6 +25,16 @@ export type IntegrationConnection = Database["public"]["Tables"]["integration_co
 export type Subscriber = Database["public"]["Tables"]["subscribers"]["Row"];
 export type MarketingDiagnosis = Database["public"]["Tables"]["marketing_diagnoses"]["Row"];
 
+/** Shape stored in `businesses.sns_links` (jsonb). All keys optional — a business may have none, some, or all. */
+export interface BusinessSnsLinks {
+  instagram?: string;
+  facebook?: string;
+  youtube?: string;
+  blog?: string;
+  // Index signature so this is structurally assignable to the generated `Json` type (sns_links' column type).
+  [key: string]: string | undefined;
+}
+
 export type {
   AutomationStatus,
   AutomationRunStatus,

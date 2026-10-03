@@ -3,6 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { diagnoseWebsite, DiagnosisError } from "@/server/marketing/diagnosis";
+import type { BusinessSnsLinks } from "@/types/domain";
+
+export interface DiagnosisProfileSuggestions {
+  mainOffering: string | null;
+  strengths: string | null;
+  marketingGoal: string | null;
+  snsLinks: BusinessSnsLinks;
+}
 
 export interface DiagnosisResultView {
   id: string;
@@ -12,6 +20,14 @@ export interface DiagnosisResultView {
   snsActivity: string;
   recommendations: string[];
   sourceUrl: string | null;
+  /**
+   * Suggested Business Profile values (ticket 2) — never written to
+   * `businesses` by this action. Purely a pass-through for the client to
+   * offer as form defaultValues; only an explicit save in
+   * BusinessFormDialog (src/components/business/business-form-dialog.tsx)
+   * persists anything.
+   */
+  profileSuggestions: DiagnosisProfileSuggestions;
 }
 
 export interface DiagnosisActionState {
@@ -105,6 +121,12 @@ export async function runDiagnosis(_prevState: DiagnosisActionState, formData: F
       snsActivity: outcome.snsActivity,
       recommendations: outcome.recommendations,
       sourceUrl: outcome.sourceUrl,
+      profileSuggestions: {
+        mainOffering: outcome.mainOffering,
+        strengths: outcome.strengths,
+        marketingGoal: outcome.marketingGoal,
+        snsLinks: outcome.snsLinks,
+      },
     },
   };
 }

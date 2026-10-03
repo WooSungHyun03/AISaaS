@@ -55,6 +55,10 @@ export interface Database {
           brand_tone: string | null;
           keywords: string[];
           website: string | null;
+          sns_links: Json;
+          main_offering: string | null;
+          strengths: string | null;
+          marketing_goal: string | null;
           public_widget_id: string;
           created_at: string;
           updated_at: string;
@@ -70,6 +74,10 @@ export interface Database {
           brand_tone?: string | null;
           keywords?: string[];
           website?: string | null;
+          sns_links?: Json;
+          main_offering?: string | null;
+          strengths?: string | null;
+          marketing_goal?: string | null;
           public_widget_id?: string;
           created_at?: string;
           updated_at?: string;

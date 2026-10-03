@@ -66,6 +66,9 @@ export class MockAIProvider implements AIProvider {
           contentStatus: hasRecentPost ? "최근 콘텐츠가 꾸준히 올라오고 있습니다." : "최근 업데이트된 콘텐츠를 찾기 어렵습니다.",
           snsActivity: "SNS 연동 여부를 홈페이지에서 확인하지 못했습니다.",
           recommendations: ["인스타그램 계정을 연결해 주기적으로 소식을 올려보세요.", "블로그에 고객 후기나 사례를 정기적으로 추가해보세요."],
+          mainOffering: null,
+          strengths: null,
+          marketingGoal: null,
         }),
       };
     }

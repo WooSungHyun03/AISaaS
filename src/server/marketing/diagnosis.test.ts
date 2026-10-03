@@ -178,6 +178,9 @@ const VALID_AI_RESULT = {
   contentStatus: "최근 6개월간 업데이트가 없습니다.",
   snsActivity: "SNS 연동이 확인되지 않습니다.",
   recommendations: ["인스타그램 계정을 연결하세요."],
+  mainOffering: null,
+  strengths: null,
+  marketingGoal: null,
 };
 
 describe("diagnoseWebsite", () => {
@@ -208,5 +211,33 @@ describe("diagnoseWebsite", () => {
 
     expect(error).toBeInstanceOf(DiagnosisError);
     expect((error as InstanceType<typeof DiagnosisError>).code).toBe("AI_INVALID_RESPONSE");
+  });
+
+  it("deterministically finds social/blog links in <a href> attributes, independent of what the AI returns", async () => {
+    mockOneRequest(
+      makeMockResponse(200, HTML_HEADERS),
+      '<html><body><a href="https://www.instagram.com/ourcafe">IG</a><a href="https://blog.naver.com/ourcafe">Blog</a></body></html>',
+    );
+    generateStructuredMock.mockResolvedValue(VALID_AI_RESULT);
+
+    const result = await diagnoseWebsite(BUSINESS, "https://example.com/");
+
+    expect(result.snsLinks).toEqual({ instagram: "https://www.instagram.com/ourcafe", blog: "https://blog.naver.com/ourcafe" });
+  });
+
+  it("passes through AI-confident profile suggestions, and omits them (null) when the AI isn't sure", async () => {
+    mockOneRequest(makeMockResponse(200, HTML_HEADERS), "<html></html>");
+    generateStructuredMock.mockResolvedValue({
+      ...VALID_AI_RESULT,
+      mainOffering: "핸드드립 커피와 디저트",
+      strengths: "직접 로스팅한 원두",
+      marketingGoal: null,
+    });
+
+    const result = await diagnoseWebsite(BUSINESS, "https://example.com/");
+
+    expect(result.mainOffering).toBe("핸드드립 커피와 디저트");
+    expect(result.strengths).toBe("직접 로스팅한 원두");
+    expect(result.marketingGoal).toBeNull();
   });
 });
