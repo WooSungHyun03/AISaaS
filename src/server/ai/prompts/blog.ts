@@ -9,10 +9,16 @@ export const blogTopicSchema = z.object({
 export type BlogTopic = z.infer<typeof blogTopicSchema>;
 
 export const blogBodySchema = z.object({
+  /** Opening hook sentence meant to grab attention before the body proper starts. */
+  hook: z.string().min(1),
   excerpt: z.string().min(1),
   bodyHtml: z.string().min(1),
   keywords: z.array(z.string().min(1)).default([]),
+  /** Separate from `keywords` (reader-facing topic tags) — terms chosen for search/SEO. */
+  seoKeywords: z.array(z.string().min(1)).default([]),
   callToAction: z.string().min(1),
+  /** Where to place an image and what it should show, e.g. "도입부 직후: 완성된 디저트 클로즈업 사진". */
+  imageSuggestion: z.string().min(1),
 });
 export type BlogBody = z.infer<typeof blogBodySchema>;
 
@@ -23,6 +29,7 @@ export type BlogContent = z.infer<typeof blogContentSchema>;
 function buildBusinessContext(business: Business, config?: BlogAutomationConfig): string {
   return [
     "You are a marketing content writer for a small business, writing in Korean.",
+    "Avoid writing that reads like an obvious ad — no over-the-top sales pressure. Use natural, conversational Korean, and avoid stock AI-sounding phrases/clichés (e.g. \"안녕하세요, 오늘은~\", \"~해보는 건 어떨까요?\", excessive emoji or exclamation marks).",
     `Business name: ${business.name}`,
     business.industry ? `Industry: ${business.industry}` : null,
     business.location ? `Location: ${business.location}` : null,
@@ -74,7 +81,7 @@ export function buildBlogBodyPrompt(business: Business, topic: string, title: st
   const prompt = [
     `Write the full marketing blog post body for the topic "${topic}" with the title "${title}".`,
     "Return JSON with exactly these fields:",
-    '{ "excerpt": "1-2 sentence summary for previews", "bodyHtml": "the full post body as simple HTML using only <p> paragraph tags, 3-5 short paragraphs", "keywords": ["keyword1", "keyword2"], "callToAction": "one short closing call-to-action sentence" }',
+    '{ "hook": "one opening sentence to grab attention before the body starts", "excerpt": "1-2 sentence summary for previews", "bodyHtml": "the full post body as simple HTML using only <p> paragraph tags, 3-5 short paragraphs", "keywords": ["keyword1", "keyword2"], "seoKeywords": ["search-focused keyword1", "search-focused keyword2"], "callToAction": "one short closing call-to-action sentence", "imageSuggestion": "where to place one image and what it should show, in Korean" }',
   ].join("\n");
 
   return { system, prompt };

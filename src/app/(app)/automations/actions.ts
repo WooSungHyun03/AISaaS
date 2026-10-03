@@ -82,21 +82,17 @@ export async function createAutomation(
     });
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "블로그 설정을 확인해주세요." };
 
-    const blogConfig: BlogAutomationConfig = parsed.data;
+    // Blog automations are generation-only going forward (ticket: "Blog 자동
+    // 발행 제거") — new automations may only save drafts in-app. WordPress
+    // delivery still exists for automations created before this change
+    // (see updateAutomation below and the handler's publish path in
+    // src/server/automations/handlers/blog.ts), just not for new ones, and
+    // hiding the option in blog-setup-wizard.tsx isn't enough on its own
+    // since a request can bypass the UI entirely.
     if (parsed.data.deliveryMode !== "app_draft") {
-      const siteUrlInput = String(formData.get("wordpressSiteUrl") ?? "");
-      const username = String(formData.get("wordpressUsername") ?? "").trim();
-      const appPassword = String(formData.get("wordpressAppPassword") ?? "").trim();
-      if (!siteUrlInput || !username || !appPassword) return { error: "WordPress 사이트 주소, 사용자명, Application Password를 모두 입력해주세요." };
-
-      try {
-        const siteUrl = normalizeWordPressSiteUrl(siteUrlInput);
-        await new WordPressConnector({ siteUrl, username, appPassword }).testConnection();
-        blogConfig.wordpress = { siteUrl, username, encryptedAppPassword: encryptWordPressPassword(appPassword) };
-      } catch (error) {
-        return { error: error instanceof Error ? error.message : "WordPress 연결을 확인할 수 없습니다." };
-      }
+      return { error: "새로 만드는 블로그 자동화는 앱에 초안 저장만 선택할 수 있어요." };
     }
+    const blogConfig: BlogAutomationConfig = parsed.data;
     config = blogConfig as unknown as Json;
   }
 

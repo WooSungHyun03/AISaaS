@@ -11,6 +11,10 @@ export interface SafeAutomationRunOutput {
   keywords: string[];
   externalUrl: string | null;
   destinationStatus: "draft" | "publish" | null;
+  /** Blog-only (added alongside the generation-only switch) — null for every run from before that change or for non-blog handlers. */
+  hook: string | null;
+  seoKeywords: string[];
+  imageSuggestion: string | null;
 }
 
 function asRecord(value: Json): Record<string, Json | undefined> | null {
@@ -68,6 +72,9 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
   const keywords = Array.isArray(output.keywords)
     ? output.keywords.filter((item): item is string => typeof item === "string").slice(0, 20).map((item) => item.slice(0, 100))
     : [];
+  const seoKeywords = Array.isArray(output.seoKeywords)
+    ? output.seoKeywords.filter((item): item is string => typeof item === "string").slice(0, 20).map((item) => item.slice(0, 100))
+    : [];
   const destinationStatus = output.wordpressStatus === "draft" || output.wordpressStatus === "publish"
     ? output.wordpressStatus
     : null;
@@ -80,6 +87,9 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
     keywords,
     externalUrl: safeExternalUrl(output.externalUrl),
     destinationStatus,
+    hook: safeText(output.hook, 500),
+    seoKeywords,
+    imageSuggestion: safeText(output.imageSuggestion, 500),
   };
 
   return Object.values(safe).some((item) => Array.isArray(item) ? item.length > 0 : item !== null) ? safe : null;

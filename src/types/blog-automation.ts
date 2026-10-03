@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+/**
+ * "app_draft" is the only mode a *new* blog automation can be created with
+ * (see createAutomation in src/app/(app)/automations/actions.ts — it
+ * rejects any other value). "wordpress_draft"/"wordpress_publish" are
+ * DEPRECATED for new automations but kept here, not deleted, for
+ * automations that already use WordPress delivery: editing one
+ * (updateAutomation / automation-settings-dialog.tsx) and running one
+ * (handlers/blog.ts's publish() path) both still work.
+ */
 export const blogDeliveryModes = ["app_draft", "wordpress_draft", "wordpress_publish"] as const;
 
 export const blogSetupSchema = z.object({

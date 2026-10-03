@@ -74,6 +74,7 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
             <div className="space-y-6 rounded-2xl border bg-card px-5 py-6 sm:px-8">
               {output.title ? <div><p className={label}>제목</p><p className="mt-1 text-xl font-extrabold leading-8 tracking-[-0.03em]">{output.title}</p></div> : null}
               {output.topic ? <div><p className={label}>주제</p><p className="mt-1 text-[15px] leading-7">{output.topic}</p></div> : null}
+              {output.hook ? <div><p className={label}>도입부 후킹 문장</p><p className="mt-1 text-[15px] leading-7">{output.hook}</p></div> : null}
               {output.summary ? <div><p className={label}>요약</p><p className="mt-1 whitespace-pre-wrap text-[15px] leading-7">{output.summary}</p></div> : null}
               {output.body ? (
                 <div>
@@ -81,8 +82,10 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
                   <div className="mt-2 max-h-[520px] overflow-y-auto rounded-xl bg-muted px-5 py-4 text-[15px] leading-8 whitespace-pre-wrap">{output.body}</div>
                 </div>
               ) : null}
+              {output.imageSuggestion ? <div><p className={label}>이미지 제안</p><p className="mt-1 text-[15px] leading-7">{output.imageSuggestion}</p></div> : null}
               {output.callToAction ? <div><p className={label}>행동 유도 문구</p><p className="mt-1 text-[15px] leading-7">{output.callToAction}</p></div> : null}
               {output.keywords.length ? <div><p className={label}>키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.keywords.map((keyword) => <Badge key={keyword} variant="brand">{keyword}</Badge>)}</div></div> : null}
+              {output.seoKeywords.length ? <div><p className={label}>SEO 키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.seoKeywords.map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>)}</div></div> : null}
             </div>
           )}
           {output?.externalUrl ? (

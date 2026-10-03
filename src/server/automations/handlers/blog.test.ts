@@ -77,10 +77,13 @@ const automation = {
 
 const topicResult = { topic: "겨울철 소금빵 신메뉴 소개", title: "겨울 한정 소금빵이 왔어요" };
 const bodyResult = {
+  hook: "겨울에만 만날 수 있는 소금빵이 궁금하지 않으세요?",
   excerpt: "겨울 한정 소금빵을 소개합니다.",
   bodyHtml: "<p>겨울 한정 소금빵이 새로 나왔습니다.</p><p>지금 바로 매장에서 만나보세요.</p>",
   keywords: ["소금빵", "겨울한정"],
+  seoKeywords: ["겨울 소금빵", "마포 베이커리"],
   callToAction: "지금 매장을 방문해보세요!",
+  imageSuggestion: "도입부 직후: 겨울 한정 소금빵 클로즈업 사진",
 };
 
 function baseContext(overrides: Partial<AutomationRunContext> = {}): AutomationRunContext {
@@ -236,6 +239,35 @@ describe("blogAutomationHandler", () => {
     expect(publishMock).not.toHaveBeenCalled();
     expect(result.externalUrl).toBeUndefined();
     expect(result.output).toMatchObject({ published: false, wordpressStatus: null, externalUrl: null });
+  });
+
+  it("never calls WordPress for an explicit app_draft config — generation-only going forward", async () => {
+    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
+
+    const result = await blogAutomationHandler.run(
+      baseContext({
+        config: { objective: "신메뉴 홍보", keywords: ["소금빵"], tone: "친근하게", deliveryMode: "app_draft" },
+      }),
+    );
+
+    expect(publishMock).not.toHaveBeenCalled();
+    expect(isConfiguredMock).not.toHaveBeenCalled();
+    expect(result.content).toBeTruthy();
+    expect(result.output).toMatchObject({ published: false, wordpressStatus: null, externalUrl: null });
+  });
+
+  it("includes the new hook/seoKeywords/imageSuggestion fields in the saved output", async () => {
+    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
+
+    const result = await blogAutomationHandler.run(
+      baseContext({ config: { objective: "신메뉴 홍보", keywords: ["소금빵"], tone: "친근하게", deliveryMode: "app_draft" } }),
+    );
+
+    expect(result.output).toMatchObject({
+      hook: bodyResult.hook,
+      seoKeywords: bodyResult.seoKeywords,
+      imageSuggestion: bodyResult.imageSuggestion,
+    });
   });
 
   it("throws instead of returning a partial result when the topic stage fails", async () => {

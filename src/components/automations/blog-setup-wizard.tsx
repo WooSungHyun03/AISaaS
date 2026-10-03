@@ -2,11 +2,9 @@
 
 import { useActionState, useState } from "react";
 import { createAutomation, type AutomationActionState } from "@/app/(app)/automations/actions";
-import { BLOG_DELIVERY_LABEL, type BlogAutomationConfig } from "@/types/blog-automation";
 import type { AutomationTemplate, Business } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { WeekdayPicker } from "@/components/automations/weekday-picker";
 import { cn } from "@/lib/utils";
@@ -15,18 +13,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { FormMessage } from "@/components/ui/form-message";
 
-const STEP_LABELS = ["사업과 목적", "글의 방향", "만들기 주기", "저장 위치"];
+const STEP_LABELS = ["사업과 목적", "글의 방향", "만들기 주기"];
 const STEP_HINTS = [
   "어떤 사업의 어떤 글을 만들지 알려주세요.",
   "AI가 글을 쓸 때 참고할 키워드와 말투예요.",
-  "정해진 날에 새 글 초안을 자동으로 만들어 드려요. 올리는 건 직접 해요.",
-  "만든 글을 어디에 모아둘지 골라주세요.",
+  "정해진 날에 새 글 초안을 자동으로 만들어 드려요. 이지 마케팅 안에 저장되고, 올리는 건 직접 해요.",
 ];
-const DELIVERY_HINT: Record<BlogAutomationConfig["deliveryMode"], string> = {
-  app_draft: "이지 마케팅 안에서 글을 확인하고 복사해 쓰세요. 가장 간단해요.",
-  wordpress_draft: "내 WordPress에 비공개 초안으로 넣어 드려요. 공개는 직접 하세요.",
-  wordpress_publish: "WordPress 연결이 있는 경우에만. 만들어진 글이 바로 공개되니 신중히 고르세요.",
-};
+const LAST_STEP = STEP_LABELS.length - 1;
 
 export function BlogSetupWizard({ businesses, template }: { businesses: Business[]; template: AutomationTemplate }) {
   const [state, formAction, isPending] = useActionState<AutomationActionState, FormData>(createAutomation, {});
@@ -40,17 +33,11 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
   const [frequency, setFrequency] = useState<"DAILY" | "WEEKLY">("WEEKLY");
   const [days, setDays] = useState<number[]>([1, 3, 5]);
   const [timeOfDay, setTimeOfDay] = useState("09:00");
-  const [deliveryMode, setDeliveryMode] = useState<BlogAutomationConfig["deliveryMode"]>("app_draft");
-  const [siteUrl, setSiteUrl] = useState("");
-  const [username, setUsername] = useState("");
-  const [appPassword, setAppPassword] = useState("");
-  const needsWordPress = deliveryMode !== "app_draft";
 
   function validate(currentStep: number): string {
     if (currentStep === 0 && (!businessId || !name.trim() || objective.trim().length < 3)) return "사업체, 이름, 글의 목적을 입력해주세요.";
     if (currentStep === 1 && (!keywords.split(/[,\n]/).some((item) => item.trim()) || tone.trim().length < 2)) return "키워드를 하나 이상 입력하고 글의 톤을 정해주세요.";
     if (currentStep === 2 && (frequency === "WEEKLY" && days.length === 0 || !timeOfDay)) return "만들 요일과 시간을 정해주세요.";
-    if (currentStep === 3 && needsWordPress && (!siteUrl.trim() || !username.trim() || !appPassword.trim())) return "WordPress 사이트 주소, 사용자명, Application Password를 입력해주세요.";
     return "";
   }
 
@@ -58,7 +45,7 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
     const message = validate(step);
     if (message) { setError(message); return; }
     setError("");
-    setStep((current) => Math.min(current + 1, STEP_LABELS.length - 1));
+    setStep((current) => Math.min(current + 1, LAST_STEP));
   }
 
   return (
@@ -69,7 +56,7 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
           <span className="tabular text-muted-foreground">{step + 1} / {STEP_LABELS.length}</span>
         </div>
         <Progress value={((step + 1) / STEP_LABELS.length) * 100} aria-label="설정 진행 상황" />
-        <ol className="grid grid-cols-4 gap-2 text-[13px]">
+        <ol className="grid grid-cols-3 gap-2 text-[13px]">
           {STEP_LABELS.map((label, index) => (
             <li key={label} aria-current={index === step ? "step" : undefined} className={cn("leading-5", index === step ? "font-bold text-foreground" : "text-muted-foreground")}>
               <span className="hidden sm:inline">{index + 1}. </span>{label}
@@ -79,7 +66,7 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
       </div>
       <form action={formAction} onSubmit={(event) => {
         const message = validate(step);
-        if (message || step !== 3) { event.preventDefault(); setError(message || "마지막 단계까지 진행해주세요."); }
+        if (message || step !== LAST_STEP) { event.preventDefault(); setError(message || "마지막 단계까지 진행해주세요."); }
       }} className="space-y-6 px-5 py-6 sm:px-8 sm:py-8" aria-describedby={(error || state.error) ? "blog-wizard-error" : undefined}>
         <div>
           <h2 className="text-xl font-extrabold tracking-[-0.03em]">{STEP_LABELS[step]}</h2>
@@ -94,12 +81,8 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
         <input type="hidden" name="frequency" value={frequency} />
         <input type="hidden" name="timeOfDay" value={timeOfDay} />
         {frequency === "WEEKLY" && days.map((day) => <input key={day} type="hidden" name="daysOfWeek" value={day} />)}
-        <input type="hidden" name="deliveryMode" value={deliveryMode} />
-        {needsWordPress && <>
-          <input type="hidden" name="wordpressSiteUrl" value={siteUrl} />
-          <input type="hidden" name="wordpressUsername" value={username} />
-          <input type="hidden" name="wordpressAppPassword" value={appPassword} />
-        </>}
+        {/* New blog automations are generation-only — app_draft is the only mode createAutomation accepts, see src/app/(app)/automations/actions.ts */}
+        <input type="hidden" name="deliveryMode" value="app_draft" />
 
         {step === 0 && <div className="space-y-5">
           <div className="space-y-2"><Label htmlFor="blog-business">사업체</Label>
@@ -133,30 +116,13 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
           </div>
           {frequency === "WEEKLY" && <WeekdayPicker legend="만드는 요일" value={days} onChange={setDays} disabled={isPending} />}
           <div className="space-y-2"><Label htmlFor="blog-time">만드는 시간 (한국 시간)</Label><Input id="blog-time" type="time" value={timeOfDay} onChange={(event) => setTimeOfDay(event.target.value)} disabled={isPending} className="sm:w-44" /></div>
-          <FormMessage variant="info">설정을 만든 뒤 확인하고 켜면 정해진 때마다 글 초안이 만들어져요.</FormMessage>
-        </div>}
-
-        {step === 3 && <div className="space-y-5">
-          <fieldset className="space-y-3"><legend className="text-sm font-semibold">만든 글을 어디에 저장할까요?</legend>
-            {(Object.keys(BLOG_DELIVERY_LABEL) as BlogAutomationConfig["deliveryMode"][]).map((mode) => <label key={mode} className={cn("flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors focus-within:ring-3 focus-within:ring-ring/25", deliveryMode === mode ? "border-primary bg-brand-soft" : "hover:border-primary/40")}>
-              <input type="radio" name="delivery-mode-option" value={mode} checked={deliveryMode === mode} onChange={() => setDeliveryMode(mode)} disabled={isPending} className="mt-1.5 size-4 accent-primary" />
-              <span className="min-w-0"><span className="flex flex-wrap items-center gap-2 text-[15px] font-semibold">{BLOG_DELIVERY_LABEL[mode]}{mode === "app_draft" ? <Badge variant="brand">추천</Badge> : null}</span><span className="mt-0.5 block text-[13px] leading-6 text-muted-foreground">{DELIVERY_HINT[mode]}</span></span>
-            </label>)}
-          </fieldset>
-          {needsWordPress && <div className="space-y-4 rounded-xl bg-muted p-4 sm:p-5">
-            <div><p className="text-sm font-semibold">WordPress 연결</p>
-              <p className="mt-1 text-[13px] leading-6 text-muted-foreground">WordPress 사용자 프로필에서 Application Password를 만들어 입력하세요. 만들 때 연결과 권한을 확인해요.</p></div>
-            <div className="space-y-2"><Label htmlFor="wordpress-site">사이트 주소</Label><Input id="wordpress-site" type="url" value={siteUrl} onChange={(event) => setSiteUrl(event.target.value)} placeholder="https://example.com" autoComplete="url" disabled={isPending} /></div>
-            <div className="space-y-2"><Label htmlFor="wordpress-user">사용자명</Label><Input id="wordpress-user" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" disabled={isPending} /></div>
-            <div className="space-y-2"><Label htmlFor="wordpress-password">Application Password</Label><Input id="wordpress-password" type="password" value={appPassword} onChange={(event) => setAppPassword(event.target.value)} autoComplete="new-password" disabled={isPending} /></div>
-            <p className="text-[13px] text-muted-foreground">비밀번호는 서버에서 암호화해 저장하고, 설정 요약에는 보여주지 않아요.</p>
-          </div>}
+          <FormMessage variant="info">설정을 만든 뒤 확인하고 켜면 정해진 때마다 글 초안이 만들어져요. 이지 마케팅 안에서 확인하고 복사해 쓰세요.</FormMessage>
         </div>}
 
         {(error || state.error) && <FormMessage id="blog-wizard-error">{error || state.error}</FormMessage>}
         <div className="flex flex-wrap gap-3 border-t pt-5">
           {step > 0 && <Button key="prev" type="button" variant="outline" onClick={() => { setError(""); setStep((current) => current - 1); }} disabled={isPending}>이전</Button>}
-          {step < 3 ? <Button key="next" type="button" className="ml-auto" onClick={nextStep} disabled={isPending}>다음</Button> : <Button key="submit" type="submit" className="ml-auto" disabled={isPending}>{isPending ? "연결 확인하고 만드는 중…" : "설정 만들기"}</Button>}
+          {step < LAST_STEP ? <Button key="next" type="button" className="ml-auto" onClick={nextStep} disabled={isPending}>다음</Button> : <Button key="submit" type="submit" className="ml-auto" disabled={isPending}>{isPending ? "만드는 중…" : "설정 만들기"}</Button>}
         </div>
       </form>
     </div>
