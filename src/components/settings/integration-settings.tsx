@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Camera, CheckCircle2, CircleOff, Globe2, Mail, RefreshCw, Unplug } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, CircleOff, Globe2, Mail, RefreshCw, Unplug, Video } from "lucide-react";
 import { toast } from "sonner";
 import { connectWordPress, disconnectIntegration, type SettingsActionState } from "@/app/(app)/settings/actions";
 import { Badge } from "@/components/ui/badge";
@@ -53,7 +53,7 @@ function DisconnectButton({ businessId, provider }: { businessId: string; provid
   return <ConfirmationDialog
     trigger={<Button type="button" variant="ghost" size="sm"><Unplug aria-hidden="true" />연결 해제</Button>}
     title="연결을 해제할까요?"
-    description="이 연결을 쓰는 만들기 설정은 다음부터 WordPress로 글을 보내지 못할 수 있어요. 언제든 다시 연결할 수 있어요."
+    description="이 연결을 사용하는 자동화는 다음부터 외부 서비스로 결과를 보내지 못할 수 있어요. 언제든 다시 연결할 수 있어요."
     confirmLabel="해제하기"
     pendingLabel="해제하는 중…"
     destructive
@@ -140,6 +140,7 @@ export function IntegrationSettings({ businessId, connections }: { businessId: s
   const wordpress = get("wordpress");
   const instagram = get("instagram");
   const email = get("email");
+  const youtube = get("youtube");
 
   return <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
     <IntegrationRow icon={<Globe2 className="size-5" aria-hidden="true" />} title="WordPress" description="만든 블로그 글을 내 WordPress에 초안으로 보내고 싶을 때 연결해요." connection={wordpress}>
@@ -149,6 +150,10 @@ export function IntegrationSettings({ businessId, connections }: { businessId: s
     <IntegrationRow icon={<Camera className="size-5" aria-hidden="true" />} title="인스타그램" description="비즈니스·크리에이터 계정을 연결해 두면 콘텐츠를 만들 때 참고해요." connection={instagram}>
       <Button asChild size="sm" variant={instagram ? "outline" : "default"}><a href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`}>{instagram ? <RefreshCw aria-hidden="true" /> : null}{instagram ? "다시 연결" : "인스타그램 연결"}</a></Button>
       {instagram && <DisconnectButton businessId={businessId} provider="instagram" />}
+    </IntegrationRow>
+    <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description="Shorts를 내 채널에 업로드해요. 현재 비공개로만 업로드됩니다." connection={youtube}>
+      <Button asChild size="sm" variant={youtube ? "outline" : "default"}><a href={`/api/integrations/youtube/connect?businessId=${encodeURIComponent(businessId)}`}>{youtube ? <RefreshCw aria-hidden="true" /> : null}{youtube ? "다시 연결" : "YouTube 연결"}</a></Button>
+      {youtube && <DisconnectButton businessId={businessId} provider="youtube" />}
     </IntegrationRow>
     <IntegrationRow icon={<Mail className="size-5" aria-hidden="true" />} title="이메일" description="뉴스레터용 이메일 서비스 연결 상태를 확인해요." connection={email}>
       {email ? <DisconnectButton businessId={businessId} provider="email" /> : <Button size="sm" variant="outline" disabled>준비 중</Button>}

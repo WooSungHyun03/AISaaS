@@ -17,6 +17,11 @@ afterEach(() => {
 
 const CONNECTION = { accessToken: "ig-token", igUserId: "ig-user-1" };
 const PUBLISH_PARAMS = { content: "오늘의 소식입니다 #홍보", imageUrl: "https://storage.example.com/marketing-card.png" };
+const REELS_PARAMS = {
+  content: "30초 만에 확인하는 오늘의 마케팅 팁 #마케팅",
+  mediaType: "REELS" as const,
+  videoUrl: "https://storage.example.com/shorts/reel.mp4",
+};
 
 describe("InstagramConnector.isConfigured", () => {
   it("is true when an explicit connection is given", () => {
@@ -34,6 +39,19 @@ describe("InstagramConnector.publish", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const error = await new InstagramConnector(CONNECTION).publish({ content: "caption only" }).catch((e: unknown) => e);
+
+    expect(isConnectorError(error)).toBe(true);
+    expect((error as { code: string }).code).toBe("INVALID_TARGET");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("requires a videoUrl for REELS — never calls the API without one", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await new InstagramConnector(CONNECTION)
+      .publish({ content: "caption only", mediaType: "REELS" })
+      .catch((e: unknown) => e);
 
     expect(isConnectorError(error)).toBe(true);
     expect((error as { code: string }).code).toBe("INVALID_TARGET");
@@ -67,6 +85,8 @@ describe("InstagramConnector.publish", () => {
     const createUrl = new URL(fetchMock.mock.calls[0][0] as string);
     expect(createUrl.pathname).toBe("/v21.0/ig-user-1/media");
     expect(createUrl.searchParams.get("image_url")).toBe(PUBLISH_PARAMS.imageUrl);
+    expect(createUrl.searchParams.get("video_url")).toBeNull();
+    expect(createUrl.searchParams.get("media_type")).toBeNull();
     expect(createUrl.searchParams.get("caption")).toBe(PUBLISH_PARAMS.content);
     expect(createUrl.searchParams.get("access_token")).toBe("ig-token");
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
@@ -79,6 +99,30 @@ describe("InstagramConnector.publish", () => {
     expect(publishUrl.pathname).toBe("/v21.0/ig-user-1/media_publish");
     expect(publishUrl.searchParams.get("creation_id")).toBe("creation-1");
     expect(fetchMock.mock.calls[2][1]).toMatchObject({ method: "POST" });
+  });
+
+  it("creates a REELS container with video_url and publishes it after processing", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { id: "reel-creation-1" }))
+      .mockResolvedValueOnce(jsonResponse(200, { status_code: "IN_PROGRESS" }))
+      .mockResolvedValueOnce(jsonResponse(200, { status_code: "FINISHED" }))
+      .mockResolvedValueOnce(jsonResponse(200, { id: "reel-media-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new InstagramConnector(CONNECTION, { pollIntervalMs: 0 }).publish(REELS_PARAMS);
+
+    expect(result).toEqual({ externalId: "reel-media-1" });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    const createUrl = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(createUrl.searchParams.get("media_type")).toBe("REELS");
+    expect(createUrl.searchParams.get("video_url")).toBe(REELS_PARAMS.videoUrl);
+    expect(createUrl.searchParams.get("image_url")).toBeNull();
+    expect(createUrl.searchParams.get("caption")).toBe(REELS_PARAMS.content);
+
+    const publishUrl = new URL(fetchMock.mock.calls[3][0] as string);
+    expect(publishUrl.searchParams.get("creation_id")).toBe("reel-creation-1");
   });
 
   it("polls IN_PROGRESS status until FINISHED before publishing", async () => {
@@ -135,8 +179,8 @@ describe("InstagramConnector.publish", () => {
 
     expect(isConnectorError(error)).toBe(true);
     expect((error as { code: string }).code).toBe("TIMEOUT");
-    // 1 create + 5 bounded status checks, never more.
-    expect(fetchMock).toHaveBeenCalledTimes(6);
+    // 1 create + 10 bounded status checks, never more.
+    expect(fetchMock).toHaveBeenCalledTimes(11);
   });
 
   it("a publish (media_publish) failure surfaces a classified ConnectorError after a successful container/status", async () => {

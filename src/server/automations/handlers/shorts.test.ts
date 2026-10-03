@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Automation, Business } from "@/types/domain";
 import type { AutomationRunContext } from "@/types/automation";
 
@@ -6,15 +6,48 @@ const { generateStructuredMock } = vi.hoisted(() => ({ generateStructuredMock: v
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
 const { renderShortVideoMock } = vi.hoisted(() => ({ renderShortVideoMock: vi.fn() }));
 vi.mock("@/server/connectors/video", () => ({ renderShortVideo: renderShortVideoMock }));
+const {
+  getConnectionMock,
+  instagramConnectorMock,
+  instagramIsConfiguredMock,
+  instagramPublishMock,
+  loadInstagramConnectorMock,
+  updateConnectionStatusMock,
+} = vi.hoisted(() => {
+  const instagramIsConfigured = vi.fn();
+  const instagramPublish = vi.fn();
+  return {
+    getConnectionMock: vi.fn(),
+    instagramConnectorMock: { isConfigured: instagramIsConfigured, publish: instagramPublish },
+    instagramIsConfiguredMock: instagramIsConfigured,
+    instagramPublishMock: instagramPublish,
+    loadInstagramConnectorMock: vi.fn(),
+    updateConnectionStatusMock: vi.fn(),
+  };
+});
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ kind: "admin-test-client" }) }));
+vi.mock("@/server/connectors/instagram", () => ({
+  InstagramConnector: class {
+    isConfigured = instagramIsConfiguredMock;
+    publish = instagramPublishMock;
+  },
+}));
+vi.mock("@/server/connectors/instagram/connect", () => ({ loadInstagramConnector: loadInstagramConnectorMock }));
+vi.mock("@/server/connectors/integrations", () => ({
+  getConnection: getConnectionMock,
+  updateConnectionStatus: updateConnectionStatusMock,
+}));
 
 const { shortsAutomationHandler } = await import("./shorts");
 
-afterEach(() => {
+beforeEach(() => {
   vi.resetAllMocks();
   renderShortVideoMock.mockResolvedValue("https://cdn.example.com/shorts/result.mp4");
+  getConnectionMock.mockResolvedValue({ id: "conn-1", status: "CONNECTED" });
+  loadInstagramConnectorMock.mockResolvedValue(instagramConnectorMock);
+  instagramIsConfiguredMock.mockReturnValue(true);
+  instagramPublishMock.mockResolvedValue({ externalId: "reel-media-1" });
 });
-
-renderShortVideoMock.mockResolvedValue("https://cdn.example.com/shorts/result.mp4");
 
 const business: Business = {
   id: "biz-1",
@@ -80,7 +113,11 @@ describe("shortsAutomationHandler", () => {
     const result = await shortsAutomationHandler.run(baseContext());
 
     expect(generateStructuredMock).toHaveBeenCalledTimes(2);
-    expect(result.output).toEqual({ ...generatedContent, videoUrl: "https://cdn.example.com/shorts/result.mp4" });
+    expect(result.output).toEqual({
+      ...generatedContent,
+      videoUrl: "https://cdn.example.com/shorts/result.mp4",
+      instagramMediaId: "reel-media-1",
+    });
     expect(result.output).toMatchObject({
       scenes: expect.arrayContaining([
         expect.objectContaining({ text: expect.any(String), visualPrompt: expect.any(String), durationSec: expect.any(Number) }),
@@ -96,6 +133,11 @@ describe("shortsAutomationHandler", () => {
       contentType: "shorts",
     });
     expect(renderShortVideoMock).toHaveBeenCalledWith(generatedContent.scenes, generatedContent.script);
+    expect(instagramPublishMock).toHaveBeenCalledWith({
+      content: generatedContent.caption,
+      mediaType: "REELS",
+      videoUrl: "https://cdn.example.com/shorts/result.mp4",
+    });
   });
 
   it("regenerates a near-duplicate topic exactly once before writing content", async () => {
@@ -143,5 +185,6 @@ describe("shortsAutomationHandler", () => {
 
     await expect(shortsAutomationHandler.run(baseContext())).rejects.toThrow("generation failed");
     expect(renderShortVideoMock).not.toHaveBeenCalled();
+    expect(instagramPublishMock).not.toHaveBeenCalled();
   });
 });

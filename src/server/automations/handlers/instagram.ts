@@ -36,11 +36,11 @@ function buildCaptionText(caption: InstagramCaption): string {
 }
 
 /**
- * Day 9: single-image Instagram post through the same
+ * Single-image Instagram post through the same
  * container-create -> status-check -> media_publish sequence every
  * PlatformConnector caller goes through (InstagramConnector.publish()) —
  * no automation-type-specific forking of the AutomationRunner lifecycle.
- * Carousel/Reels are explicitly out of scope this Day.
+ * The connector's REELS branch is used separately by the Shorts handler.
  */
 export const instagramAutomationHandler: AutomationHandler = {
   templateSlug: "instagram-marketing",

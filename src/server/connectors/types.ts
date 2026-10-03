@@ -5,6 +5,10 @@ export interface PublishContentParams {
   excerpt?: string;
   /** Publicly fetchable image URL, when the platform requires one (e.g. Instagram's media container). */
   imageUrl?: string;
+  /** Publicly fetchable MP4 URL, when publishing an Instagram Reel. */
+  videoUrl?: string;
+  /** Instagram media kind. Omitted values retain the legacy IMAGE behavior. */
+  mediaType?: "IMAGE" | "REELS";
 }
 
 export interface PublishResult {

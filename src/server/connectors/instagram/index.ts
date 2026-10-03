@@ -5,8 +5,8 @@ import type { PlatformConnector, PublishContentParams, PublishResult } from "../
 
 const GRAPH_API_BASE = "https://graph.instagram.com/v21.0";
 /** Bounded polling for the media container's processing status — never unbounded (Rule 29). */
-const MEDIA_STATUS_MAX_ATTEMPTS = 5;
-const MEDIA_STATUS_POLL_INTERVAL_MS = 2_000;
+const MEDIA_STATUS_MAX_ATTEMPTS = 10;
+const MEDIA_STATUS_POLL_INTERVAL_MS = 5_000;
 
 export interface InstagramConnection {
   accessToken: string;
@@ -19,7 +19,7 @@ function delay(ms: number): Promise<void> {
 
 /**
  * Instagram Content Publishing (Meta Graph API) connector for a single
- * static-image post — Day 9. Carousels/Reels are explicitly out of scope.
+ * static image or Reel. Carousels remain out of scope.
  * Mirrors `WordPressConnector`'s constructor shape: an explicit
  * `InstagramConnection` (from a business's Vault-backed
  * `integration_connections` row, see `./connect.ts#loadInstagramConnector`)
@@ -62,11 +62,21 @@ export class InstagramConnector implements PlatformConnector {
     return response.json() as Promise<T>;
   }
 
-  private async createMediaContainer(imageUrl: string, caption: string): Promise<string> {
+  private async createMediaContainer(params: {
+    caption: string;
+    imageUrl?: string;
+    mediaType: "IMAGE" | "REELS";
+    videoUrl?: string;
+  }): Promise<string> {
     const { accessToken, igUserId } = this.credentials();
     const url = new URL(`${GRAPH_API_BASE}/${igUserId}/media`);
-    url.searchParams.set("image_url", imageUrl);
-    url.searchParams.set("caption", caption);
+    if (params.mediaType === "REELS") {
+      url.searchParams.set("media_type", "REELS");
+      url.searchParams.set("video_url", params.videoUrl!);
+    } else {
+      url.searchParams.set("image_url", params.imageUrl!);
+    }
+    url.searchParams.set("caption", params.caption);
     url.searchParams.set("access_token", accessToken);
     const result = await this.fetchJson<{ id?: string }>(url, { method: "POST" }, "Instagram 게시물 컨테이너를 생성하지 못했습니다.");
     if (!result.id) throw new ConnectorError("instagram", "UPSTREAM_SERVER_ERROR", "Instagram 게시물 컨테이너 ID를 받지 못했습니다.");
@@ -75,9 +85,9 @@ export class InstagramConnector implements PlatformConnector {
 
   /**
    * Polls the container's `status_code` up to MEDIA_STATUS_MAX_ATTEMPTS
-   * times before giving up as `TIMEOUT` ("stuck") — a single static image
-   * is normally processed near-instantly, but Meta's API contract still
-   * requires checking before `media_publish` rather than assuming FINISHED.
+   * times before giving up as `TIMEOUT` ("stuck"). Reels take longer than
+   * static images, so both media paths use the video-safe bounded window.
+   * Meta's API contract requires checking before `media_publish`.
    */
   private async waitForContainerReady(creationId: string): Promise<void> {
     const { accessToken } = this.credentials();
@@ -108,11 +118,16 @@ export class InstagramConnector implements PlatformConnector {
     return result.id;
   }
 
-  /** create media container -> poll status -> media_publish. Single image only (no carousel/reels — Day 9 scope). */
-  async publish({ content, imageUrl }: PublishContentParams): Promise<PublishResult> {
-    if (!imageUrl) throw new ConnectorError("instagram", "INVALID_TARGET", "Instagram 게시물에는 이미지 URL이 필요합니다.");
+  /** create media container -> poll status -> media_publish for an image or Reel. */
+  async publish({ content, imageUrl, mediaType = "IMAGE", videoUrl }: PublishContentParams): Promise<PublishResult> {
+    if (mediaType === "REELS" && !videoUrl) {
+      throw new ConnectorError("instagram", "INVALID_TARGET", "Instagram Reels 게시물에는 영상 URL이 필요합니다.");
+    }
+    if (mediaType === "IMAGE" && !imageUrl) {
+      throw new ConnectorError("instagram", "INVALID_TARGET", "Instagram 게시물에는 이미지 URL이 필요합니다.");
+    }
 
-    const creationId = await this.createMediaContainer(imageUrl, content);
+    const creationId = await this.createMediaContainer({ caption: content, imageUrl, mediaType, videoUrl });
     await this.waitForContainerReady(creationId);
     const mediaId = await this.publishMediaContainer(creationId);
     return { externalId: mediaId };
