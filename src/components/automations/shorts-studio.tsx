@@ -173,6 +173,9 @@ export function ShortsStudio({
               </Button>
               <p className="text-xs leading-5 text-muted-foreground">YouTube는 현재 비공개 상태로 업로드됩니다.</p>
             </div>
+            <p className="mt-4 rounded-xl bg-muted px-4 py-3 text-xs leading-5 text-muted-foreground">
+              TikTok 연동은 공식 API 심사(약 3주, 전용 UI 요건)로 추후 지원 예정입니다.
+            </p>
           </div>
         </div>
       </section>

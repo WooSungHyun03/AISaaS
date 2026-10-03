@@ -23,6 +23,8 @@ export interface NavItem {
   exact?: boolean;
   /** 아직 제공되지 않는 메뉴. 링크 대신 "준비 중"으로 표시합니다. */
   comingSoon?: boolean;
+  /** 호환/통합 라우트로 이동한 뒤에도 같은 메뉴를 활성 표시합니다. */
+  activePaths?: string[];
 }
 
 export interface NavSection {
@@ -31,48 +33,47 @@ export interface NavSection {
 }
 
 /**
- * 사용자의 핵심 동선: 진단 → 사업 정보 → 캘린더 → 콘텐츠 → 성장 리포트.
- * AI 도구 모음은 보조 자료이므로 맨 아래에 둡니다.
+ * 신규 사용자의 핵심 동선을 한 섹션에 그대로 배치합니다.
+ * 자동화 관리와 실행 기록은 필요할 때 찾는 고급 설정으로 분리합니다.
  */
 export const APP_NAV: NavSection[] = [
   {
-    items: [{ href: "/dashboard", label: "홈", icon: House, exact: true }],
-  },
-  {
-    label: "마케팅 계획",
     items: [
-      { href: "/marketing/diagnosis", label: "마케팅 진단", icon: Activity },
+      { href: "/dashboard", label: "대시보드", icon: House, exact: true },
+      { href: "/diagnosis", label: "마케팅 진단", icon: Activity, activePaths: ["/marketing/diagnosis"] },
+      { href: "/business", label: "사업 정보", icon: Building2 },
       { href: "/calendar", label: "마케팅 캘린더", icon: CalendarDays },
+      { href: "/blog", label: "블로그", icon: BookOpen },
+      { href: "/shorts", label: "숏폼", icon: Video },
+      { href: "/growth-report", label: "성장 리포트", icon: TrendingUp, comingSoon: true },
     ],
   },
   {
-    label: "콘텐츠 만들기",
+    label: "고급 설정",
     items: [
-      { href: "/automations/marketplace", label: "블로그·숏폼 시작", icon: Sparkles },
-      { href: "/shorts", label: "숏폼 스튜디오", icon: Video },
-      { href: "/automations", label: "만들기 설정", icon: ListChecks, exact: true },
-      { href: "/automations/history", label: "제작 기록", icon: History },
-      { href: "#growth-report", label: "성장 리포트", icon: TrendingUp, comingSoon: true },
+      { href: "/automations/marketplace", label: "자동화 둘러보기", icon: Sparkles },
+      { href: "/automations", label: "내 자동화", icon: ListChecks, exact: true },
+      { href: "/automations/history", label: "실행 기록", icon: History },
     ],
   },
   {
     label: "내 계정",
     items: [
-      { href: "/business", label: "사업 정보", icon: Building2 },
       { href: "/billing", label: "요금제·결제", icon: CreditCard },
       { href: "/settings", label: "설정", icon: Settings },
     ],
   },
   {
-    label: "도움말",
+    label: "리소스",
     items: [
+      { href: "/directory", label: "AI 서비스", icon: Compass },
       { href: "/guides", label: "활용 가이드", icon: BookOpen },
-      { href: "/directory", label: "AI 도구 모음", icon: Compass },
     ],
   },
 ];
 
-export function isNavActive(pathname: string, item: Pick<NavItem, "href" | "exact">): boolean {
-  if (item.exact) return pathname === item.href;
-  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+export function isNavActive(pathname: string, item: Pick<NavItem, "href" | "exact" | "activePaths">): boolean {
+  const paths = [item.href, ...(item.activePaths ?? [])];
+  if (item.exact) return paths.includes(pathname);
+  return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
