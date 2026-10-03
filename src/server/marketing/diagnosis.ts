@@ -242,7 +242,9 @@ const SNS_LINK_PATTERNS: Array<{ key: keyof BusinessSnsLinks; pattern: RegExp }>
   { key: "instagram", pattern: /https?:\/\/(?:www\.)?instagram\.com\/[^\s"'<>]+/i },
   { key: "facebook", pattern: /https?:\/\/(?:www\.)?facebook\.com\/[^\s"'<>]+/i },
   { key: "youtube", pattern: /https?:\/\/(?:www\.)?(?:youtube\.com|youtu\.be)\/[^\s"'<>]+/i },
-  { key: "blog", pattern: /https?:\/\/(?:[^\s"'<>]*\.)?(?:blog\.naver\.com|tistory\.com)\/[^\s"'<>]+/i },
+  { key: "naver_blog", pattern: /https?:\/\/blog\.naver\.com\/[^\s"'<>]+/i },
+  { key: "naver_place", pattern: /https?:\/\/(?:[^\s"'<>]*\.)?(?:map|place)\.naver\.com\/[^\s"'<>]+/i },
+  { key: "kakao_channel", pattern: /https?:\/\/pf\.kakao\.com\/[^\s"'<>]+/i },
 ];
 
 /**

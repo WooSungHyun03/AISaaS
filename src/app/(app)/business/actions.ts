@@ -16,7 +16,11 @@ function parseKeywords(raw: string): string[] {
     .filter(Boolean);
 }
 
-const SNS_LINK_KEYS = ["instagram", "facebook", "youtube", "blog"] as const;
+// A saved business may still have a value under the old generic "blog" key
+// — that's only ever read back for display (mergeSnsLinks in
+// src/components/business/prefill.ts), never submitted by this form, so
+// every save here writes "naver_blog" and effectively migrates it forward.
+const SNS_LINK_KEYS = ["instagram", "facebook", "youtube", "naver_blog", "naver_place", "kakao_channel"] as const;
 
 function snsLinksFromForm(formData: FormData): BusinessSnsLinks {
   const links: BusinessSnsLinks = {};

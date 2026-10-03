@@ -106,18 +106,20 @@ export function BusinessFormDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor="mainOffering">주요 상품/서비스</Label>
-            <Input
+            <Textarea
               id="mainOffering"
               name="mainOffering"
+              rows={2}
               defaultValue={mergeBusinessDefault(business?.main_offering, prefill?.mainOffering)}
               maxLength={300}
             />
           </div>
           <div className="space-y-2">
             <Label htmlFor="strengths">강점</Label>
-            <Input
+            <Textarea
               id="strengths"
               name="strengths"
+              rows={2}
               defaultValue={mergeBusinessDefault(business?.strengths, prefill?.strengths)}
               maxLength={300}
             />
@@ -138,7 +140,9 @@ export function BusinessFormDialog({
               <Input aria-label="Instagram" name="snsLinks.instagram" type="url" placeholder="Instagram" spellCheck={false} defaultValue={snsLinks.instagram ?? ""} maxLength={500} />
               <Input aria-label="Facebook" name="snsLinks.facebook" type="url" placeholder="Facebook" spellCheck={false} defaultValue={snsLinks.facebook ?? ""} maxLength={500} />
               <Input aria-label="YouTube" name="snsLinks.youtube" type="url" placeholder="YouTube" spellCheck={false} defaultValue={snsLinks.youtube ?? ""} maxLength={500} />
-              <Input aria-label="블로그" name="snsLinks.blog" type="url" placeholder="블로그" spellCheck={false} defaultValue={snsLinks.blog ?? ""} maxLength={500} />
+              <Input aria-label="네이버 블로그" name="snsLinks.naver_blog" type="url" placeholder="네이버 블로그" spellCheck={false} defaultValue={snsLinks.naver_blog ?? ""} maxLength={500} />
+              <Input aria-label="네이버 플레이스" name="snsLinks.naver_place" type="url" placeholder="네이버 플레이스" spellCheck={false} defaultValue={snsLinks.naver_place ?? ""} maxLength={500} />
+              <Input aria-label="카카오 채널" name="snsLinks.kakao_channel" type="url" placeholder="카카오 채널" spellCheck={false} defaultValue={snsLinks.kakao_channel ?? ""} maxLength={500} />
             </div>
           </div>
           {state.error ? <FormMessage id="business-form-error">{state.error}</FormMessage> : null}

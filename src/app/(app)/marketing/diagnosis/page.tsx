@@ -4,6 +4,7 @@ import { ArrowRight, CalendarDays, Check, CircleAlert, Settings } from "lucide-r
 import { createClient } from "@/lib/supabase/server";
 import { Mascot } from "@/components/brand/mascot";
 import { PageHeader } from "@/components/layout/page-header";
+import { DiagnosisForm } from "@/components/marketing/diagnosis-form";
 import { ScoreRing, scoreTone } from "@/components/marketing/score-ring";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -27,7 +28,7 @@ export default async function MarketingDiagnosisPage({
 
   const { data: businesses, error: businessError } = await supabase
     .from("businesses")
-    .select("id, name, industry, description, location, target_customer, brand_tone, keywords, website")
+    .select("*")
     .eq("owner_id", user.id)
     .order("created_at");
   if (businessError) throw new Error("마케팅 진단에 필요한 사업체 정보를 불러오지 못했습니다.", { cause: businessError });
@@ -167,8 +168,16 @@ export default async function MarketingDiagnosisPage({
         </ul>
         <p className="mt-4 flex items-start gap-2 text-[13px] leading-6 text-muted-foreground">
           <CircleAlert className="mt-1 size-3.5 shrink-0" aria-hidden="true" />
-          지금은 저장된 홈페이지 주소와 연결 상태를 점수에 반영해요. 홈페이지 본문을 읽어 가게 정보를 자동으로 채워주는 기능은 준비 중이에요.
+          이 점수는 저장된 사업 정보와 연결 상태, 최근 제작 기록을 기준으로 계산해요. 아래에서 홈페이지 주소로 더 자세한 AI 진단을 받아보세요.
         </p>
+      </section>
+
+      <section aria-labelledby="url-diagnosis-title" className="space-y-4">
+        <div>
+          <h2 id="url-diagnosis-title" className="text-lg font-bold tracking-[-0.02em]">홈페이지로 더 자세히 진단하기</h2>
+          <p className="mt-1 text-[15px] text-muted-foreground">홈페이지 주소를 입력하면 AI가 내용을 읽고 점수와 추천 액션을 알려드려요. 결과에서 Business Profile을 바로 채울 수도 있어요.</p>
+        </div>
+        <DiagnosisForm business={selectedBusiness} />
       </section>
     </div>
   );

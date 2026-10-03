@@ -22,13 +22,15 @@ describe("mergeBusinessDefault", () => {
 describe("mergeSnsLinks", () => {
   it("keeps each saved link independently and only fills the ones missing", () => {
     const current = { instagram: "https://instagram.com/saved" };
-    const suggestion = { instagram: "https://instagram.com/suggested", blog: "https://blog.naver.com/suggested" };
+    const suggestion = { instagram: "https://instagram.com/suggested", naver_blog: "https://blog.naver.com/suggested" };
 
     expect(mergeSnsLinks(current, suggestion)).toEqual({
       instagram: "https://instagram.com/saved",
-      blog: "https://blog.naver.com/suggested",
+      naver_blog: "https://blog.naver.com/suggested",
       facebook: undefined,
       youtube: undefined,
+      naver_place: undefined,
+      kakao_channel: undefined,
     });
   });
 
@@ -37,7 +39,21 @@ describe("mergeSnsLinks", () => {
       instagram: undefined,
       facebook: undefined,
       youtube: undefined,
-      blog: undefined,
+      naver_blog: undefined,
+      naver_place: undefined,
+      kakao_channel: undefined,
     });
+  });
+
+  it("falls back to the legacy `blog` key when `naver_blog` is empty, so a business saved before the 6-key revision doesn't lose its link", () => {
+    const current = { blog: "https://blog.naver.com/legacy" };
+
+    expect(mergeSnsLinks(current, null).naver_blog).toBe("https://blog.naver.com/legacy");
+  });
+
+  it("prefers the new `naver_blog` key over the legacy `blog` key if both are somehow present", () => {
+    const current = { naver_blog: "https://blog.naver.com/current", blog: "https://blog.naver.com/legacy" };
+
+    expect(mergeSnsLinks(current, null).naver_blog).toBe("https://blog.naver.com/current");
   });
 });

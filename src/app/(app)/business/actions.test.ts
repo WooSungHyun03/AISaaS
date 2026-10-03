@@ -66,6 +66,31 @@ describe("createBusiness — marketing profile fields (ticket 2)", () => {
     expect(inserted[0].sns_links).not.toHaveProperty("facebook");
   });
 
+  it("saves the 6-key SNS link set (naver_blog/naver_place/kakao_channel included), never the old generic 'blog' key", async () => {
+    const { client, inserted } = makeClient();
+    createClientMock.mockResolvedValue(client);
+
+    const result = await createBusiness(
+      {},
+      formData({
+        ...BASE_FIELDS,
+        "snsLinks.naver_blog": "https://blog.naver.com/ourcafe",
+        "snsLinks.naver_place": "https://map.naver.com/p/entry/place/123456",
+        "snsLinks.kakao_channel": "https://pf.kakao.com/_ourcafe",
+      }),
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(inserted[0]).toMatchObject({
+      sns_links: {
+        naver_blog: "https://blog.naver.com/ourcafe",
+        naver_place: "https://map.naver.com/p/entry/place/123456",
+        kakao_channel: "https://pf.kakao.com/_ourcafe",
+      },
+    });
+    expect(inserted[0].sns_links).not.toHaveProperty("blog");
+  });
+
   it("defaults the new profile fields to null/empty when left blank", async () => {
     const { client, inserted } = makeClient();
     createClientMock.mockResolvedValue(client);

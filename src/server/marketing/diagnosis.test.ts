@@ -213,16 +213,26 @@ describe("diagnoseWebsite", () => {
     expect((error as InstanceType<typeof DiagnosisError>).code).toBe("AI_INVALID_RESPONSE");
   });
 
-  it("deterministically finds social/blog links in <a href> attributes, independent of what the AI returns", async () => {
+  it("deterministically finds social/blog/place/channel links in <a href> attributes, independent of what the AI returns", async () => {
     mockOneRequest(
       makeMockResponse(200, HTML_HEADERS),
-      '<html><body><a href="https://www.instagram.com/ourcafe">IG</a><a href="https://blog.naver.com/ourcafe">Blog</a></body></html>',
+      '<html><body>'
+        + '<a href="https://www.instagram.com/ourcafe">IG</a>'
+        + '<a href="https://blog.naver.com/ourcafe">Blog</a>'
+        + '<a href="https://map.naver.com/p/entry/place/123456">Place</a>'
+        + '<a href="https://pf.kakao.com/_ourcafe">Channel</a>'
+        + '</body></html>',
     );
     generateStructuredMock.mockResolvedValue(VALID_AI_RESULT);
 
     const result = await diagnoseWebsite(BUSINESS, "https://example.com/");
 
-    expect(result.snsLinks).toEqual({ instagram: "https://www.instagram.com/ourcafe", blog: "https://blog.naver.com/ourcafe" });
+    expect(result.snsLinks).toEqual({
+      instagram: "https://www.instagram.com/ourcafe",
+      naver_blog: "https://blog.naver.com/ourcafe",
+      naver_place: "https://map.naver.com/p/entry/place/123456",
+      kakao_channel: "https://pf.kakao.com/_ourcafe",
+    });
   });
 
   it("passes through AI-confident profile suggestions, and omits them (null) when the AI isn't sure", async () => {

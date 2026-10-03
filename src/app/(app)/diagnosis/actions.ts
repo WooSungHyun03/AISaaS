@@ -111,7 +111,9 @@ export async function runDiagnosis(_prevState: DiagnosisActionState, formData: F
     .single();
   if (insertError || !inserted) return { error: "진단 결과를 저장하지 못했습니다." };
 
-  revalidatePath("/diagnosis");
+  revalidatePath("/marketing/diagnosis");
+  revalidatePath("/calendar");
+  revalidatePath("/marketing/calendar");
   return {
     result: {
       id: inserted.id,

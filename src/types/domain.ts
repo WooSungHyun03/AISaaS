@@ -30,6 +30,17 @@ export interface BusinessSnsLinks {
   instagram?: string;
   facebook?: string;
   youtube?: string;
+  naver_blog?: string;
+  naver_place?: string;
+  kakao_channel?: string;
+  /**
+   * @deprecated Replaced by `naver_blog` (the single generic `blog` key
+   * covered both Naver Blog and Tistory links). Still declared, read-only,
+   * so a business saved before that change keeps showing its link instead
+   * of silently losing it — see mergeSnsLinks in
+   * src/components/business/prefill.ts for where this is read as a
+   * fallback. Never written by new saves.
+   */
   blog?: string;
   // Index signature so this is structurally assignable to the generated `Json` type (sns_links' column type).
   [key: string]: string | undefined;

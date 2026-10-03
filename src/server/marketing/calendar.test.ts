@@ -8,7 +8,7 @@ const { createClientMock, generateStructuredMock } = vi.hoisted(() => ({
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
 
-const { CalendarPlanError, generateCalendarPlan } = await import("./calendar");
+const { CalendarPlanError, generateCalendarPlan, getMarketingCalendarPageData } = await import("./calendar");
 
 const business = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -137,5 +137,68 @@ describe("generateCalendarPlan", () => {
     expect(error).toBeInstanceOf(CalendarPlanError);
     expect((error as InstanceType<typeof CalendarPlanError>).code).toBe("INVALID_AI_RESULT");
     expect(insert).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Builder for getMarketingCalendarPageData's query shapes, distinct from
+ * makeClient() above: its businesses/calendar_items queries are awaited
+ * directly (no .maybeSingle()), while getLatestDiagnosis still ends in
+ * .maybeSingle() — same dual shape runner.test.ts's makeAdmin uses.
+ */
+function makePageDataClient(options: { businesses?: unknown[]; items?: unknown[]; diagnosis: Record<string, unknown> | null }) {
+  const businesses = options.businesses ?? [business];
+  const items = options.items ?? [];
+  const from = vi.fn((table: string) => {
+    const builder: Record<string, unknown> = {
+      select: vi.fn(() => builder),
+      eq: vi.fn(() => builder),
+      gte: vi.fn(() => builder),
+      lte: vi.fn(() => builder),
+      order: vi.fn(() => builder),
+      limit: vi.fn(() => builder),
+      maybeSingle: vi.fn(() => Promise.resolve({ data: options.diagnosis, error: null })),
+      then: (resolve: (value: { data: unknown; error: null }) => unknown) => {
+        if (table === "businesses") return resolve({ data: businesses, error: null });
+        if (table === "calendar_items") return resolve({ data: items, error: null });
+        throw new Error(`Unexpected table: ${table}`);
+      },
+    };
+    return builder;
+  });
+  return { from };
+}
+
+describe("getMarketingCalendarPageData — hasDiagnosis reflects marketing_diagnoses directly", () => {
+  it("is true once a diagnosis row exists, using exactly the columns runDiagnosis() (src/app/(app)/diagnosis/actions.ts) writes", async () => {
+    const client = makePageDataClient({
+      diagnosis: {
+        id: "diagnosis-1",
+        business_id: business.id,
+        source_type: "website",
+        source_url: "https://example.com/",
+        score: 70,
+        missing_channels: ["instagram"],
+        content_status: "최근 업데이트가 없습니다.",
+        sns_activity: "SNS 연동이 없습니다.",
+        recommendations: ["인스타그램을 연결하세요."],
+        raw_summary: "성장 카페 — 소개",
+        created_at: "2026-03-01T00:00:00.000Z",
+      },
+    });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await getMarketingCalendarPageData("user-1", { businessId: business.id, startDate: "2026-03-01", endDate: "2026-03-28" });
+
+    expect(result.hasDiagnosis).toBe(true);
+  });
+
+  it("is false when no diagnosis has been run yet", async () => {
+    const client = makePageDataClient({ diagnosis: null });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await getMarketingCalendarPageData("user-1", { businessId: business.id, startDate: "2026-03-01", endDate: "2026-03-28" });
+
+    expect(result.hasDiagnosis).toBe(false);
   });
 });

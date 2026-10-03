@@ -90,7 +90,8 @@ describe("runDiagnosis", () => {
     expect(diagnoseWebsiteMock).toHaveBeenCalledWith({ id: "business-1", name: "우리가게", industry: "카페" }, "https://example.com");
     expect(inserted[0]).toMatchObject({ business_id: "business-1", source_type: "website", score: 70 });
     expect(inserted[0]).not.toHaveProperty("main_offering");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/diagnosis");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/marketing/diagnosis");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/calendar");
   });
 
   it("never writes to the businesses table — the mocked client only exposes select() on it, so any write attempt would throw", async () => {
