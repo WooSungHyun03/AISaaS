@@ -5,6 +5,7 @@ import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { serverEnv } from "@/lib/env/server";
 import { classifyHttpStatus, ConnectorError } from "@/server/shared/errors";
+import { isPrivateAddress } from "@/server/shared/ssrf";
 import type { PlatformConnector, PublishContentParams, PublishResult } from "../types";
 
 export interface WordPressConnection {
@@ -30,20 +31,6 @@ export function normalizeWordPressSiteUrl(value: string): string {
     throw new ConnectorError("wordpress", "INVALID_TARGET", "공개 HTTPS WordPress 사이트의 기본 주소를 입력해주세요. 예: https://example.com");
   }
   return `${url.origin}${url.pathname.replace(/\/$/, "")}`;
-}
-
-function isPrivateAddress(address: string): boolean {
-  if (address.includes(":")) {
-    const lower = address.toLowerCase();
-    return lower === "::1" || lower === "::" || lower.startsWith("fc") || lower.startsWith("fd") ||
-      lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") ||
-      lower.startsWith("feb") || lower.startsWith("::ffff:");
-  }
-  const [a, b] = address.split(".").map(Number);
-  return a === 0 || a === 10 || a === 127 || a >= 224 ||
-    (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) ||
-    (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19));
 }
 
 async function publicHostAddress(siteUrl: string): Promise<{ address: string; family: number }> {

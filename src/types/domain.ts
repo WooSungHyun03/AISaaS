@@ -23,6 +23,7 @@ export type SupportWidgetRequest = Database["public"]["Tables"]["support_widget_
 export type SupportConversation = Database["public"]["Tables"]["support_conversations"]["Row"];
 export type IntegrationConnection = Database["public"]["Tables"]["integration_connections"]["Row"];
 export type Subscriber = Database["public"]["Tables"]["subscribers"]["Row"];
+export type MarketingDiagnosis = Database["public"]["Tables"]["marketing_diagnoses"]["Row"];
 
 export type {
   AutomationStatus,
@@ -37,6 +38,7 @@ export type {
   SubscriberStatus,
   CalendarPlatform,
   CalendarItemStatus,
+  MarketingDiagnosisSourceType,
   Json,
 } from "./database.types";
 

@@ -57,6 +57,19 @@ export class MockAIProvider implements AIProvider {
       }
     }
 
+    if (prompt.includes("===WEBPAGE_DATA_START===")) {
+      const hasRecentPost = /최근 게시물\/업데이트 신호: 있음/.test(prompt);
+      return {
+        text: JSON.stringify({
+          score: hasRecentPost ? 68 : 42,
+          missingChannels: ["instagram", "newsletter"],
+          contentStatus: hasRecentPost ? "최근 콘텐츠가 꾸준히 올라오고 있습니다." : "최근 업데이트된 콘텐츠를 찾기 어렵습니다.",
+          snsActivity: "SNS 연동 여부를 홈페이지에서 확인하지 못했습니다.",
+          recommendations: ["인스타그램 계정을 연결해 주기적으로 소식을 올려보세요.", "블로그에 고객 후기나 사례를 정기적으로 추가해보세요."],
+        }),
+      };
+    }
+
     return {
       text: `[MOCK AI RESPONSE]\n\n다음 요청에 대한 예시 결과입니다:\n"${prompt.slice(0, 200)}"\n\n실제 서비스에서는 AI_PROVIDER 환경변수를 openai 또는 gemini로 설정하면 이 자리에 실제 생성 콘텐츠가 표시됩니다.`,
     };

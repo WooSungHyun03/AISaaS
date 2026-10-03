@@ -20,6 +20,7 @@ export type BillingCheckoutStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "FA
 export type SubscriberStatus = "ACTIVE" | "UNSUBSCRIBED";
 export type CalendarPlatform = "blog" | "instagram_reels" | "youtube_shorts";
 export type CalendarItemStatus = "PLANNED" | "GENERATED" | "PUBLISHED" | "SKIPPED";
+export type MarketingDiagnosisSourceType = "website" | "manual";
 
 export interface Database {
   public: {
@@ -520,6 +521,36 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["subscribers"]["Insert"]>;
+        Relationships: [];
+      };
+      marketing_diagnoses: {
+        Row: {
+          id: string;
+          business_id: string;
+          source_type: MarketingDiagnosisSourceType;
+          source_url: string | null;
+          score: number;
+          missing_channels: string[];
+          content_status: string;
+          sns_activity: string;
+          recommendations: string[];
+          raw_summary: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          source_type: MarketingDiagnosisSourceType;
+          source_url?: string | null;
+          score: number;
+          missing_channels?: string[];
+          content_status: string;
+          sns_activity: string;
+          recommendations?: string[];
+          raw_summary?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["marketing_diagnoses"]["Insert"]>;
         Relationships: [];
       };
     };
