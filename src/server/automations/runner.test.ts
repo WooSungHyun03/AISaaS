@@ -121,6 +121,10 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
       ["content_type", "blog-marketing"],
     ]));
     expect(admin.inserts.automation_runs[0]).toMatchObject({ automation_id: "auto-1", status: "RUNNING", source: "SCHEDULED" });
+    // So a content_history row can link back to its full generation result
+    // (hook/seoKeywords/imageSuggestion etc. live only in
+    // automation_runs.output) — see src/app/(app)/blog/page.tsx.
+    expect(admin.inserts.content_history[0]).toMatchObject({ run_id: "run-1" });
     const expectedNext = computeNextRunAt(SCHEDULE).toISOString();
     expect(admin.updates.automations[0]).toMatchObject({ next_run_at: expectedNext });
     expect(incrementUsageMock).toHaveBeenCalledWith(admin, "user-1", { automationRuns: 1, aiGenerations: 1 });

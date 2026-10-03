@@ -174,6 +174,7 @@ export interface Database {
           id: string;
           business_id: string;
           automation_id: string;
+          run_id: string | null;
           content_type: string;
           title: string | null;
           topic: string | null;
@@ -185,6 +186,7 @@ export interface Database {
           id?: string;
           business_id: string;
           automation_id: string;
+          run_id?: string | null;
           content_type: string;
           title?: string | null;
           topic?: string | null;

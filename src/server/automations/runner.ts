@@ -217,6 +217,12 @@ async function executeAutomation(
         .insert({
           business_id: automation.business_id,
           automation_id: automationId,
+          // Lets a content_history row link back to the full generation
+          // result (hook/seoKeywords/imageSuggestion etc. live only in
+          // automation_runs.output) — see src/app/(app)/blog/page.tsx.
+          // Nullable: rows from before this column existed just have null,
+          // and the UI falls back to this row's own plain-text fields.
+          run_id: run.id,
           content_type: result.contentType ?? template.slug,
           title: result.title ?? null,
           topic: result.topic ?? null,

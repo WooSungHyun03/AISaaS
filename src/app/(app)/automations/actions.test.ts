@@ -119,6 +119,36 @@ describe("triggerRunNow with a calendar item", () => {
   });
 });
 
+describe("triggerRunNow without a calendar item (plain re-generate — what RunNowButton / the /blog page use)", () => {
+  it("still enforces the billing limit before calling the runner", async () => {
+    const { client } = makeClient();
+    createClientMock.mockResolvedValue(client);
+    canExecuteAutomationMock.mockResolvedValue({ allowed: false, reason: "이번 달 블로그 실행 한도를 모두 사용했습니다." });
+
+    const result = await triggerRunNow("automation-1");
+
+    expect(result).toEqual({ error: "이번 달 블로그 실행 한도를 모두 사용했습니다." });
+    expect(runAutomationNowMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to run (or leak) an automation owned by a different user", async () => {
+    const from = vi.fn((table: string) => {
+      const result: QueryResult = table === "automations"
+        ? { data: { id: "automation-1", user_id: "someone-elses-user-id", business_id: "business-1", template_id: "template-1" }, error: null }
+        : { data: null, error: null };
+      const builder = { select: vi.fn(() => builder), eq: vi.fn(() => builder), single: vi.fn().mockResolvedValue(result), maybeSingle: vi.fn().mockResolvedValue(result) };
+      return builder;
+    });
+    createClientMock.mockResolvedValue({ auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) }, from });
+
+    const result = await triggerRunNow("automation-1");
+
+    expect(result).toEqual({ error: "자동화를 찾을 수 없습니다." });
+    expect(canExecuteAutomationMock).not.toHaveBeenCalled();
+    expect(runAutomationNowMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("createAutomation — availability gate", () => {
   it("rejects creating an automation for a COMING_SOON template, even if requested directly (not just hidden in the UI)", async () => {
     const queues: Record<string, QueryResult[]> = {
