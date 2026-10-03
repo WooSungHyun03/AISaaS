@@ -4,12 +4,17 @@ import type { AutomationRunContext } from "@/types/automation";
 
 const { generateStructuredMock } = vi.hoisted(() => ({ generateStructuredMock: vi.fn() }));
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
+const { renderShortVideoMock } = vi.hoisted(() => ({ renderShortVideoMock: vi.fn() }));
+vi.mock("@/server/connectors/video", () => ({ renderShortVideo: renderShortVideoMock }));
 
 const { shortsAutomationHandler } = await import("./shorts");
 
 afterEach(() => {
   vi.resetAllMocks();
+  renderShortVideoMock.mockResolvedValue("https://cdn.example.com/shorts/result.mp4");
 });
+
+renderShortVideoMock.mockResolvedValue("https://cdn.example.com/shorts/result.mp4");
 
 const business: Business = {
   id: "biz-1",
@@ -75,7 +80,7 @@ describe("shortsAutomationHandler", () => {
     const result = await shortsAutomationHandler.run(baseContext());
 
     expect(generateStructuredMock).toHaveBeenCalledTimes(2);
-    expect(result.output).toEqual(generatedContent);
+    expect(result.output).toEqual({ ...generatedContent, videoUrl: "https://cdn.example.com/shorts/result.mp4" });
     expect(result.output).toMatchObject({
       scenes: expect.arrayContaining([
         expect.objectContaining({ text: expect.any(String), visualPrompt: expect.any(String), durationSec: expect.any(Number) }),
@@ -84,11 +89,13 @@ describe("shortsAutomationHandler", () => {
       privacy: "private",
     });
     expect(result).toMatchObject({
+      externalUrl: "https://cdn.example.com/shorts/result.mp4",
       title: generatedContent.hook,
       topic: "출근길 소금빵 예약 팁",
       content: generatedContent.script,
       contentType: "shorts",
     });
+    expect(renderShortVideoMock).toHaveBeenCalledWith(generatedContent.scenes, generatedContent.script);
   });
 
   it("regenerates a near-duplicate topic exactly once before writing content", async () => {
@@ -135,5 +142,6 @@ describe("shortsAutomationHandler", () => {
     generateStructuredMock.mockResolvedValueOnce({ topic: "출근길 소금빵 예약 팁" }).mockRejectedValueOnce(new Error("generation failed"));
 
     await expect(shortsAutomationHandler.run(baseContext())).rejects.toThrow("generation failed");
+    expect(renderShortVideoMock).not.toHaveBeenCalled();
   });
 });

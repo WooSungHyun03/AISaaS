@@ -43,6 +43,10 @@ const serverSchema = z.object({
   YOUTUBE_CLIENT_SECRET: z.string().optional(),
   YOUTUBE_REFRESH_TOKEN: z.string().optional(),
 
+  VIDEO_RENDER_PROVIDER: z.enum(["mock", "json2video"]).default("mock"),
+  VIDEO_RENDER_API_KEY: z.string().optional(),
+  VIDEO_RENDER_TEMPLATE_ID: z.string().optional(),
+
   GITHUB_TOKEN: z.string().optional(),
 
   // Keys the CS widget's requester IP before it's stored for rate limiting

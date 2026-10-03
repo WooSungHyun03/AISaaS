@@ -8,6 +8,7 @@ import {
   type ShortsTopic,
 } from "@/server/ai/prompts/shorts";
 import { isNearDuplicateTopic } from "@/server/ai/similarity";
+import { renderShortVideo } from "@/server/connectors/video";
 import type { AutomationHandler, AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
 
 /**
@@ -40,9 +41,11 @@ export const shortsAutomationHandler: AutomationHandler = {
       schema: shortsContentSchema,
       maxTokens: 1_600,
     });
+    const videoUrl = await renderShortVideo(content.scenes, content.script);
 
     return {
-      output: content,
+      output: { ...content, videoUrl },
+      externalUrl: videoUrl,
       title: content.hook,
       topic,
       content: content.script,
