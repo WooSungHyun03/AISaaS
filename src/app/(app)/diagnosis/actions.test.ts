@@ -188,6 +188,48 @@ describe("runDiagnosis", () => {
     expect(inserted).toHaveLength(0);
   });
 
+  it("still saves the diagnosis when the 0032 columns don't exist yet (code deployed before the migration)", async () => {
+    const inserted: Array<Record<string, unknown>> = [];
+    let call = 0;
+    const client = {
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) },
+      from: vi.fn((table: string) => {
+        if (table === "businesses") return { select: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: "business-1", name: "우리가게", industry: "카페", sns_links: {} }, error: null }) })) })) })) };
+        if (table === "integration_connections") {
+          const builder: Record<string, unknown> = {};
+          for (const method of ["select", "eq"]) builder[method] = vi.fn(() => builder);
+          builder.then = (resolve: (value: unknown) => unknown) => resolve({ data: [], error: null });
+          return builder;
+        }
+        return {
+          select: vi.fn(() => {
+            const builder: Record<string, unknown> = {};
+            for (const method of ["eq", "gte"]) builder[method] = vi.fn(() => builder);
+            builder.then = (resolve: (value: unknown) => unknown) => resolve({ count: 0, error: null });
+            return builder;
+          }),
+          insert: vi.fn((payload: Record<string, unknown>) => {
+            inserted.push(payload);
+            const result = call++ === 0 ? { data: null, error: { code: "PGRST204" } } : { data: { id: "diagnosis-1", created_at: "2026-10-01T00:00:00.000Z" }, error: null };
+            return { select: vi.fn(() => ({ single: vi.fn().mockResolvedValue(result) })) };
+          }),
+        };
+      }),
+    };
+    createClientMock.mockResolvedValue(client);
+    diagnoseWebsiteMock.mockResolvedValue({
+      score: 50, scoreBreakdown: [], evidence: {}, aiUsed: false, missingChannels: [], contentStatus: "ok", snsActivity: "ok", recommendations: [],
+      sourceUrl: "https://example.com/", rawSummary: null, mainOffering: null, strengths: null, marketingGoal: null, snsLinks: {},
+    });
+
+    const result = await runDiagnosis({}, formData({ businessId: "business-1", url: "https://example.com" }));
+
+    expect(result.error).toBeUndefined();
+    expect(inserted).toHaveLength(2);
+    expect(inserted[0]).toHaveProperty("score_breakdown");
+    expect(inserted[1]).not.toHaveProperty("score_breakdown");
+  });
+
   it("requires both a businessId and a url before calling diagnoseWebsite", async () => {
     const { client } = makeClient();
     createClientMock.mockResolvedValue(client);

@@ -124,23 +124,32 @@ export async function runDiagnosis(_prevState: DiagnosisActionState, formData: F
     return { error: describeDiagnosisError(error) };
   }
 
-  const { data: inserted, error: insertError } = await supabase
+  const baseRow = {
+    business_id: business.id,
+    source_type: "website" as const,
+    source_url: outcome.sourceUrl,
+    score: outcome.score,
+    missing_channels: outcome.missingChannels,
+    content_status: outcome.contentStatus,
+    sns_activity: outcome.snsActivity,
+    recommendations: outcome.recommendations,
+    raw_summary: outcome.rawSummary,
+  };
+  const withBreakdown = {
+    ...baseRow,
+    score_breakdown: outcome.scoreBreakdown as unknown as Json,
+    evidence: outcome.evidence as unknown as Json,
+  };
+  let { data: inserted, error: insertError } = await supabase
     .from("marketing_diagnoses")
-    .insert({
-      business_id: business.id,
-      source_type: "website",
-      source_url: outcome.sourceUrl,
-      score: outcome.score,
-      missing_channels: outcome.missingChannels,
-      content_status: outcome.contentStatus,
-      sns_activity: outcome.snsActivity,
-      recommendations: outcome.recommendations,
-      raw_summary: outcome.rawSummary,
-      score_breakdown: outcome.scoreBreakdown as unknown as Json,
-      evidence: outcome.evidence as unknown as Json,
-    })
+    .insert(withBreakdown)
     .select("id, created_at")
     .single();
+  // 0032_audit_hardening.sql adds score_breakdown/evidence. If the code is deployed a moment before
+  // that migration runs, store the diagnosis without them instead of failing the whole request.
+  if (insertError && (insertError.code === "PGRST204" || insertError.code === "42703")) {
+    ({ data: inserted, error: insertError } = await supabase.from("marketing_diagnoses").insert(baseRow).select("id, created_at").single());
+  }
   if (insertError || !inserted) return { error: "진단 결과를 저장하지 못했습니다." };
 
   revalidatePath("/marketing/diagnosis");
