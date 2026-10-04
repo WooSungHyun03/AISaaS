@@ -9,8 +9,7 @@ import { createShortsAutomation, generateShortsPreview, publishShortsNow, saveSh
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form-message";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { ScheduleFields, ScheduleHiddenInputs, scheduleToValue } from "@/components/automations/schedule-fields";
 import { cn } from "@/lib/utils";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
 
@@ -18,7 +17,6 @@ const PLATFORM = {
   instagram: { label: "Instagram Reels", icon: Film },
   youtube: { label: "YouTube Shorts", icon: Play },
 } as const;
-const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
 interface Preview {
   runId: string;
@@ -77,7 +75,7 @@ export function ShortsStudio({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busyAction, setBusyAction] = useState<"generate" | "publish" | "schedule" | null>(null);
-  const [frequency, setFrequency] = useState<"DAILY" | "WEEKLY">(schedule.frequency);
+  const [scheduleValue, setScheduleValue] = useState(() => scheduleToValue(schedule, { timeOfDay: "18:00" }));
   const [platforms, setPlatforms] = useState<ShortsPublishPlatform[]>(() =>
     configuredPlatforms.filter((platform) => connections[platform] === "CONNECTED"),
   );
@@ -181,15 +179,12 @@ export function ShortsStudio({
       </section>
 
       <section aria-labelledby="schedule-heading" className="rounded-2xl border bg-card p-5 sm:p-7">
-        <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-start gap-3"><span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-primary"><CalendarClock className="size-5" aria-hidden="true" /></span><div><h2 id="schedule-heading" className="text-lg font-extrabold tracking-[-0.03em]">예약 게시</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">저장하면 기존 Scheduler가 예약 시각에 영상을 만들고 선택한 플랫폼에 게시해요.</p></div></div>{nextRunAt && automationStatus === "ACTIVE" ? <Badge variant="brand">다음 게시 {new Date(nextRunAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</Badge> : <Badge variant="secondary">예약 꺼짐</Badge>}</div>
-        <form className="mt-6 space-y-5" action={(formData) => run("schedule", () => saveShortsSchedule(automationId, formData), "예약 게시를 저장하고 켰어요.")}>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <div className="space-y-2"><Label htmlFor="shorts-frequency">게시 주기</Label><select id="shorts-frequency" name="frequency" value={frequency} onChange={(event) => setFrequency(event.target.value as "DAILY" | "WEEKLY")} className="h-10 w-full rounded-md border bg-background px-3 text-sm"><option value="DAILY">매일</option><option value="WEEKLY">매주 정한 요일</option></select></div>
-            <div className="space-y-2"><Label htmlFor="shorts-time">게시 시간 (한국 시간)</Label><Input id="shorts-time" name="timeOfDay" type="time" defaultValue={schedule.timeOfDay} required /></div>
-          </div>
-          {frequency === "WEEKLY" ? <fieldset><legend className="text-sm font-medium">게시 요일</legend><div className="mt-2 flex flex-wrap gap-2">{DAYS.map((day, index) => <label key={day} className="cursor-pointer"><input type="checkbox" name="daysOfWeek" value={index} defaultChecked={(schedule.daysOfWeek ?? []).includes(index)} className="peer sr-only" /><span className="flex size-10 items-center justify-center rounded-full border text-sm font-semibold peer-checked:border-primary peer-checked:bg-primary peer-checked:text-primary-foreground peer-focus-visible:ring-2 peer-focus-visible:ring-ring">{day}</span></label>)}</div></fieldset> : null}
+        <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-start gap-3"><span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-primary"><CalendarClock className="size-5" aria-hidden="true" /></span><div><h2 id="schedule-heading" className="text-lg font-extrabold tracking-[-0.03em]">예약 만들기</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">저장하면 예약 시각마다 새 영상을 만들어요. 위에서 게시할 플랫폼을 골라두면 만든 영상을 그곳에 바로 올리고, 고르지 않으면 영상만 만들어 둬요.</p></div></div>{nextRunAt && automationStatus === "ACTIVE" ? <Badge variant="brand">다음 만들기 {new Date(nextRunAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</Badge> : <Badge variant="secondary">예약 꺼짐</Badge>}</div>
+        <form className="mt-6 space-y-5" action={(formData) => run("schedule", () => saveShortsSchedule(automationId, formData), "예약 설정을 저장하고 켰어요.")}>
+          <ScheduleFields idPrefix="shorts" label="예약" value={scheduleValue} onChange={setScheduleValue} disabled={busy} />
+          <ScheduleHiddenInputs value={scheduleValue} />
           {platforms.map((platform) => <input key={platform} type="hidden" name="platforms" value={platform} />)}
-          <div className="flex flex-wrap items-center gap-3"><Button type="submit" variant="outline" disabled={busy || platforms.length === 0}>{busyAction === "schedule" ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Check aria-hidden="true" />}{busyAction === "schedule" ? "저장 중…" : "예약 저장하고 켜기"}</Button></div>
+          <div className="flex flex-wrap items-center gap-3"><Button type="submit" variant="outline" disabled={busy}>{busyAction === "schedule" ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Check aria-hidden="true" />}{busyAction === "schedule" ? "저장 중…" : "예약 저장하고 켜기"}</Button></div>
         </form>
       </section>
 

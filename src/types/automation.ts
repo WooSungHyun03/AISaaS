@@ -5,9 +5,11 @@ import type { Automation, AutomationTemplateSlug, Business, CalendarPlatform, Js
  * the scheduler only needs enough to compute the next run timestamp.
  */
 export interface AutomationSchedule {
-  frequency: "DAILY" | "WEEKLY";
+  frequency: "DAILY" | "WEEKLY" | "MONTHLY";
   /** 0 = Sunday .. 6 = Saturday. Required when frequency is WEEKLY. */
   daysOfWeek?: number[];
+  /** 1..31. Required when frequency is MONTHLY; clamped to the month's last day (31 -> Feb 28/29). */
+  dayOfMonth?: number;
   /** "HH:mm" in the schedule's timezone. */
   timeOfDay: string;
   /** IANA timezone name. Defaults to the service timezone (Asia/Seoul). */
@@ -52,8 +54,12 @@ export interface AutomationRunContext {
     businessId: string;
     plannedDate: string;
     platform: CalendarPlatform;
+    contentType: string;
     topic: string;
+    /** The plan's marketing goal. */
     goal: string;
+    /** The plan's content brief (what the piece should cover). */
+    summary: string;
     cta: string;
   };
   /** Trusted execution options supplied by the authenticated Shorts UI. */

@@ -6,7 +6,7 @@ import type { AutomationTemplate, Business } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Progress } from "@/components/ui/progress";
-import { WeekdayPicker } from "@/components/automations/weekday-picker";
+import { ScheduleFields, ScheduleHiddenInputs, scheduleToValue } from "@/components/automations/schedule-fields";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,14 +30,12 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
   const [objective, setObjective] = useState("");
   const [keywords, setKeywords] = useState("");
   const [tone, setTone] = useState("친근하고 전문적인");
-  const [frequency, setFrequency] = useState<"DAILY" | "WEEKLY">("WEEKLY");
-  const [days, setDays] = useState<number[]>([1, 3, 5]);
-  const [timeOfDay, setTimeOfDay] = useState("09:00");
+  const [schedule, setSchedule] = useState(() => scheduleToValue(null));
 
   function validate(currentStep: number): string {
     if (currentStep === 0 && (!businessId || !name.trim() || objective.trim().length < 3)) return "사업체, 이름, 글의 목적을 입력해주세요.";
     if (currentStep === 1 && (!keywords.split(/[,\n]/).some((item) => item.trim()) || tone.trim().length < 2)) return "키워드를 하나 이상 입력하고 글의 톤을 정해주세요.";
-    if (currentStep === 2 && (frequency === "WEEKLY" && days.length === 0 || !timeOfDay)) return "만들 요일과 시간을 정해주세요.";
+    if (currentStep === 2 && (schedule.frequency === "WEEKLY" && schedule.daysOfWeek.length === 0 || !schedule.timeOfDay)) return "만들 요일과 시간을 정해주세요.";
     return "";
   }
 
@@ -78,9 +76,7 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
         <input type="hidden" name="objective" value={objective} />
         <input type="hidden" name="keywords" value={keywords} />
         <input type="hidden" name="tone" value={tone} />
-        <input type="hidden" name="frequency" value={frequency} />
-        <input type="hidden" name="timeOfDay" value={timeOfDay} />
-        {frequency === "WEEKLY" && days.map((day) => <input key={day} type="hidden" name="daysOfWeek" value={day} />)}
+        <ScheduleHiddenInputs value={schedule} />
         {/* New blog automations are generation-only — app_draft is the only mode createAutomation accepts, see src/app/(app)/automations/actions.ts */}
         <input type="hidden" name="deliveryMode" value="app_draft" />
 
@@ -109,13 +105,7 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
         </div>}
 
         {step === 2 && <div className="space-y-5">
-          <div className="space-y-2"><Label htmlFor="blog-frequency">만드는 주기</Label>
-            <NativeSelect id="blog-frequency" value={frequency} onChange={(event) => setFrequency(event.target.value as "DAILY" | "WEEKLY")} disabled={isPending}>
-              <option value="WEEKLY">정한 요일마다</option><option value="DAILY">매일</option>
-            </NativeSelect>
-          </div>
-          {frequency === "WEEKLY" && <WeekdayPicker legend="만드는 요일" value={days} onChange={setDays} disabled={isPending} />}
-          <div className="space-y-2"><Label htmlFor="blog-time">만드는 시간 (한국 시간)</Label><Input id="blog-time" type="time" value={timeOfDay} onChange={(event) => setTimeOfDay(event.target.value)} disabled={isPending} className="sm:w-44" /></div>
+          <ScheduleFields idPrefix="blog" value={schedule} onChange={setSchedule} disabled={isPending} />
           <FormMessage variant="info">설정을 만든 뒤 확인하고 켜면 정해진 때마다 글 초안이 만들어져요. 이지 마케팅 안에서 확인하고 복사해 쓰세요.</FormMessage>
         </div>}
 

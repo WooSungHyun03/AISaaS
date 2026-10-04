@@ -169,8 +169,10 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
       businessId: "biz-1",
       plannedDate: "2026-10-01",
       platform: "blog" as const,
+      contentType: "정보성 블로그 글",
       topic: "계획 주제",
       goal: "상담 전환",
+      summary: "상담 전 자주 묻는 질문 정리",
       cta: "상담 신청",
     };
 

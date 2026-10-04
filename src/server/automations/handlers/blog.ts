@@ -30,6 +30,7 @@ async function generateTopic(ctx: AutomationRunContext, config?: BlogAutomationC
       system: [
         base.system,
         `This calendar item's fixed marketing goal: ${ctx.calendarItem.goal}`,
+        `This calendar item's content brief: ${ctx.calendarItem.summary}`,
         `Preferred closing CTA: ${ctx.calendarItem.cta}`,
       ].join("\n"),
       prompt: [
@@ -77,6 +78,7 @@ export const blogAutomationHandler: AutomationHandler = {
         ? [
           bodyPrompt.system,
           `This calendar item's marketing goal: ${ctx.calendarItem.goal}`,
+          `This calendar item's content brief (cover this): ${ctx.calendarItem.summary}`,
           `End with a CTA aligned with: ${ctx.calendarItem.cta}`,
         ].join("\n")
         : bodyPrompt.system,

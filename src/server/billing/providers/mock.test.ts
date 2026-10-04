@@ -25,7 +25,7 @@ vi.mock("../checkout-sessions", () => ({
   cancelStoredSubscription: cancelStoredSubscriptionMock,
 }));
 
-const { MockBillingProvider } = await import("./mock");
+const { MockBillingProvider, assertMockBillingAllowed } = await import("./mock");
 
 const SESSION_ROW = {
   id: "session-1",
@@ -108,5 +108,18 @@ describe("MockBillingProvider.handleWebhook", () => {
     await expect(new MockBillingProvider().handleWebhook({ payload: "{}", headers: {} })).rejects.toThrow(
       /does not accept external webhooks/,
     );
+  });
+});
+
+describe("assertMockBillingAllowed", () => {
+  it("allows mock billing outside production", () => {
+    expect(() => assertMockBillingAllowed(undefined, "development")).not.toThrow();
+    expect(() => assertMockBillingAllowed(undefined, "test")).not.toThrow();
+  });
+
+  it("refuses mock billing in production unless explicitly allowed", () => {
+    expect(() => assertMockBillingAllowed(undefined, "production")).toThrow(/모의 결제/);
+    expect(() => assertMockBillingAllowed("false", "production")).toThrow(/모의 결제/);
+    expect(() => assertMockBillingAllowed("true", "production")).not.toThrow();
   });
 });

@@ -24,6 +24,9 @@ const serverSchema = z.object({
   AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
 
   BILLING_PROVIDER: z.enum(["mock", "toss"]).default("mock"),
+  // The mock provider upgrades a plan with one click and no payment. It is
+  // refused in production unless this is explicitly "true" (demo deployments).
+  ALLOW_MOCK_BILLING: z.enum(["true", "false"]).optional(),
   TOSS_SECRET_KEY: z.string().optional(),
 
   WORDPRESS_SITE_URL: z.string().optional(),

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FormMessage } from "@/components/ui/form-message";
 import { NativeSelect } from "@/components/ui/native-select";
-import { WeekdayPicker } from "@/components/automations/weekday-picker";
+import { ScheduleFields, ScheduleHiddenInputs, scheduleToValue } from "@/components/automations/schedule-fields";
 import { createAutomation, type AutomationActionState } from "@/app/(app)/automations/actions";
 import type { AutomationTemplate, Business } from "@/types/domain";
 
@@ -22,8 +22,7 @@ export function AutomationForm({
   defaultTemplateId?: string;
 }) {
   const [state, formAction, isPending] = useActionState(createAutomation, initialState);
-  const [frequency, setFrequency] = useState<"DAILY" | "WEEKLY">("WEEKLY");
-  const [selectedDays, setSelectedDays] = useState<number[]>([1, 3, 5]);
+  const [schedule, setSchedule] = useState(() => scheduleToValue(null));
 
   return (
     <form action={formAction} className="space-y-5 rounded-2xl border bg-card px-5 py-6 sm:px-8 sm:py-8" aria-describedby={state.error ? "automation-form-error" : undefined}>
@@ -46,25 +45,8 @@ export function AutomationForm({
         <Input id="name" name="name" placeholder="예: 헬스장 숏폼 만들기" required maxLength={100} disabled={isPending} />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="frequency">만드는 주기</Label>
-        <NativeSelect id="frequency" name="frequency" value={frequency} onChange={(event) => setFrequency(event.target.value as "DAILY" | "WEEKLY")} disabled={isPending}>
-          <option value="DAILY">매일</option>
-          <option value="WEEKLY">정한 요일마다</option>
-        </NativeSelect>
-      </div>
-
-      {frequency === "WEEKLY" ? (
-        <>
-          <WeekdayPicker legend="만드는 요일" value={selectedDays} onChange={setSelectedDays} disabled={isPending} />
-          {selectedDays.map((day) => <input key={day} type="hidden" name="daysOfWeek" value={day} />)}
-        </>
-      ) : null}
-
-      <div className="space-y-2">
-        <Label htmlFor="timeOfDay">만드는 시간 (한국 시간)</Label>
-        <Input id="timeOfDay" name="timeOfDay" type="time" defaultValue="09:00" required disabled={isPending} className="sm:w-44" />
-      </div>
+      <ScheduleFields idPrefix="automation" value={schedule} onChange={setSchedule} disabled={isPending} />
+      <ScheduleHiddenInputs value={schedule} />
 
       {state.error ? <FormMessage id="automation-form-error">{state.error}</FormMessage> : null}
 

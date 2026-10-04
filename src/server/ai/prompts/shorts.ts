@@ -100,12 +100,21 @@ export function buildShortsTopicPrompt(
   };
 }
 
-export function buildShortsContentPrompt(business: Business, topic: string) {
+export interface ShortsCalendarBrief {
+  goal: string;
+  summary: string;
+  cta: string;
+}
+
+export function buildShortsContentPrompt(business: Business, topic: string, brief?: ShortsCalendarBrief) {
   return {
     system: buildBusinessContext(business),
     prompt: [
       "AUTOBIZ_SHORTS_CONTENT_V1",
       `Create one vertical short-form video plan about this fixed topic: "${topic}".`,
+      brief ? `Marketing goal for this video: ${brief.goal}` : null,
+      brief ? `Content brief (what the video must cover): ${brief.summary}` : null,
+      brief ? `The final CTA scene should lead to: ${brief.cta}` : null,
       "The spoken script and scenes together must follow Hook -> Problem -> Solution -> CTA.",
       "The first scene is the hook and must last 1-3 seconds. The sum of all scene durations must be 15-45 seconds.",
       "Use 4-10 scenes. Each scene text must be a short spoken or on-screen Korean line.",
@@ -114,6 +123,6 @@ export function buildShortsContentPrompt(business: Business, topic: string) {
       'Use privacy "private" so a person can review the generated asset before any future upload flow publishes it.',
       "Return JSON with exactly these fields:",
       '{ "hook": "1-3 second Korean hook", "script": "complete natural Korean spoken script", "scenes": [{ "text": "scene line", "visualPrompt": "specific 9:16 visual direction", "durationSec": 3 }], "caption": "platform description and #hashtags", "privacy": "private" }',
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
   };
 }

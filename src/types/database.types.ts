@@ -545,6 +545,8 @@ export interface Database {
           sns_activity: string;
           recommendations: string[];
           raw_summary: string | null;
+          score_breakdown: Json;
+          evidence: Json;
           created_at: string;
         };
         Insert: {
@@ -558,6 +560,8 @@ export interface Database {
           sns_activity: string;
           recommendations?: string[];
           raw_summary?: string | null;
+          score_breakdown?: Json;
+          evidence?: Json;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["marketing_diagnoses"]["Insert"]>;
@@ -580,6 +584,10 @@ export interface Database {
       };
       integration_secret_delete: {
         Args: { p_id: string };
+        Returns: void;
+      };
+      increment_usage: {
+        Args: { p_user_id: string; p_period: string; p_runs: number; p_generations: number };
         Returns: void;
       };
     };

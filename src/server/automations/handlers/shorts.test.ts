@@ -109,12 +109,23 @@ function baseContext(overrides: Partial<AutomationRunContext> = {}): AutomationR
 }
 
 describe("shortsAutomationHandler", () => {
-  it("returns schema-shaped scenes and caption and persists Shorts metadata", async () => {
+  it("only renders a preview (never posts) when no platform was explicitly configured", async () => {
     generateStructuredMock
       .mockResolvedValueOnce({ topic: "출근길 소금빵 예약 팁" })
       .mockResolvedValueOnce(generatedContent);
 
     const result = await shortsAutomationHandler.run(baseContext());
+
+    expect(instagramPublishMock).not.toHaveBeenCalled();
+    expect(result.output).toMatchObject({ videoUrl: "https://cdn.example.com/shorts/result.mp4", publicationResults: {} });
+  });
+
+  it("returns schema-shaped scenes and caption and persists Shorts metadata", async () => {
+    generateStructuredMock
+      .mockResolvedValueOnce({ topic: "출근길 소금빵 예약 팁" })
+      .mockResolvedValueOnce(generatedContent);
+
+    const result = await shortsAutomationHandler.run(baseContext({ config: { platforms: ["instagram"] } }));
 
     expect(generateStructuredMock).toHaveBeenCalledTimes(2);
     expect(result.output).toEqual({

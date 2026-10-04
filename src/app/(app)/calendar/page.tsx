@@ -150,7 +150,7 @@ export default async function CalendarPage({
         <section aria-labelledby="today-title">
           <h2 id="today-title" className="text-lg font-bold tracking-[-0.02em]">오늘 만들 콘텐츠</h2>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
-            {todayItems.map((item) => <CalendarItemDialog key={item.id} item={item} isToday variant="card" />)}
+            {todayItems.map((item) => <CalendarItemDialog key={item.id} item={item} variant="card" />)}
           </div>
         </section>
       ) : null}
@@ -194,7 +194,7 @@ export default async function CalendarPage({
                 return (
                   <section key={day} className="p-4" aria-labelledby={`calendar-day-${day}`}>
                     <p id={`calendar-day-${day}`} className="text-sm font-bold">{month}월 {day}일 · {weekday}요일</p>
-                    <div className="mt-3 space-y-3">{items.map((item) => <CalendarItemDialog key={item.id} item={item} isToday={item.planned_date === today} variant="card" />)}</div>
+                    <div className="mt-3 space-y-3">{items.map((item) => <CalendarItemDialog key={item.id} item={item} variant="card" />)}</div>
                   </section>
                 );
               })}
@@ -225,7 +225,7 @@ function CalendarDay({ day, dateKey, items, today }: { day: number; dateKey: str
       </p>
       <div className="mt-1.5 space-y-1.5">
         {items.slice(0, 3).map((item) => (
-          <CalendarItemDialog key={item.id} item={item} isToday={item.planned_date === today} />
+          <CalendarItemDialog key={item.id} item={item} />
         ))}
         {items.length > 3 ? <p className="px-1 text-[11px] font-medium text-muted-foreground">+{items.length - 3}개 더 있어요</p> : null}
       </div>

@@ -38,8 +38,10 @@ function makeClient() {
           business_id: "business-1",
           planned_date: "2026-10-01",
           platform: "blog",
+          content_type: "정보성 블로그 글",
           topic: "계획된 블로그 주제",
           goal: "상담 전환",
+          summary: "상담 전 자주 묻는 질문 정리",
           cta: "상담 신청",
           status: "PLANNED",
         },
@@ -105,8 +107,10 @@ describe("triggerRunNow with a calendar item", () => {
         businessId: "business-1",
         plannedDate: "2026-10-01",
         platform: "blog",
+        contentType: "정보성 블로그 글",
         topic: "계획된 블로그 주제",
         goal: "상담 전환",
+        summary: "상담 전 자주 묻는 질문 정리",
         cta: "상담 신청",
       },
     });
@@ -237,5 +241,42 @@ describe("createAutomation — blog delivery mode (generation-only going forward
     // createAutomation redirects on success (mocked as a no-op above), so a
     // defined return value here would mean it returned early with an error.
     expect(result).toBeUndefined();
+  });
+});
+
+describe("triggerRunNow with a Shorts calendar item", () => {
+  it("only renders a preview — it never posts to a platform from the calendar", async () => {
+    const { client } = makeClient();
+    createClientMock.mockResolvedValue(client);
+    canExecuteAutomationMock.mockResolvedValue({ allowed: true });
+    runAutomationNowMock.mockResolvedValue({ runId: "run-1", status: "SUCCESS", output: {}, contentHistoryId: "content-1" });
+    // Swap the queued rows for a Shorts template + youtube_shorts item.
+    const original = client.from;
+    client.from = vi.fn((table: string) => {
+      const builder = original(table) as { single: () => Promise<{ data: unknown; error: unknown }>; maybeSingle: () => Promise<{ data: unknown; error: unknown }> };
+      if (table === "automation_templates") {
+        builder.single = () => Promise.resolve({ data: { slug: "shorts" }, error: null });
+      }
+      if (table === "calendar_items") {
+        const calendarMaybeSingle = builder.maybeSingle;
+        let first = true;
+        builder.maybeSingle = async () => {
+          const result = await calendarMaybeSingle();
+          if (first) {
+            first = false;
+            return { data: { ...(result.data as object), platform: "youtube_shorts" }, error: null };
+          }
+          return result;
+        };
+      }
+      return builder as never;
+    }) as never;
+
+    await triggerRunNow("automation-1", "calendar-1");
+
+    expect(runAutomationNowMock).toHaveBeenCalledWith(
+      "automation-1",
+      expect.objectContaining({ shorts: { previewOnly: true } }),
+    );
   });
 });

@@ -7,6 +7,7 @@ import { describeAutomationRunError } from "@/server/shared/errors";
 import { canCreateAutomation, canExecuteAutomation } from "@/server/billing/entitlements";
 import { runAutomationNow } from "@/server/automations/runner";
 import { computeNextRunAt } from "@/server/automations/scheduler";
+import { parseScheduleFromForm } from "@/server/automations/schedule-input";
 import { WordPressConnector, normalizeWordPressSiteUrl } from "@/server/connectors/wordpress";
 import { encryptWordPressPassword } from "@/server/connectors/wordpress/credentials";
 import { AUTOMATION_AVAILABILITY, type AutomationSchedule } from "@/types/automation";
@@ -15,20 +16,6 @@ import type { Json } from "@/types/domain";
 
 export interface AutomationActionState {
   error?: string;
-}
-
-function scheduleFromForm(formData: FormData): AutomationSchedule | null {
-  const frequency = String(formData.get("frequency") ?? "");
-  const timeOfDay = String(formData.get("timeOfDay") ?? "09:00");
-  const daysOfWeek = formData.getAll("daysOfWeek").map((value) => Number(value));
-  if ((frequency !== "DAILY" && frequency !== "WEEKLY") || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeOfDay)) return null;
-  if (frequency === "WEEKLY" && (daysOfWeek.length === 0 || daysOfWeek.some((day) => !Number.isInteger(day) || day < 0 || day > 6))) return null;
-
-  return {
-    frequency,
-    timeOfDay,
-    ...(frequency === "WEEKLY" ? { daysOfWeek: [...new Set(daysOfWeek)] } : {}),
-  };
 }
 
 export async function createAutomation(
@@ -69,8 +56,8 @@ export async function createAutomation(
     return { error: entitlement.reason };
   }
 
-  const schedule = scheduleFromForm(formData);
-  if (!schedule) return { error: "실행 주기, 요일, 시간을 확인해주세요." };
+  const schedule = parseScheduleFromForm(formData);
+  if (!schedule) return { error: "주기, 요일(날짜), 시간을 확인해주세요." };
 
   let config: Json = {};
   if (template.slug === "blog-marketing") {
@@ -195,9 +182,9 @@ export async function updateAutomation(automationId: string, formData: FormData)
 
   const name = String(formData.get("name") ?? "").trim();
   const businessId = String(formData.get("businessId") ?? "");
-  const schedule = scheduleFromForm(formData);
+  const schedule = parseScheduleFromForm(formData);
   if (!name || name.length > 100) return { error: "자동화 이름은 1~100자로 입력해주세요." };
-  if (!schedule) return { error: "실행 주기, 요일, 시간을 확인해주세요." };
+  if (!schedule) return { error: "주기, 요일(날짜), 시간을 확인해주세요." };
   const { data: business, error: businessError } = await supabase.from("businesses")
     .select("id").eq("id", businessId).eq("owner_id", user.id).maybeSingle();
   if (businessError || !business) return { error: "본인의 사업체를 선택해주세요." };
@@ -278,17 +265,6 @@ export interface RunNowState {
   contentHistoryId?: string;
 }
 
-function currentKstDate(): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${value("year")}-${value("month")}-${value("day")}`;
-}
-
 export async function triggerRunNow(automationId: string, calendarItemId?: string): Promise<RunNowState> {
   const supabase = await createClient();
   const {
@@ -316,14 +292,13 @@ export async function triggerRunNow(automationId: string, calendarItemId?: strin
   if (calendarItemId) {
     const { data: selectedItem, error: calendarError } = await supabase
       .from("calendar_items")
-      .select("id,business_id,planned_date,platform,topic,goal,cta,status")
+      .select("id,business_id,planned_date,platform,content_type,topic,goal,summary,cta,status")
       .eq("id", calendarItemId)
       .maybeSingle();
     if (calendarError || !selectedItem || selectedItem.business_id !== automation.business_id) {
       return { error: "캘린더 항목을 찾을 수 없습니다." };
     }
     if (selectedItem.status !== "PLANNED") return { error: "이미 생성되었거나 건너뛴 캘린더 항목입니다." };
-    if (selectedItem.planned_date !== currentKstDate()) return { error: "예정일이 오늘인 콘텐츠만 바로 생성할 수 있습니다." };
 
     const expectedTemplate = selectedItem.platform === "blog"
       ? "blog-marketing"
@@ -332,7 +307,7 @@ export async function triggerRunNow(automationId: string, calendarItemId?: strin
         : null;
     if (!expectedTemplate) return { error: "이 채널은 아직 캘린더에서 바로 생성할 수 없습니다." };
     if (expectedTemplate === "shorts" && AUTOMATION_AVAILABILITY.shorts !== "AVAILABLE") {
-      return { error: "YouTube Shorts 자동화는 Coming Soon입니다." };
+      return { error: "유튜브 쇼츠 제작은 준비 중입니다." };
     }
     if (template.slug !== expectedTemplate) return { error: "캘린더 채널과 자동화 유형이 일치하지 않습니다." };
 
@@ -341,8 +316,10 @@ export async function triggerRunNow(automationId: string, calendarItemId?: strin
       businessId: selectedItem.business_id,
       plannedDate: selectedItem.planned_date,
       platform: selectedItem.platform,
+      contentType: selectedItem.content_type,
       topic: selectedItem.topic,
       goal: selectedItem.goal,
+      summary: selectedItem.summary,
       cta: selectedItem.cta,
     };
   }
@@ -354,7 +331,12 @@ export async function triggerRunNow(automationId: string, calendarItemId?: strin
 
   let result;
   try {
-    result = await runAutomationNow(automationId, { calendarItem });
+    // A calendar-triggered Shorts run only ever produces a preview: posting
+    // to a platform is a separate, explicit step in the Shorts studio.
+    result = await runAutomationNow(automationId, {
+      calendarItem,
+      ...(template.slug === "shorts" ? { shorts: { previewOnly: true } } : {}),
+    });
   } catch (error) {
     if (error instanceof Error && (error.message.includes("already has a run") || error.message.includes("automation_runs_one_active_run"))) {
       return { error: "이미 실행 중입니다. 완료 후 다시 시도해주세요." };

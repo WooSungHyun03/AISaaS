@@ -45,9 +45,8 @@ function statusTone(status: CalendarItemStatus) {
   return "border-border bg-card text-muted-foreground";
 }
 
-function disabledReason(item: CalendarItem, isToday: boolean): string | null {
+function disabledReason(item: CalendarItem): string | null {
   if (item.status !== "PLANNED") return "이미 처리된 항목이에요.";
-  if (!isToday) return "예정일이 오늘인 콘텐츠만 바로 만들 수 있어요.";
   if (item.platform === "instagram_reels") return "인스타 릴스 제작은 준비 중이에요.";
   if (item.platform === "youtube_shorts" && AUTOMATION_AVAILABILITY.shorts !== "AVAILABLE") {
     return "유튜브 쇼츠 제작은 준비 중이에요.";
@@ -57,18 +56,16 @@ function disabledReason(item: CalendarItem, isToday: boolean): string | null {
 
 export function CalendarItemDialog({
   item,
-  isToday,
   variant = "compact",
 }: {
   item: CalendarItem;
-  isToday: boolean;
   variant?: "compact" | "card";
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
-  const reason = disabledReason(item, isToday);
+  const reason = disabledReason(item);
 
   function handleGenerate() {
     setError("");
@@ -80,7 +77,7 @@ export function CalendarItemDialog({
           toast.error(result.error);
           return;
         }
-        toast.success("오늘 콘텐츠를 만들고 캘린더에 연결했어요.");
+        toast.success(item.platform === "youtube_shorts" ? "숏폼 영상을 만들고 캘린더에 연결했어요. 숏폼 스튜디오에서 확인하세요." : "콘텐츠를 만들고 캘린더에 연결했어요.");
         setOpen(false);
         router.refresh();
       } catch {
@@ -147,7 +144,7 @@ export function CalendarItemDialog({
           {item.status === "PLANNED" ? (
             <Button type="button" onClick={handleGenerate} disabled={Boolean(reason) || isPending}>
               {isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Play aria-hidden="true" />}
-              {isPending ? "콘텐츠를 만드는 중…" : "오늘 콘텐츠 만들기"}
+              {isPending ? "콘텐츠를 만드는 중…" : "이 콘텐츠 만들기"}
             </Button>
           ) : null}
         </DialogFooter>

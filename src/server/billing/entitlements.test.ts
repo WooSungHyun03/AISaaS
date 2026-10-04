@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { canExecuteAutomation } = await import("./entitlements");
+const { canExecuteAutomation, incrementUsage } = await import("./entitlements");
 
 /**
  * Minimal per-table chainable Supabase stand-in. `from(table)` pops the next
@@ -149,5 +149,33 @@ describe("canExecuteAutomation — regression (existing behavior unaffected)", (
 
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain("Starter");
+  });
+});
+
+describe("incrementUsage", () => {
+  type AdminArg = Parameters<typeof incrementUsage>[0];
+
+  it("increments through the atomic RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({ error: null });
+    const from = vi.fn();
+    await incrementUsage({ rpc, from } as unknown as AdminArg, "user-1", { automationRuns: 1, aiGenerations: 2 });
+    expect(rpc).toHaveBeenCalledWith("increment_usage", expect.objectContaining({ p_user_id: "user-1", p_runs: 1, p_generations: 2 }));
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  it("falls back to read-then-write only when the RPC does not exist yet", async () => {
+    const rpc = vi.fn().mockResolvedValue({ error: { code: "PGRST202" } });
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    const builder = { select: vi.fn(() => builder), eq: vi.fn(() => builder), maybeSingle: vi.fn().mockResolvedValue({ data: null }), insert };
+    const from = vi.fn(() => builder);
+    await incrementUsage({ rpc, from } as unknown as AdminArg, "user-1", { automationRuns: 1 });
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ user_id: "user-1", automation_runs: 1, ai_generations: 0 }));
+  });
+
+  it("never throws on other RPC errors (the content is already saved)", async () => {
+    const rpc = vi.fn().mockResolvedValue({ error: { code: "XX000" } });
+    const from = vi.fn();
+    await expect(incrementUsage({ rpc, from } as unknown as AdminArg, "user-1", { automationRuns: 1 })).resolves.toBeUndefined();
+    expect(from).not.toHaveBeenCalled();
   });
 });

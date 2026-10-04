@@ -20,6 +20,9 @@ import type { Json } from "@/types/domain";
  * similarity, matching the bounded retry pattern used by the Blog pipeline.
  */
 async function generateTopic(ctx: AutomationRunContext): Promise<ShortsTopic> {
+  // A calendar item already fixed the topic — never replace it with a new one.
+  if (ctx.calendarItem) return { topic: ctx.calendarItem.topic.slice(0, 120) };
+
   const first = await generateStructured({
     ...buildShortsTopicPrompt(ctx.business, ctx.recentTopics),
     schema: shortsTopicSchema,
@@ -35,7 +38,8 @@ async function generateTopic(ctx: AutomationRunContext): Promise<ShortsTopic> {
 }
 
 function scheduledPlatforms(config: AutomationRunContext["config"]): ShortsPublishPlatform[] {
-  if (!Array.isArray(config.platforms)) return ["instagram"];
+  // Publishing is opt-in: an automation without an explicit platform list only renders a preview.
+  if (!Array.isArray(config.platforms)) return [];
   const platforms = config.platforms.filter(
     (value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube",
   );
@@ -98,7 +102,7 @@ export const shortsAutomationHandler: AutomationHandler = {
 
     const { topic } = await generateTopic(ctx);
     const content = await generateStructured({
-      ...buildShortsContentPrompt(ctx.business, topic),
+      ...buildShortsContentPrompt(ctx.business, topic, ctx.calendarItem),
       schema: shortsContentSchema,
       maxTokens: 1_600,
     });

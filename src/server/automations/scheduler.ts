@@ -14,6 +14,24 @@ export function computeNextRunAt(schedule: AutomationSchedule, from: Date = new 
   const [hour, minute] = schedule.timeOfDay.split(":").map(Number);
   const nowParts = getZonedParts(from, timezone);
   const baseUtcDay = Date.UTC(nowParts.year, nowParts.month - 1, nowParts.day);
+
+  if (schedule.frequency === "MONTHLY") {
+    const dayOfMonth = schedule.dayOfMonth ?? 0;
+    if (!Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+      throw new Error("Could not compute next run time for schedule — check dayOfMonth.");
+    }
+    // This month and the next: if this month's slot already passed, next month's is always later.
+    for (let offset = 0; offset <= 2; offset++) {
+      const monthIndex = nowParts.month - 1 + offset;
+      const year = nowParts.year + Math.floor(monthIndex / 12);
+      const month = (monthIndex % 12) + 1;
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const candidateInstant = zonedTimeToUtc(year, month, Math.min(dayOfMonth, lastDay), hour, minute, timezone);
+      if (candidateInstant.getTime() > from.getTime()) return candidateInstant;
+    }
+    throw new Error("Could not compute next run time for schedule — check dayOfMonth/timeOfDay.");
+  }
+
   const maxLookaheadDays = schedule.frequency === "WEEKLY" ? 7 : 1;
 
   for (let offset = 0; offset <= maxLookaheadDays; offset++) {

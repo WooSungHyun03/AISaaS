@@ -148,8 +148,10 @@ describe("blogAutomationHandler", () => {
       businessId: "biz-1",
       plannedDate: "2026-10-01",
       platform: "blog" as const,
+      contentType: "정보성 블로그 글",
       topic: "직장인을 위한 아침 소금빵 활용법",
       goal: "평일 오전 방문 늘리기",
+      summary: "출근 전 5분 안에 고르는 법과 예약 픽업 방법을 소개한다",
       cta: "출근길 예약하기",
     };
 
@@ -163,6 +165,9 @@ describe("blogAutomationHandler", () => {
     expect(titleRequest.system).toContain(calendarItem.goal);
     expect(bodyRequest.system).toContain(calendarItem.goal);
     expect(bodyRequest.system).toContain(calendarItem.cta);
+    // The calendar's content brief must actually reach the writer, not just goal/CTA.
+    expect(titleRequest.system).toContain(calendarItem.summary);
+    expect(bodyRequest.system).toContain(calendarItem.summary);
   });
 
   it("publishes to WordPress with the generated excerpt/bodyHtml when configured for it", async () => {

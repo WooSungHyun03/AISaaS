@@ -9,7 +9,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
-import { WeekdayPicker } from "@/components/automations/weekday-picker";
+import { ScheduleFields, ScheduleHiddenInputs, scheduleToValue } from "@/components/automations/schedule-fields";
 import { FormMessage } from "@/components/ui/form-message";
 import { Textarea } from "@/components/ui/textarea";
 import { BLOG_DELIVERY_LABEL, type BlogAutomationConfig } from "@/types/blog-automation";
@@ -37,8 +37,7 @@ export function AutomationSettingsDialog({
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
-  const [frequency, setFrequency] = useState<"DAILY" | "WEEKLY">(schedule.frequency === "DAILY" ? "DAILY" : "WEEKLY");
-  const [days, setDays] = useState<number[]>(schedule.daysOfWeek ?? []);
+  const [scheduleValue, setScheduleValue] = useState(() => scheduleToValue(schedule));
   const [deliveryMode, setDeliveryMode] = useState<BlogAutomationConfig["deliveryMode"]>(blogSettings?.deliveryMode ?? "app_draft");
   const [siteUrl, setSiteUrl] = useState(blogSettings?.wordpressSiteUrl ?? "");
   const [username, setUsername] = useState(blogSettings?.wordpressUsername ?? "");
@@ -81,14 +80,8 @@ export function AutomationSettingsDialog({
 
           <section className="space-y-4 border-t pt-5">
             <h3 className="text-[15px] font-bold">만드는 때</h3>
-            <div className="space-y-2"><Label htmlFor="edit-frequency">만드는 주기</Label>
-              <NativeSelect id="edit-frequency" name="frequency" value={frequency} onChange={(event) => setFrequency(event.target.value as "DAILY" | "WEEKLY")}>
-                <option value="DAILY">매일</option><option value="WEEKLY">정한 요일마다</option>
-              </NativeSelect>
-            </div>
-            {frequency === "WEEKLY" && <WeekdayPicker legend="만드는 요일" value={days} onChange={setDays} />}
-            {frequency === "WEEKLY" && days.map((day) => <input key={day} type="hidden" name="daysOfWeek" value={day} />)}
-            <div className="space-y-2"><Label htmlFor="edit-time">만드는 시간 (한국 시간)</Label><Input id="edit-time" name="timeOfDay" type="time" defaultValue={schedule.timeOfDay} required /></div>
+            <ScheduleFields idPrefix="edit" value={scheduleValue} onChange={setScheduleValue} />
+            <ScheduleHiddenInputs value={scheduleValue} />
           </section>
 
           {blogSettings && <section className="space-y-4 border-t pt-5">

@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { Mascot } from "@/components/brand/mascot";
 import { PageHeader } from "@/components/layout/page-header";
 import { DiagnosisForm } from "@/components/marketing/diagnosis-form";
+import type { DiagnosisResultView } from "@/app/(app)/diagnosis/actions";
+import { scoreItemsSchema } from "@/server/marketing/scoring";
 import { ScoreRing, scoreTone } from "@/components/marketing/score-ring";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -48,7 +50,7 @@ export default async function MarketingDiagnosisPage({
     );
   }
 
-  const [{ data: connections, error: connectionError }, { data: automations, error: automationError }] = await Promise.all([
+  const [{ data: connections, error: connectionError }, { data: automations, error: automationError }, { data: latestRow, error: diagnosisError }] = await Promise.all([
     supabase
       .from("integration_connections")
       .select("provider, status, account_identifier")
@@ -60,8 +62,15 @@ export default async function MarketingDiagnosisPage({
       .select("id, name, status, template_id, last_run_at, next_run_at")
       .eq("user_id", user.id)
       .eq("business_id", selectedBusiness.id),
+    supabase
+      .from("marketing_diagnoses")
+      .select("*")
+      .eq("business_id", selectedBusiness.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
-  const readError = connectionError || automationError;
+  const readError = connectionError || automationError || diagnosisError;
   if (readError) throw new Error("마케팅 채널 상태를 불러오지 못했습니다.", { cause: readError });
 
   const automationIds = (automations ?? []).map((automation) => automation.id);
@@ -77,6 +86,22 @@ export default async function MarketingDiagnosisPage({
     : { count: 0, error: null };
   if (recentSuccessResult.error) throw new Error("최근 콘텐츠 운영 기록을 불러오지 못했습니다.", { cause: recentSuccessResult.error });
 
+  const latestDiagnosis: DiagnosisResultView | null = latestRow
+    ? {
+      id: latestRow.id,
+      createdAt: latestRow.created_at,
+      score: latestRow.score,
+      scoreBreakdown: scoreItemsSchema.catch([]).parse(latestRow.score_breakdown),
+      evidence: typeof latestRow.evidence === "object" && latestRow.evidence && !Array.isArray(latestRow.evidence)
+        ? Object.fromEntries(Object.entries(latestRow.evidence).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+        : {},
+      missingChannels: latestRow.missing_channels,
+      contentStatus: latestRow.content_status,
+      snsActivity: latestRow.sns_activity,
+      recommendations: latestRow.recommendations,
+      sourceUrl: latestRow.source_url,
+    }
+    : null;
   const instagram = connections?.find((connection) => connection.provider === "instagram");
   const hasInstagram = isInstagramConnected(instagram?.status);
   const activeAutomations = (automations ?? []).filter((automation) => automation.status === "ACTIVE");
@@ -125,7 +150,7 @@ export default async function MarketingDiagnosisPage({
         <div className="grid items-center gap-8 px-6 py-8 sm:px-10 md:grid-cols-[auto_minmax(0,1fr)_auto]">
           <ScoreRing score={score} size={164} className="mx-auto md:mx-0" />
           <div className="text-center md:text-left">
-            <p className="text-sm font-semibold text-muted-foreground">{selectedBusiness.name}의 마케팅 점수</p>
+            <p className="text-sm font-semibold text-muted-foreground">{selectedBusiness.name}의 마케팅 준비 점수</p>
             <h2 id="score-title" className="mt-1 text-2xl font-extrabold tracking-[-0.04em] sm:text-[1.75rem]">{tone.label}</h2>
             <p className="mt-3 max-w-md text-[15px] leading-7 text-muted-foreground">
               {nextTodo
@@ -168,16 +193,16 @@ export default async function MarketingDiagnosisPage({
         </ul>
         <p className="mt-4 flex items-start gap-2 text-[13px] leading-6 text-muted-foreground">
           <CircleAlert className="mt-1 size-3.5 shrink-0" aria-hidden="true" />
-          이 점수는 저장된 사업 정보와 연결 상태, 최근 제작 기록을 기준으로 계산해요. 아래에서 홈페이지 주소로 더 자세한 AI 진단을 받아보세요.
+          이 점수는 저장된 사업 정보와 연결 상태, 최근 제작 기록만으로 계산한 ‘운영 준비 점수’예요. 홈페이지 자체의 점수는 아래 ‘홈페이지 진단’에서 따로 확인해요.
         </p>
       </section>
 
       <section aria-labelledby="url-diagnosis-title" className="space-y-4">
         <div>
-          <h2 id="url-diagnosis-title" className="text-lg font-bold tracking-[-0.02em]">홈페이지로 더 자세히 진단하기</h2>
-          <p className="mt-1 text-[15px] text-muted-foreground">홈페이지 주소를 입력하면 AI가 내용을 읽고 점수와 추천 액션을 알려드려요. 결과에서 Business Profile을 바로 채울 수도 있어요.</p>
+          <h2 id="url-diagnosis-title" className="text-lg font-bold tracking-[-0.02em]">홈페이지 진단</h2>
+          <p className="mt-1 text-[15px] text-muted-foreground">홈페이지 주소를 입력하면 제목·설명·연락처·SNS 링크·최근 업데이트 같은 항목을 직접 확인해 점수를 매겨요. SNS 계정 자체는 접속하지 않고, 홈페이지에 링크가 있는지만 봐요.</p>
         </div>
-        <DiagnosisForm business={selectedBusiness} />
+        <DiagnosisForm business={selectedBusiness} latest={latestDiagnosis} />
       </section>
     </div>
   );

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { runAutomationNow } from "@/server/automations/runner";
 import { computeNextRunAt } from "@/server/automations/scheduler";
+import { parseScheduleFromForm } from "@/server/automations/schedule-input";
 import { canCreateAutomation } from "@/server/billing/entitlements";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
 import type { Json } from "@/types/domain";
@@ -60,7 +61,9 @@ export async function createShortsAutomation(businessId: string): Promise<Shorts
     name: `${business.name} 숏폼`,
     status: "DRAFT",
     schedule: schedule as unknown as Json,
-    config: { platforms: ["instagram"] },
+    // Posting is always an explicit opt-in (saveShortsSchedule): a fresh
+    // automation only ever produces previews.
+    config: { platforms: [] },
   }).select("id").single();
   if (error || !automation) return { error: "숏폼 만들기 설정을 만들지 못했습니다." };
   revalidatePath("/shorts");
@@ -115,33 +118,21 @@ export async function publishShortsNow(
 export async function saveShortsSchedule(automationId: string, formData: FormData): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
-  const frequency = String(formData.get("frequency") ?? "");
-  const timeOfDay = String(formData.get("timeOfDay") ?? "");
-  const daysOfWeek = formData.getAll("daysOfWeek").map(Number);
+  const schedule = parseScheduleFromForm(formData, "Asia/Seoul");
+  if (!schedule) return { error: "주기, 요일(날짜), 시간을 확인해주세요." };
   const platforms = parsePlatforms(formData.getAll("platforms").map(String));
-  if ((frequency !== "DAILY" && frequency !== "WEEKLY") || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeOfDay)) {
-    return { error: "게시 주기와 시간을 확인해주세요." };
-  }
-  if (frequency === "WEEKLY" && (daysOfWeek.length === 0 || daysOfWeek.some((day) => !Number.isInteger(day) || day < 0 || day > 6))) {
-    return { error: "매주 게시할 요일을 한 개 이상 선택해주세요." };
-  }
-  if (platforms.length === 0) return { error: "자동 게시할 플랫폼을 한 개 이상 선택해주세요." };
 
   const { data: inFlight } = await owned.supabase.from("automation_runs").select("id")
     .eq("automation_id", automationId).in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle();
   if (inFlight) return { error: "실행 중에는 예약 설정을 바꿀 수 없습니다." };
-  const { data: connections } = await owned.supabase.from("integration_connections").select("provider,status")
-    .eq("user_id", owned.user.id).eq("business_id", owned.automation.business_id).in("provider", platforms);
-  const connected = new Set((connections ?? []).filter((item) => item.status === "CONNECTED").map((item) => item.provider));
-  const missing = platforms.filter((platform) => !connected.has(platform));
-  if (missing.length > 0) return { error: `${missing.map((item) => item === "youtube" ? "YouTube" : "Instagram").join(", ")} 연결을 먼저 완료해주세요.` };
+  if (platforms.length > 0) {
+    const { data: connections } = await owned.supabase.from("integration_connections").select("provider,status")
+      .eq("user_id", owned.user.id).eq("business_id", owned.automation.business_id).in("provider", platforms);
+    const connected = new Set((connections ?? []).filter((item) => item.status === "CONNECTED").map((item) => item.provider));
+    const missing = platforms.filter((platform) => !connected.has(platform));
+    if (missing.length > 0) return { error: `${missing.map((item) => item === "youtube" ? "YouTube" : "Instagram").join(", ")} 연결을 먼저 완료해주세요.` };
+  }
 
-  const schedule: AutomationSchedule = {
-    frequency,
-    timeOfDay,
-    timezone: "Asia/Seoul",
-    ...(frequency === "WEEKLY" ? { daysOfWeek: [...new Set(daysOfWeek)] } : {}),
-  };
   const currentConfig = owned.automation.config && typeof owned.automation.config === "object" && !Array.isArray(owned.automation.config)
     ? owned.automation.config as Record<string, Json | undefined>
     : {};

@@ -1,4 +1,5 @@
 import "server-only";
+import { serverEnv } from "@/lib/env/server";
 import { logger } from "@/lib/logger";
 import type {
   BillingProvider,
@@ -18,6 +19,23 @@ import {
 } from "../checkout-sessions";
 
 /**
+ * Mock checkout grants a paid plan without any payment, so on a real
+ * (production) deployment it must be an explicit opt-in — otherwise any
+ * signed-in user could upgrade themselves for free just by clicking
+ * through /billing/mock-checkout.
+ */
+export function assertMockBillingAllowed(
+  allowMock: string | undefined = serverEnv.ALLOW_MOCK_BILLING,
+  nodeEnv: string | undefined = process.env.NODE_ENV,
+): void {
+  if (nodeEnv === "production" && allowMock !== "true") {
+    throw new Error(
+      "모의 결제는 운영 환경에서 사용할 수 없습니다. BILLING_PROVIDER=toss 로 설정하거나, 데모 목적이라면 ALLOW_MOCK_BILLING=true 를 명시해주세요.",
+    );
+  }
+}
+
+/**
  * Simulates a payment gateway end-to-end (checkout -> completion -> entitlement
  * update) with no real money and no external dependency, so the full
  * billing flow can be verified before a real PG contract exists.
@@ -28,6 +46,7 @@ import {
  */
 export class MockBillingProvider implements BillingProvider {
   async createCheckout({ userId, plan, successUrl }: CreateCheckoutParams) {
+    assertMockBillingAllowed();
     const session = await createCheckoutSession(userId, plan, "mock");
     const url = new URL("/billing/mock-checkout", successUrl);
     url.searchParams.set("session", session.id);
@@ -35,6 +54,7 @@ export class MockBillingProvider implements BillingProvider {
   }
 
   async completeCheckout({ userId, sessionId }: CompleteCheckoutParams) {
+    assertMockBillingAllowed();
     const session = await claimCheckoutSession(sessionId, userId, "mock");
     if (session.status === "SUCCEEDED") return { plan: session.plan, provider: "mock" };
 

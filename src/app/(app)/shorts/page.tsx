@@ -58,7 +58,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     .map(([platform, result]) => ({ runId: run.id, createdAt: run.created_at, platform, ...result })));
   const connectionMap = Object.fromEntries((connectionsResult.data ?? []).map((item) => [item.provider, item.status])) as Partial<Record<ShortsPublishPlatform, string>>;
   const config = automation.config && typeof automation.config === "object" && !Array.isArray(automation.config) ? automation.config as Record<string, unknown> : {};
-  const configuredPlatforms: ShortsPublishPlatform[] = Array.isArray(config.platforms) ? config.platforms.filter((item): item is ShortsPublishPlatform => item === "instagram" || item === "youtube") : ["instagram"];
+  const configuredPlatforms: ShortsPublishPlatform[] = Array.isArray(config.platforms) ? config.platforms.filter((item): item is ShortsPublishPlatform => item === "instagram" || item === "youtube") : [];
   const schedule = automation.schedule as unknown as AutomationSchedule;
 
   return <div className="mx-auto max-w-6xl space-y-8"><PageHeading />{businessPicker}<ShortsStudio automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} nextRunAt={automation.next_run_at} /></div>;

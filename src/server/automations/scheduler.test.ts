@@ -85,3 +85,33 @@ describe("computeNextRunAt", () => {
     expect(next.toISOString()).toBe("2027-11-07T05:30:00.000Z"); // 01:30 EDT (UTC-4), the first occurrence
   });
 });
+
+describe("computeNextRunAt (MONTHLY)", () => {
+  const monthly = (dayOfMonth: number) => ({ frequency: "MONTHLY" as const, dayOfMonth, timeOfDay: "09:00", timezone: "Asia/Seoul" });
+
+  it("fires later this month when the slot has not passed", () => {
+    const next = computeNextRunAt(monthly(25), new Date("2026-09-21T00:00:00.000Z"));
+    expect(next.toISOString()).toBe("2026-09-25T00:00:00.000Z");
+  });
+
+  it("rolls into next month once this month's slot passed", () => {
+    const next = computeNextRunAt(monthly(10), new Date("2026-09-21T00:00:00.000Z"));
+    expect(next.toISOString()).toBe("2026-10-10T00:00:00.000Z");
+  });
+
+  it("clamps day 31 to the last day of a shorter month", () => {
+    // 2026-02 has 28 days; 09:00 KST on the 28th is 00:00 UTC.
+    const next = computeNextRunAt(monthly(31), new Date("2026-02-01T00:00:00.000Z"));
+    expect(next.toISOString()).toBe("2026-02-28T00:00:00.000Z");
+  });
+
+  it("rolls over a year boundary", () => {
+    const next = computeNextRunAt(monthly(5), new Date("2026-12-20T00:00:00.000Z"));
+    expect(next.toISOString()).toBe("2027-01-05T00:00:00.000Z");
+  });
+
+  it("rejects a missing or invalid dayOfMonth instead of looping", () => {
+    expect(() => computeNextRunAt({ frequency: "MONTHLY", timeOfDay: "09:00" })).toThrow(/dayOfMonth/);
+    expect(() => computeNextRunAt(monthly(32))).toThrow(/dayOfMonth/);
+  });
+});

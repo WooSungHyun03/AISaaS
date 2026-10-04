@@ -18,10 +18,10 @@ const { DiagnosisError } = await import("@/server/marketing/diagnosis");
 
 type QueryResult = { data: unknown; error: unknown };
 
-function makeClient(options: { business?: QueryResult; insert?: QueryResult } = {}) {
+function makeClient(options: { business?: QueryResult; insert?: QueryResult; recentCount?: number; connections?: Array<{ provider: string }> } = {}) {
   const inserted: Array<Record<string, unknown>> = [];
-  const businessResult = options.business ?? { data: { id: "business-1", name: "우리가게", industry: "카페" }, error: null };
-  const insertResult = options.insert ?? { data: { id: "diagnosis-1" }, error: null };
+  const businessResult = options.business ?? { data: { id: "business-1", name: "우리가게", industry: "카페", sns_links: { naver_blog: "https://blog.naver.com/x" } }, error: null };
+  const insertResult = options.insert ?? { data: { id: "diagnosis-1", created_at: "2026-10-01T00:00:00.000Z" }, error: null };
 
   const from = vi.fn((table: string) => {
     if (table === "businesses") {
@@ -29,8 +29,20 @@ function makeClient(options: { business?: QueryResult; insert?: QueryResult } = 
         select: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue(businessResult) })) })) })),
       };
     }
+    if (table === "integration_connections") {
+      const builder: Record<string, unknown> = {};
+      for (const method of ["select", "eq"]) builder[method] = vi.fn(() => builder);
+      builder.then = (resolve: (value: unknown) => unknown) => resolve({ data: options.connections ?? [], error: null });
+      return builder;
+    }
     if (table === "marketing_diagnoses") {
       return {
+        select: vi.fn(() => {
+          const builder: Record<string, unknown> = {};
+          for (const method of ["eq", "gte"]) builder[method] = vi.fn(() => builder);
+          builder.then = (resolve: (value: unknown) => unknown) => resolve({ count: options.recentCount ?? 0, error: null });
+          return builder;
+        }),
         insert: vi.fn((payload: Record<string, unknown>) => {
           inserted.push(payload);
           return { select: vi.fn(() => ({ single: vi.fn().mockResolvedValue(insertResult) })) };
@@ -62,6 +74,9 @@ describe("runDiagnosis", () => {
     createClientMock.mockResolvedValue(client);
     diagnoseWebsiteMock.mockResolvedValue({
       score: 70,
+      scoreBreakdown: [{ key: "https", group: "website", label: "보안 연결(HTTPS)", points: 5, max: 5, detail: "HTTPS로 접속돼요." }],
+      evidence: { mainOffering: "핸드드립 커피를 내립니다" },
+      aiUsed: true,
       missingChannels: ["instagram"],
       contentStatus: "콘텐츠가 부족합니다.",
       snsActivity: "SNS 연동이 없습니다.",
@@ -87,8 +102,19 @@ describe("runDiagnosis", () => {
       marketingGoal: null,
       snsLinks: { instagram: "https://instagram.com/ourcafe" },
     });
-    expect(diagnoseWebsiteMock).toHaveBeenCalledWith({ id: "business-1", name: "우리가게", industry: "카페" }, "https://example.com");
-    expect(inserted[0]).toMatchObject({ business_id: "business-1", source_type: "website", score: 70 });
+    expect(diagnoseWebsiteMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "business-1", name: "우리가게" }),
+      "https://example.com",
+      { profileSnsLinks: { naver_blog: "https://blog.naver.com/x" }, connectedProviders: [] },
+    );
+    expect(inserted[0]).toMatchObject({
+      business_id: "business-1",
+      source_type: "website",
+      score: 70,
+      score_breakdown: [expect.objectContaining({ key: "https", points: 5 })],
+      evidence: { mainOffering: "핸드드립 커피를 내립니다" },
+    });
+    expect(result.result?.scoreBreakdown).toHaveLength(1);
     expect(inserted[0]).not.toHaveProperty("main_offering");
     expect(revalidatePathMock).toHaveBeenCalledWith("/marketing/diagnosis");
     expect(revalidatePathMock).toHaveBeenCalledWith("/calendar");
@@ -135,6 +161,30 @@ describe("runDiagnosis", () => {
     const result = await runDiagnosis({}, formData({ businessId: "business-1", url: "http://169.254.169.254/" }));
 
     expect(result.error).toContain("내부/사설 네트워크");
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("passes connected integrations to the scorer so connected channels count", async () => {
+    const { client } = makeClient({ connections: [{ provider: "instagram" }] });
+    createClientMock.mockResolvedValue(client);
+    diagnoseWebsiteMock.mockResolvedValue({
+      score: 50, scoreBreakdown: [], evidence: {}, aiUsed: false, missingChannels: [], contentStatus: "ok", snsActivity: "ok", recommendations: [],
+      sourceUrl: "https://example.com/", rawSummary: null, mainOffering: null, strengths: null, marketingGoal: null, snsLinks: {},
+    });
+
+    await runDiagnosis({}, formData({ businessId: "business-1", url: "https://example.com" }));
+
+    expect(diagnoseWebsiteMock.mock.calls[0][2]).toMatchObject({ connectedProviders: ["instagram"] });
+  });
+
+  it("rate-limits repeated diagnoses of the same business before fetching or calling the AI", async () => {
+    const { client, inserted } = makeClient({ recentCount: 5 });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await runDiagnosis({}, formData({ businessId: "business-1", url: "https://example.com" }));
+
+    expect(result.error).toContain("너무 자주");
+    expect(diagnoseWebsiteMock).not.toHaveBeenCalled();
     expect(inserted).toHaveLength(0);
   });
 

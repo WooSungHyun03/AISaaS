@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
 import type { SubscriptionPlan } from "@/types/domain";
+import { logger } from "@/lib/logger";
 import { getPeriodKey, getPeriodRange } from "@/lib/utils/date";
 import { getPlanConfig } from "./plans";
 
@@ -162,10 +163,11 @@ export async function getMonthlyRunLimit(plan: SubscriptionPlan): Promise<number
 }
 
 /**
- * Increments this month's usage counters. Read-then-write, not atomic —
- * acceptable at MVP scale (a handful of runs per user per day). If
- * concurrent runs per user become common, replace with a Postgres RPC
- * that does `insert ... on conflict do update set x = x + 1`.
+ * Increments this month's usage counters atomically through the
+ * `increment_usage` RPC (0032_audit_hardening.sql) so concurrent runs can't
+ * lose an increment. Falls back to the old read-then-write only when the RPC
+ * doesn't exist yet (a deploy that ran before the migration did), so rolling
+ * the code out ahead of the migration never breaks run bookkeeping.
  */
 export async function incrementUsage(
   admin: DbClient,
@@ -173,6 +175,24 @@ export async function incrementUsage(
   delta: { automationRuns?: number; aiGenerations?: number },
 ): Promise<void> {
   const period = getPeriodKey();
+  const runs = delta.automationRuns ?? 0;
+  const generations = delta.aiGenerations ?? 0;
+
+  const { error: rpcError } = await admin.rpc("increment_usage", {
+    p_user_id: userId,
+    p_period: period,
+    p_runs: runs,
+    p_generations: generations,
+  });
+  if (!rpcError) return;
+  // PGRST202 = function not found in the schema cache, 42883 = undefined_function.
+  if (rpcError.code !== "PGRST202" && rpcError.code !== "42883") {
+    // The generated content already exists; a bookkeeping failure must not
+    // turn a successful run into a failed one. Surface it loudly instead.
+    logger.error("usage_increment_failed", { userId, period, code: rpcError.code });
+    return;
+  }
+
   const { data: existing } = await admin
     .from("usage")
     .select("id, automation_runs, ai_generations")
@@ -181,20 +201,12 @@ export async function incrementUsage(
     .maybeSingle();
 
   if (!existing) {
-    await admin.from("usage").insert({
-      user_id: userId,
-      period,
-      automation_runs: delta.automationRuns ?? 0,
-      ai_generations: delta.aiGenerations ?? 0,
-    });
+    await admin.from("usage").insert({ user_id: userId, period, automation_runs: runs, ai_generations: generations });
     return;
   }
 
   await admin
     .from("usage")
-    .update({
-      automation_runs: existing.automation_runs + (delta.automationRuns ?? 0),
-      ai_generations: existing.ai_generations + (delta.aiGenerations ?? 0),
-    })
+    .update({ automation_runs: existing.automation_runs + runs, ai_generations: existing.ai_generations + generations })
     .eq("id", existing.id);
 }
