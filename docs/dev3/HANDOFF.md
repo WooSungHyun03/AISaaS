@@ -64,3 +64,9 @@ main의 `setup_requests_cancel_own` 정책은 `using (status in ('REQUESTED', 'C
 `IN_PROGRESS`를 추가하고, 그에 맞춰 `setup-request-transitions.ts`의
 `USER_CANCELLABLE_FROM` 상수도 함께 넓히면 됩니다(현재는 정확히 RLS와 동일한 경계를
 미러링하도록 만들어뒀습니다).
+
+> **해결됨 (2026-10)**: 운영 DB에는 0016~0033이 한 번에 적용되었고(그 전까지 0015에서 멈춰 있었음),
+> 중복 번호는 `0018_setup_request_funnel.sql` → `001801_setup_request_funnel.sql` 로 버전만 바꿔 정리했습니다
+> (SQL 내용은 동일, 운영에는 이미 적용됨 — `supabase migration repair --status applied 001801`로 기록 맞춤).
+> `0027_instagram_marketing_assets_bucket.sql`은 `storage.objects` 소유 권한이 없는 환경(호스티드 CLI,
+> 로컬)에서 중단되지 않도록 권한 오류 시 건너뛰게 감쌌습니다(버킷은 public이라 정책 없이도 URL로 읽힙니다).

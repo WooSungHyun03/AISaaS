@@ -11,7 +11,7 @@
 이 프로젝트엔 "관리자/운영자" 역할이나 화면이 전혀 없습니다(코드베이스 전체 확인 완료 —
 `is_staff`/`is_admin` 같은 개념 자체가 없음). `setup_requests.status`를 `REQUESTED` →
 `CONTACTED` → `IN_PROGRESS` → `COMPLETED`로 진행시키는 것은 **애플리케이션 코드에 그 경로가
-없습니다** — RLS 정책 `setup_requests_cancel_own`(`supabase/migrations/0018_setup_request_funnel.sql`)이
+없습니다** — RLS 정책 `setup_requests_cancel_own`(`supabase/migrations/001801_setup_request_funnel.sql`)이
 일반 사용자의 자기 요청 수정 권한을 다음 두 가지로 명시적으로 제한하기 때문입니다:
 
 ```sql

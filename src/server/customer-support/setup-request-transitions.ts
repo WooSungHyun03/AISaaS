@@ -9,7 +9,7 @@ import { CustomerSupportError } from "./errors";
  * a reference (e.g. for docs/dev3/SETUP_REQUESTS_OPERATIONS.md, or a future
  * operator tool), NOT as a claim that every one of these transitions is
  * reachable through updateSetupRequestStatus() below. It isn't: main's
- * `setup_requests_cancel_own` RLS policy (0018_setup_request_funnel.sql)
+ * `setup_requests_cancel_own` RLS policy (001801_setup_request_funnel.sql)
  * only ever lets a user's own row move to CANCELLED, and only from
  * REQUESTED or CONTACTED — CONTACTED->IN_PROGRESS, IN_PROGRESS->COMPLETED,
  * etc. have no application code path at all today; an operator makes those
