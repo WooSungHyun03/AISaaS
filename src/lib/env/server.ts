@@ -14,13 +14,16 @@ const serverSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   CRON_SECRET: z.string().min(1).optional(),
 
-  AI_PROVIDER: z.enum(["mock", "openai", "gemini"]).default("mock"),
+  AI_PROVIDER: z.enum(["mock", "openai", "gemini", "anthropic"]).default("mock"),
   OPENAI_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  // Overrides the selected provider's default model id (e.g. claude-sonnet-5-5) without a deploy of new code.
+  AI_MODEL: z.string().min(1).optional(),
   // Bounded request timeout + retry count for real AI providers. Retries are
   // only ever applied to transient failures (timeout/429/5xx/network) — never
   // to auth or validation errors, and never unbounded.
-  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(45_000),
   AI_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
 
   BILLING_PROVIDER: z.enum(["mock", "toss"]).default("mock"),

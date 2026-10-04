@@ -4,6 +4,7 @@ import type { AIProvider } from "./provider";
 import { MockAIProvider } from "./providers/mock";
 import { OpenAIProvider } from "./providers/openai";
 import { GeminiProvider } from "./providers/gemini";
+import { AnthropicProvider } from "./providers/anthropic";
 
 let cachedProvider: AIProvider | undefined;
 
@@ -17,6 +18,9 @@ export function getAIProvider(): AIProvider {
       break;
     case "gemini":
       cachedProvider = new GeminiProvider();
+      break;
+    case "anthropic":
+      cachedProvider = new AnthropicProvider();
       break;
     case "mock":
     default:

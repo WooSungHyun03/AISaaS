@@ -26,7 +26,7 @@ export class OpenAIProvider implements AIProvider {
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: DEFAULT_MODEL,
+          model: serverEnv.AI_MODEL ?? DEFAULT_MODEL,
           temperature,
           max_tokens: maxTokens,
           messages: [
