@@ -17,10 +17,9 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     monthlyShortsLimit: 0,
     allowedTemplateSlugs: ["blog-marketing"],
     features: [
-      "AI 툴 디렉토리 & 자동화 가이드 열람",
+      "마케팅 진단 · 마케팅 캘린더",
       "사업체 프로필 등록",
-      "자동화 1개 생성 (블로그 마케팅)",
-      "월 3회 실행 체험",
+      "블로그 글 월 1건 체험",
     ],
   },
   STARTER: {
@@ -33,10 +32,9 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     monthlyShortsLimit: 4,
     allowedTemplateSlugs: null,
     features: [
-      "자동화 최대 2개",
-      "월 30회 실행",
-      "예약 자동 실행 (스케줄링)",
-      "실행 히스토리 조회",
+      "블로그 글 월 8건 · 숏폼 영상 월 4건",
+      "정해둔 때마다 자동으로 만들기",
+      "제작 기록 보기",
     ],
   },
   PRO: {
@@ -49,10 +47,9 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     monthlyShortsLimit: 12,
     allowedTemplateSlugs: null,
     features: [
-      "자동화 최대 10개",
-      "월 300회 실행",
+      "블로그 글 월 30건 · 숏폼 영상 월 12건",
+      "정해둔 때마다 자동으로 만들기",
       "우선 처리",
-      "긴 보관 기간의 실행 히스토리",
     ],
   },
 };

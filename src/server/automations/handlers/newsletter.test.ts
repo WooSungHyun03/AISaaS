@@ -98,7 +98,7 @@ describe("newsletterAutomationHandler", () => {
     expect(listActiveSubscribersMock).toHaveBeenCalledWith({ kind: "admin" }, "biz-1");
     expect(sendMock).toHaveBeenCalledTimes(2);
     expect(result.title).toBe(content.subject);
-    expect(result.content).toBe("겨울 한정 소금빵이 새로 나왔습니다. 지금 바로 매장에서 만나보세요.");
+    expect(result.content).toBe("겨울 한정 소금빵이 새로 나왔습니다.\n\n지금 바로 매장에서 만나보세요.");
     expect(result.output).toMatchObject({
       subject: content.subject,
       previewText: content.previewText,

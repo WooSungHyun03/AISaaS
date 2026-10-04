@@ -90,8 +90,8 @@ export default async function PricingPage() {
                 </div>
 
                 <dl className="tabular grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border text-sm">
-                  <div className="bg-card px-4 py-3"><dt className="text-[13px] text-muted-foreground">만들기 설정</dt><dd className="mt-0.5 text-base font-extrabold">{formatLimit(plan.automationLimit, "개")}</dd></div>
-                  <div className="bg-card px-4 py-3"><dt className="text-[13px] text-muted-foreground">한 달 제작</dt><dd className="mt-0.5 text-base font-extrabold">{formatLimit(plan.monthlyRunLimit, "회")}</dd></div>
+                  <div className="bg-card px-4 py-3"><dt className="text-[13px] text-muted-foreground">블로그 글 / 월</dt><dd className="mt-0.5 text-base font-extrabold">{formatLimit(plan.monthlyBlogLimit, "건")}</dd></div>
+                  <div className="bg-card px-4 py-3"><dt className="text-[13px] text-muted-foreground">숏폼 영상 / 월</dt><dd className="mt-0.5 text-base font-extrabold">{plan.monthlyShortsLimit === 0 ? "—" : formatLimit(plan.monthlyShortsLimit, "건")}</dd></div>
                 </dl>
 
                 <ul className="flex-1 space-y-2.5 text-[15px] leading-6">

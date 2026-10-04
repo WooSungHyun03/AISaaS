@@ -53,6 +53,9 @@ function currentKstDate(): string {
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
+/** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
+export const maxDuration = 60;
+
 export default async function CalendarPage({
   searchParams,
 }: {

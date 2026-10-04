@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { computeNextRunAt } from "./scheduler";
 
 describe("computeNextRunAt", () => {
@@ -113,5 +113,26 @@ describe("computeNextRunAt (MONTHLY)", () => {
   it("rejects a missing or invalid dayOfMonth instead of looping", () => {
     expect(() => computeNextRunAt({ frequency: "MONTHLY", timeOfDay: "09:00" })).toThrow(/dayOfMonth/);
     expect(() => computeNextRunAt(monthly(32))).toThrow(/dayOfMonth/);
+  });
+});
+
+describe("reapStaleRuns", () => {
+  it("fails only QUEUED/RUNNING runs older than the stale window", async () => {
+    const calls: Record<string, unknown[]> = {};
+    const builder: Record<string, unknown> = {};
+    builder.update = (payload: unknown) => ((calls.update = [payload]), builder);
+    builder.in = (...args: unknown[]) => ((calls.in = args), builder);
+    builder.lt = (...args: unknown[]) => ((calls.lt = args), builder);
+    builder.select = () => Promise.resolve({ data: [{ id: "r1" }, { id: "r2" }], error: null });
+    vi.doMock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: () => builder }) }));
+    vi.resetModules();
+    const { reapStaleRuns, STALE_RUN_MINUTES } = await import("./scheduler");
+
+    const now = new Date("2026-10-01T12:00:00.000Z");
+    await expect(reapStaleRuns(now)).resolves.toBe(2);
+
+    expect(calls.update?.[0]).toMatchObject({ status: "FAILED", completed_at: now.toISOString() });
+    expect(calls.in).toEqual(["status", ["QUEUED", "RUNNING"]]);
+    expect(calls.lt).toEqual(["created_at", new Date(now.getTime() - STALE_RUN_MINUTES * 60_000).toISOString()]);
   });
 });

@@ -37,7 +37,7 @@ export async function generateMarketingCalendar(
     revalidatePath("/marketing/calendar");
     return {
       status: "success",
-      message: `${parsed.data.weeks}주 마케팅 계획 ${result.items.length}건을 저장했습니다.`,
+      message: `${parsed.data.weeks}주 마케팅 계획 ${result.items.length}건을 저장했습니다.${result.replaced > 0 ? ` 아직 쓰지 않은 이전 계획 ${result.replaced}건은 새 계획으로 바꿨어요.` : ""}`,
       count: result.items.length,
       completedAt: Date.now(),
     };

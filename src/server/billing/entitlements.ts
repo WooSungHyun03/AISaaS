@@ -122,7 +122,7 @@ export async function canExecuteAutomation(
  * mirroring the same "SUCCESS only" counting rule incrementUsage uses for
  * monthlyRunLimit (see src/server/automations/runner.ts).
  */
-async function getContentTypeUsage(supabase: DbClient, userId: string, templateSlug: string): Promise<number> {
+export async function getContentTypeUsage(supabase: DbClient, userId: string, templateSlug: string): Promise<number> {
   const { data: template, error: templateError } = await supabase
     .from("automation_templates")
     .select("id")

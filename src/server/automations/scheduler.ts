@@ -72,3 +72,25 @@ export async function findDueAutomations(limit = 20): Promise<Automation[]> {
   if (error) throw error;
   return data ?? [];
 }
+
+/** A run that has been RUNNING/QUEUED this long was killed (timeout, deploy, crash) and will never finish on its own. */
+export const STALE_RUN_MINUTES = 10;
+
+/**
+ * Marks abandoned runs FAILED. The partial unique index on automation_runs
+ * allows one in-flight run per automation, so a run orphaned by a serverless
+ * timeout would otherwise block that automation from ever running again.
+ * Returns how many runs were reaped.
+ */
+export async function reapStaleRuns(now: Date = new Date()): Promise<number> {
+  const admin = createAdminClient();
+  const cutoff = new Date(now.getTime() - STALE_RUN_MINUTES * 60_000).toISOString();
+  const { data, error } = await admin
+    .from("automation_runs")
+    .update({ status: "FAILED", error_message: "실행이 중간에 멈춰 자동으로 종료했어요. 다시 시도해주세요.", completed_at: now.toISOString() })
+    .in("status", ["QUEUED", "RUNNING"])
+    .lt("created_at", cutoff)
+    .select("id");
+  if (error) throw error;
+  return data?.length ?? 0;
+}

@@ -8,6 +8,9 @@ import { EmptyState } from "@/components/ui/page-state";
 import { toSafeAutomationRunOutput } from "@/server/automations/run-output";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
 
+/** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
+export const maxDuration = 60;
+
 export default async function ShortsPage({ searchParams }: { searchParams: Promise<{ business?: string }> }) {
   const query = await searchParams;
   const supabase = await createClient();

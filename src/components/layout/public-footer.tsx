@@ -14,7 +14,6 @@ const FOOTER_LINKS = [
     title: "도움말",
     links: [
       { href: "/guides", label: "활용 가이드" },
-      { href: "/directory", label: "AI 도구 모음" },
       { href: "/setup-request", label: "직접 맡기고 싶어요" },
     ],
   },

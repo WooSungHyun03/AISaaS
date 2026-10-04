@@ -14,7 +14,8 @@ import { loadWordPressConnector } from "@/server/connectors/wordpress/connect";
 import { getConnection, updateConnectionStatus } from "@/server/connectors/integrations";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isConnectorError } from "@/server/shared/errors";
-import { stripHtml } from "@/server/shared/html";
+import { htmlToText, toSafeParagraphHtml } from "@/server/shared/html";
+import { assessBlogBody } from "@/server/ai/blog-quality";
 import { blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
 import type { AutomationHandler, AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
 
@@ -71,20 +72,37 @@ export const blogAutomationHandler: AutomationHandler = {
     const config = parsed.success ? (ctx.config as unknown as BlogAutomationConfig) : undefined;
 
     const topic = await generateTopic(ctx, config);
-    const bodyPrompt = buildBlogBodyPrompt(ctx.business, topic.topic, topic.title, config);
-    const body = await generateStructured({
-      ...bodyPrompt,
-      system: ctx.calendarItem
-        ? [
-          bodyPrompt.system,
-          `This calendar item's marketing goal: ${ctx.calendarItem.goal}`,
-          `This calendar item's content brief (cover this): ${ctx.calendarItem.summary}`,
-          `End with a CTA aligned with: ${ctx.calendarItem.cta}`,
-        ].join("\n")
-        : bodyPrompt.system,
-      schema: blogBodySchema,
-      maxTokens: 1200,
-    });
+    const qualityKeywords = [...(config?.keywords ?? []), ...ctx.business.keywords];
+
+    const writeBody = (fixes: string[]) => {
+      const bodyPrompt = buildBlogBodyPrompt(ctx.business, topic.topic, topic.title, config, fixes);
+      return generateStructured({
+        ...bodyPrompt,
+        system: ctx.calendarItem
+          ? [
+            bodyPrompt.system,
+            `This calendar item's marketing goal: ${ctx.calendarItem.goal}`,
+            `This calendar item's content brief (cover this): ${ctx.calendarItem.summary}`,
+            `End with a CTA aligned with: ${ctx.calendarItem.cta}`,
+          ].join("\n")
+          : bodyPrompt.system,
+        schema: blogBodySchema,
+        maxTokens: 2_400,
+      });
+    };
+
+    // Only paragraphs survive: whatever markup the model returned is rebuilt as escaped <p> tags.
+    const clean = (draft: Awaited<ReturnType<typeof writeBody>>) => ({ ...draft, bodyHtml: toSafeParagraphHtml(draft.bodyHtml) });
+
+    // One quality pass, then at most one rewrite with the concrete problems fed back (never a loop).
+    let body = clean(await writeBody([]));
+    let attempts = 1;
+    const issues = assessBlogBody({ bodyHtml: body.bodyHtml, keywords: qualityKeywords });
+    if (issues.length > 0) {
+      const rewrite = clean(await writeBody(issues));
+      attempts = 2;
+      if (assessBlogBody({ bodyHtml: rewrite.bodyHtml, keywords: qualityKeywords }).length <= issues.length) body = rewrite;
+    }
     const generated = { ...topic, ...body };
 
     let externalUrl: string | undefined;
@@ -134,9 +152,10 @@ export const blogAutomationHandler: AutomationHandler = {
       output: { ...generated, published: wordpressStatus === "publish", wordpressStatus: wordpressStatus ?? null, externalUrl: externalUrl ?? null },
       title: generated.title,
       topic: generated.topic,
-      content: stripHtml(generated.bodyHtml),
+      content: htmlToText(generated.bodyHtml),
       contentType: "blog-marketing",
       externalUrl,
+      aiGenerationCount: attempts,
     };
   },
 };

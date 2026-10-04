@@ -2,17 +2,13 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 
 export interface AuthActionState {
   error?: string;
 }
 
-function safeRedirectTo(value: string): string {
-  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
-    return "/dashboard";
-  }
-  return value;
-}
+const safeRedirectTo = (value: string) => safeRedirectPath(value);
 
 export async function signIn(_prevState: AuthActionState, formData: FormData): Promise<AuthActionState> {
   const email = String(formData.get("email") ?? "").trim();

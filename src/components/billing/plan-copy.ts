@@ -17,11 +17,17 @@ export const PLAN_TAGLINE: Record<SubscriptionPlan, string> = {
   PRO: "여러 채널을 자주, 많이 만들어야 할 때",
 };
 
+const quota = (limit: number | null, unit: string) => (limit === null ? "무제한" : limit === 0 ? "이용 불가" : `월 ${limit.toLocaleString()}${unit}`);
+
 export function planFeatures(plan: PlanConfig): string[] {
-  const makes = plan.automationLimit === null ? "만들기 설정 무제한" : `만들기 설정 ${plan.automationLimit}개`;
-  const runs = plan.monthlyRunLimit === null ? "한 달 제작 횟수 무제한" : `한 달 ${plan.monthlyRunLimit.toLocaleString()}회 제작`;
-  const common = ["마케팅 진단 · 마케팅 캘린더", makes, runs];
-  if (plan.id === "FREE") return [...common, "블로그 글 만들기 체험"];
-  if (plan.id === "STARTER") return [...common, "블로그 글 · 숏폼 만들기", "정해둔 때마다 자동으로 만들기", "제작 기록 보기"];
-  return [...common, "블로그 글 · 숏폼 만들기", "정해둔 때마다 자동으로 만들기", "우선 처리", "제작 기록 오래 보관"];
+  const features = [
+    "마케팅 진단 · 마케팅 캘린더",
+    `블로그 글 ${quota(plan.monthlyBlogLimit, "건")}`,
+    `숏폼 영상 ${quota(plan.monthlyShortsLimit, "건")}`,
+  ];
+  if (plan.id === "FREE") return [...features, "블로그 글은 직접 확인하고 올려요"];
+  features.push("정해둔 때마다 자동으로 만들기");
+  features.push("제작 기록 보기");
+  if (plan.id === "PRO") features.push("우선 처리");
+  return features;
 }

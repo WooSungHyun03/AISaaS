@@ -12,8 +12,14 @@ export default async function MarketplacePage() {
     .order("created_at", { ascending: true });
   if (error) throw new Error("자동화 템플릿을 불러오지 못했습니다.", { cause: error });
 
+  // Newsletter, customer support and Instagram-card automations are off the
+  // main product flow (still COMING_SOON): don't list dead-end rows in the catalog.
   const order = Object.keys(AUTOMATION_AVAILABILITY);
-  const sortedTemplates = (templates ?? []).sort((a, b) => {
+  const offered = (templates ?? []).filter((template) => {
+    const availability = AUTOMATION_AVAILABILITY[template.slug as keyof typeof AUTOMATION_AVAILABILITY];
+    return availability === "AVAILABLE" || availability === "BETA";
+  });
+  const sortedTemplates = offered.sort((a, b) => {
     const aOrder = order.indexOf(a.slug);
     const bOrder = order.indexOf(b.slug);
     return (aOrder < 0 ? order.length : aOrder) - (bOrder < 0 ? order.length : bOrder);

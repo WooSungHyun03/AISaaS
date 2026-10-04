@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form-message";
 import { PageHeader } from "@/components/layout/page-header";
 import { Mascot } from "@/components/brand/mascot";
+import { ContentEditor } from "@/components/automations/content-editor";
 
 const formatter = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
@@ -38,6 +39,10 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
   if (!detail) notFound();
   const { automation, run } = detail;
   const output = run.output;
+  // The user's working copy of a generated post (null for runs that saved no text, e.g. a Shorts preview).
+  const { data: workingCopy } = run.status === "SUCCESS" && output?.body
+    ? await supabase.from("content_history").select("id,title,content,edited_at").eq("run_id", run.id).maybeSingle()
+    : { data: null };
   const field = "bg-card px-5 py-4";
   const label = "text-[13px] font-semibold text-muted-foreground";
 
@@ -72,11 +77,13 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
           <h2 id="result-heading" className="text-lg font-extrabold tracking-[-0.03em]">결과</h2>
           {!output ? <p className="rounded-2xl bg-muted px-5 py-6 text-[15px] text-muted-foreground">이번에는 보여줄 결과가 없어요.</p> : (
             <div className="space-y-6 rounded-2xl border bg-card px-5 py-6 sm:px-8">
-              {output.title ? <div><p className={label}>제목</p><p className="mt-1 text-xl font-extrabold leading-8 tracking-[-0.03em]">{output.title}</p></div> : null}
+              {workingCopy?.content ? (
+                <ContentEditor contentId={workingCopy.id} title={workingCopy.title ?? output.title ?? ""} content={workingCopy.content} editedAt={workingCopy.edited_at} />
+              ) : output.title ? <div><p className={label}>제목</p><p className="mt-1 text-xl font-extrabold leading-8 tracking-[-0.03em]">{output.title}</p></div> : null}
               {output.topic ? <div><p className={label}>주제</p><p className="mt-1 text-[15px] leading-7">{output.topic}</p></div> : null}
               {output.hook ? <div><p className={label}>도입부 후킹 문장</p><p className="mt-1 text-[15px] leading-7">{output.hook}</p></div> : null}
               {output.summary ? <div><p className={label}>요약</p><p className="mt-1 whitespace-pre-wrap text-[15px] leading-7">{output.summary}</p></div> : null}
-              {output.body ? (
+              {output.body && !workingCopy?.content ? (
                 <div>
                   <p className={label}>본문</p>
                   <div className="mt-2 max-h-[520px] overflow-y-auto rounded-xl bg-muted px-5 py-4 text-[15px] leading-8 whitespace-pre-wrap">{output.body}</div>

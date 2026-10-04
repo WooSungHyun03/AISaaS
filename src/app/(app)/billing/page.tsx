@@ -27,7 +27,7 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { subscription, usage, automationCount } = await getBillingOverview(user.id);
+  const { subscription, usage, automationCount, contentUsage } = await getBillingOverview(user.id);
 
   const hasActiveSubscription = subscription ? ACTIVE_STATUSES.has(subscription.status) : false;
   const plan = hasActiveSubscription ? subscription!.plan : "FREE";
@@ -50,7 +50,7 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
           <div>
             <p className="font-extrabold tracking-[-0.02em]">{PLAN_LABEL[selectedPlan]} 요금제를 골랐어요</p>
             <p className="mt-1 text-sm text-muted-foreground tabular">
-              월 {getPlanConfig(selectedPlan).priceMonthlyKrw.toLocaleString()}원 · 만들기 설정 {getPlanConfig(selectedPlan).automationLimit}개 · 월 {getPlanConfig(selectedPlan).monthlyRunLimit}회
+              월 {getPlanConfig(selectedPlan).priceMonthlyKrw.toLocaleString()}원 · 블로그 {getPlanConfig(selectedPlan).monthlyBlogLimit}건 · 숏폼 {getPlanConfig(selectedPlan).monthlyShortsLimit}건 / 월
             </p>
           </div>
           <form action={startCheckout.bind(null, selectedPlan)}>
@@ -83,15 +83,17 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
 
       <section aria-labelledby="usage-heading" className="space-y-4">
         <h2 id="usage-heading" className="text-lg font-extrabold tracking-[-0.03em]">이번 달 사용량</h2>
-        <div className="grid gap-px overflow-hidden rounded-2xl border bg-border md:grid-cols-2">
+        <div className="grid gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-2 lg:grid-cols-4">
           {[
+            { label: "블로그 글", value: contentUsage.blog, limit: planConfig.monthlyBlogLimit, unit: "건" },
+            { label: "숏폼 영상", value: contentUsage.shorts, limit: planConfig.monthlyShortsLimit, unit: "건" },
+            { label: "이번 달 전체 제작", value: monthlyRuns, limit: planConfig.monthlyRunLimit, unit: "회" },
             { label: "만들기 설정", value: automationCount, limit: planConfig.automationLimit, unit: "개" },
-            { label: "이번 달 제작", value: monthlyRuns, limit: planConfig.monthlyRunLimit, unit: "회" },
           ].map((item) => (
             <div key={item.label} className="space-y-3 bg-card px-6 py-5">
               <p className="text-[13px] font-semibold text-muted-foreground">{item.label}</p>
-              <p className="tabular flex items-baseline gap-1.5"><span className="text-3xl font-extrabold tracking-[-0.04em]">{item.value}</span><span className="text-sm text-muted-foreground">/ {item.limit ?? "무제한"}{item.limit ? item.unit : ""}</span></p>
-              {item.limit ? <Progress value={Math.min(100, (item.value / item.limit) * 100)} aria-label={`${item.label} 사용량`} /> : null}
+              <p className="tabular flex items-baseline gap-1.5"><span className="text-3xl font-extrabold tracking-[-0.04em]">{item.value}</span><span className="text-sm text-muted-foreground">/ {item.limit === null ? "무제한" : `${item.limit}${item.unit}`}</span></p>
+              {item.limit !== null && item.limit > 0 ? <Progress value={Math.min(100, (item.value / item.limit) * 100)} aria-label={`${item.label} 사용량`} /> : null}
             </div>
           ))}
         </div>
@@ -114,7 +116,7 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
                     {isCurrent ? <Badge variant="brand">현재</Badge> : null}
                   </div>
                   <p className="tabular mt-2"><span className="text-3xl font-extrabold tracking-[-0.04em]">{option.priceMonthlyKrw === 0 ? "무료" : `${option.priceMonthlyKrw.toLocaleString()}원`}</span>{option.priceMonthlyKrw > 0 ? <span className="text-sm text-muted-foreground"> / 월</span> : null}</p>
-                  <p className="mt-2 text-sm font-semibold">만들기 설정 {option.automationLimit}개 · 월 {option.monthlyRunLimit}회</p>
+                  <p className="mt-2 text-sm font-semibold">블로그 {option.monthlyBlogLimit ?? "무제한"}건 · 숏폼 {option.monthlyShortsLimit ?? "무제한"}건 / 월</p>
                 </div>
                 <ul className="flex-1 space-y-2 text-sm text-muted-foreground">
                   {planFeatures(option).map((feature) => <li key={feature} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" />{feature}</li>)}

@@ -5,7 +5,7 @@ import { buildNewsletterPrompt, newsletterContentSchema, type NewsletterContent 
 import { ResendConnector, listActiveSubscribers } from "@/server/connectors/email";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isConnectorError } from "@/server/shared/errors";
-import { stripHtml } from "@/server/shared/html";
+import { htmlToText } from "@/server/shared/html";
 import type { AutomationHandler, AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
 import type { Json } from "@/types/domain";
 
@@ -98,7 +98,7 @@ export const newsletterAutomationHandler: AutomationHandler = {
       } as unknown as Json,
       title: content.subject,
       topic: content.subject,
-      content: stripHtml(content.htmlBody),
+      content: htmlToText(content.htmlBody),
       contentType: "newsletter",
     };
   },

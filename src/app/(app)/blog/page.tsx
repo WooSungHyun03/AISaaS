@@ -6,11 +6,15 @@ import { AutomationSettingsDialog } from "@/components/automations/automation-se
 import { RunNowButton } from "@/components/automations/run-now-button";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
+import { describeSchedule } from "@/server/automations/schedule-input";
 import type { AutomationSchedule } from "@/types/automation";
 import { blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
 
 const fmt = (value: string) =>
   new Date(value).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+/** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
+export const maxDuration = 60;
 
 export default async function BlogPage({
   searchParams,
@@ -138,9 +142,7 @@ export default async function BlogPage({
         };
         const hasInFlightRun = inFlightAutomationIds.has(automation.id);
         const items = contentByAutomation.get(automation.id) ?? [];
-        const scheduleText = schedule?.frequency === "WEEKLY"
-          ? `매주 정한 요일 ${schedule.timeOfDay}`
-          : `매일 ${schedule?.timeOfDay}`;
+        const scheduleText = describeSchedule(schedule);
 
         return (
           <section key={automation.id} aria-labelledby={`blog-automation-${automation.id}`} className="space-y-5">
@@ -176,7 +178,7 @@ export default async function BlogPage({
                         className="flex flex-col gap-1 px-5 py-4 transition-colors hover:bg-brand-soft/50 focus-visible:outline-offset-[-2px] sm:px-6"
                       >
                         <span className="font-bold leading-6">{item.title ?? "제목 없음"}</span>
-                        <span className="text-[13px] text-muted-foreground">{item.topic ? `주제 ${item.topic} · ` : ""}{fmt(item.created_at)}</span>
+                        <span className="text-[13px] text-muted-foreground">{item.topic ? `주제 ${item.topic} · ` : ""}{fmt(item.created_at)}{item.edited_at ? " · 수정함" : " · 열어서 검토·수정하기"}</span>
                       </Link>
                     ) : (
                       <div className="px-5 py-4 sm:px-6">

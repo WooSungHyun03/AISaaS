@@ -3,7 +3,6 @@ import {
   BookOpen,
   Building2,
   CalendarDays,
-  Compass,
   CreditCard,
   History,
   House,
@@ -45,7 +44,7 @@ export const APP_NAV: NavSection[] = [
       { href: "/calendar", label: "마케팅 캘린더", icon: CalendarDays },
       { href: "/blog", label: "블로그", icon: BookOpen },
       { href: "/shorts", label: "숏폼", icon: Video },
-      { href: "/growth-report", label: "성장 리포트", icon: TrendingUp, comingSoon: true },
+      { href: "/growth-report", label: "성장 리포트", icon: TrendingUp },
     ],
   },
   {
@@ -66,7 +65,6 @@ export const APP_NAV: NavSection[] = [
   {
     label: "리소스",
     items: [
-      { href: "/directory", label: "AI 서비스", icon: Compass },
       { href: "/guides", label: "활용 가이드", icon: BookOpen },
     ],
   },

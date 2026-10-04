@@ -43,7 +43,7 @@ export default async function TossCheckoutPage({ searchParams }: PageProps<"/bil
           <p className="font-bold">{PLAN_LABEL[checkout.plan]} 요금제</p>
           <p className="tabular text-xl font-extrabold">월 {plan.priceMonthlyKrw.toLocaleString()}원</p>
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">만들기 설정 {plan.automationLimit}개 · 월 {plan.monthlyRunLimit}회 제작</p>
+        <p className="mt-2 text-sm text-muted-foreground">블로그 월 {plan.monthlyBlogLimit}건 · 숏폼 월 {plan.monthlyShortsLimit}건</p>
       </div>
       <TossCheckoutButton
         clientKey={clientKey}

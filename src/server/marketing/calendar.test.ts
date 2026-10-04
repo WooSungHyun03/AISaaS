@@ -20,6 +20,10 @@ const business = {
   brand_tone: "친근하고 전문적",
   keywords: ["디저트", "커피"],
   website: "https://example.com",
+  main_offering: "수제 디저트",
+  strengths: null,
+  marketing_goal: "평일 방문 늘리기",
+  sns_links: { instagram: "https://instagram.com/growth" },
 };
 
 function queryReturning<T>(result: T) {
@@ -33,7 +37,20 @@ function queryReturning<T>(result: T) {
   return builder;
 }
 
-function makeClient({ diagnosis = { id: "diagnosis-1", score: 62, api_token: "must-not-leak" } as Record<string, unknown> | null } = {}) {
+function listQuery<T>(rows: T[]) {
+  const builder: Record<string, unknown> = {};
+  for (const method of ["select", "eq", "gte", "order", "limit"]) builder[method] = vi.fn(() => builder);
+  builder.then = (resolve: (value: { data: T[]; error: null }) => unknown) => resolve({ data: rows, error: null });
+  return builder;
+}
+
+type ExistingItem = { id: string; topic: string; status: string; planned_date: string; automation_id: string | null; created_at: string };
+
+function makeClient({
+  diagnosis = { id: "diagnosis-1", score: 62, api_token: "must-not-leak", raw_summary: "page title that is not prompt context" } as Record<string, unknown> | null,
+  existingItems = [] as ExistingItem[],
+  history = [] as Array<{ topic: string | null; title: string | null }>,
+} = {}) {
   const businessQuery = queryReturning({ data: business, error: null });
   const diagnosisQuery = queryReturning({ data: diagnosis, error: null });
   const insertedRows: Array<Record<string, unknown>> = [];
@@ -53,13 +70,15 @@ function makeClient({ diagnosis = { id: "diagnosis-1", score: 62, api_token: "mu
     insertedRows.push(...rows);
     return { select: insertSelect };
   });
+  const deleteIn = vi.fn().mockResolvedValue({ error: null });
   const from = vi.fn((table: string) => {
     if (table === "businesses") return businessQuery;
     if (table === "marketing_diagnoses") return diagnosisQuery;
-    if (table === "calendar_items") return { insert };
+    if (table === "content_history") return listQuery(history);
+    if (table === "calendar_items") return { select: vi.fn(() => listQuery(existingItems)), insert, delete: vi.fn(() => ({ in: deleteIn })) };
     throw new Error(`Unexpected table: ${table}`);
   });
-  return { client: { from }, insertedRows, insert };
+  return { client: { from }, insertedRows, insert, deleteIn };
 }
 
 const generatedItems = [
@@ -122,6 +141,88 @@ describe("generateCalendarPlan", () => {
     expect(request.prompt).toContain("성장 카페");
     expect(request.prompt).toContain("\"score\":62");
     expect(request.prompt).not.toContain("must-not-leak");
+    expect(request.prompt).not.toContain("page title that is not prompt context");
+  });
+
+  it("includes the marketing profile and the content brief instruction in the prompt", async () => {
+    const { client } = makeClient();
+    createClientMock.mockResolvedValue(client);
+    generateStructuredMock.mockResolvedValue(generatedItems);
+
+    await generateCalendarPlan(business.id, 2);
+
+    const request = generateStructuredMock.mock.calls[0][0] as { prompt: string };
+    expect(request.prompt).toContain("mainOffering");
+    expect(request.prompt).toContain("콘텐츠 브리프");
+  });
+
+  it("tells the AI which topics already exist and drops near-duplicates it still returns", async () => {
+    const { client, insertedRows } = makeClient({
+      existingItems: [{ id: "old-published", topic: "첫 주 블로그 주제", status: "GENERATED", planned_date: "2026-02-20", automation_id: "a-1", created_at: "2026-02-18T00:00:00.000Z" }],
+      history: [{ topic: "둘째 주 쇼츠 주제", title: "쇼츠 제목" }],
+    });
+    createClientMock.mockResolvedValue(client);
+    generateStructuredMock.mockResolvedValue([
+      ...generatedItems,
+      { date: "2026-03-12", platform: "blog", contentType: "정보형", topic: "첫 주 블로그 주제 2", goal: "인지", summary: "요약", cta: "상담" },
+    ]);
+
+    const result = await generateCalendarPlan(business.id, 2);
+
+    const request = generateStructuredMock.mock.calls[0][0] as { prompt: string };
+    expect(request.prompt).toContain("첫 주 블로그 주제");
+    expect(request.prompt).toContain("쇼츠 제목");
+    expect(insertedRows.map((row) => row.topic)).not.toContain("첫 주 블로그 주제 2");
+    expect(result.skippedDuplicates).toBeGreaterThanOrEqual(1);
+  });
+
+  it("fails instead of saving when almost every returned topic repeats an existing one", async () => {
+    const existing = generatedItems.map((item, index) => ({ id: `old-${index}`, topic: item.topic, status: "GENERATED", planned_date: "2026-02-20", automation_id: "a-1", created_at: "2026-02-18T00:00:00.000Z" }));
+    const { client, insert } = makeClient({ existingItems: existing });
+    createClientMock.mockResolvedValue(client);
+    generateStructuredMock.mockResolvedValue(generatedItems);
+
+    const error = await generateCalendarPlan(business.id, 2).catch((caught) => caught);
+
+    expect((error as InstanceType<typeof CalendarPlanError>).code).toBe("INVALID_AI_RESULT");
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("replaces the unused part of the previous plan only after the new plan is saved", async () => {
+    const { client, deleteIn, insert } = makeClient({
+      existingItems: [
+        { id: "unused-1", topic: "예전 주제 하나", status: "PLANNED", planned_date: "2026-03-05", automation_id: null, created_at: "2026-02-27T00:00:00.000Z" },
+        { id: "linked", topic: "연결된 주제", status: "PLANNED", planned_date: "2026-03-05", automation_id: "a-1", created_at: "2026-02-27T00:00:00.000Z" },
+        { id: "done", topic: "이미 만든 주제", status: "GENERATED", planned_date: "2026-03-05", automation_id: "a-1", created_at: "2026-02-27T00:00:00.000Z" },
+        { id: "past", topic: "지난 계획", status: "PLANNED", planned_date: "2026-02-20", automation_id: null, created_at: "2026-02-10T00:00:00.000Z" },
+      ],
+    });
+    createClientMock.mockResolvedValue(client);
+    generateStructuredMock.mockResolvedValue(generatedItems);
+
+    const result = await generateCalendarPlan(business.id, 2);
+
+    expect(insert.mock.invocationCallOrder[0]).toBeLessThan(deleteIn.mock.invocationCallOrder[0]);
+    expect(deleteIn).toHaveBeenCalledWith("id", ["unused-1"]);
+    expect(result.replaced).toBe(1);
+    // The replaced item's topic is not blocked from the new plan.
+    const request = generateStructuredMock.mock.calls[0][0] as { prompt: string };
+    expect(request.prompt).not.toContain("예전 주제 하나");
+    expect(request.prompt).toContain("이미 만든 주제");
+  });
+
+  it("refuses a second plan within a minute and caps daily volume, before calling the AI", async () => {
+    const justNow = { id: "x", topic: "방금 만든", status: "PLANNED", planned_date: "2026-03-05", automation_id: null, created_at: "2026-02-28T23:59:30.000Z" };
+    createClientMock.mockResolvedValue(makeClient({ existingItems: [justNow] }).client);
+    const burst = await generateCalendarPlan(business.id, 2).catch((caught) => caught);
+    expect((burst as InstanceType<typeof CalendarPlanError>).code).toBe("RATE_LIMITED");
+
+    const many = Array.from({ length: 84 }, (_, index) => ({ id: `m-${index}`, topic: `주제 ${index}`, status: "PLANNED", planned_date: "2026-03-05", automation_id: null, created_at: "2026-02-28T12:00:00.000Z" }));
+    createClientMock.mockResolvedValue(makeClient({ existingItems: many }).client);
+    const daily = await generateCalendarPlan(business.id, 2).catch((caught) => caught);
+    expect((daily as InstanceType<typeof CalendarPlanError>).code).toBe("RATE_LIMITED");
+
+    expect(generateStructuredMock).not.toHaveBeenCalled();
   });
 
   it("does not save an AI plan containing dates outside the requested range", async () => {

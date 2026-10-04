@@ -190,7 +190,7 @@ async function executeAutomation(
       .eq("automation_id", automationId)
       .eq("content_type", template.slug)
       .order("created_at", { ascending: false })
-      .limit(5);
+      .limit(20);
 
     const result = await handler.run({
       automation,

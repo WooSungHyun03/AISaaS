@@ -17,7 +17,6 @@ export const NAV_LINKS = [
   { href: "/#how", label: "이용 방법" },
   { href: "/pricing", label: "요금제" },
   { href: "/guides", label: "활용 가이드" },
-  { href: "/directory", label: "AI 서비스" },
 ];
 
 export function PublicNav({ isAuthenticated }: { isAuthenticated: boolean }) {

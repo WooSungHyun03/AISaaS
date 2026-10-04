@@ -1,3 +1,4 @@
+import { PLAN_LABEL, planFeatures } from "@/components/billing/plan-copy";
 import Link from "next/link";
 import { ArrowRight, Check, TrendingUp, Video } from "lucide-react";
 import { Mascot } from "@/components/brand/mascot";
@@ -196,13 +197,13 @@ export default function LandingPage() {
                   className={`relative flex flex-col rounded-2xl border p-7 ${recommended ? "border-primary bg-brand-soft/50 shadow-[0_0_0_1px_var(--primary)]" : "border-border bg-card"}`}
                 >
                   {recommended ? <Badge className="absolute right-6 top-6">가장 많이 선택</Badge> : null}
-                  <h3 className="text-lg font-bold">{plan.name}</h3>
+                  <h3 className="text-lg font-bold">{PLAN_LABEL[plan.id]}</h3>
                   <p className="tabular mt-4 text-4xl font-extrabold tracking-[-0.04em]">
-                    {plan.priceMonthlyKrw === 0 ? "무료" : `₩${plan.priceMonthlyKrw.toLocaleString()}`}
+                    {plan.priceMonthlyKrw === 0 ? "무료" : `${plan.priceMonthlyKrw.toLocaleString()}원`}
                     {plan.priceMonthlyKrw === 0 ? null : <span className="ml-1 text-sm font-medium text-muted-foreground">/월</span>}
                   </p>
                   <ul className="mt-6 flex-1 space-y-3 border-t border-border pt-6 text-[15px]">
-                    {plan.features.slice(0, 4).map((feature) => (
+                    {planFeatures(plan).slice(0, 5).map((feature) => (
                       <li key={feature} className="flex gap-2.5">
                         <Check className="mt-1 size-4 shrink-0 text-primary" strokeWidth={3} aria-hidden="true" />
                         {feature}
@@ -211,7 +212,7 @@ export default function LandingPage() {
                   </ul>
                   <Button asChild variant={recommended ? "default" : "outline"} size="lg" className="mt-8">
                     <Link href={plan.id === "FREE" ? "/signup" : `/signup?redirectTo=${encodeURIComponent(`/billing?plan=${plan.id}`)}`}>
-                      {plan.id === "FREE" ? "무료로 시작하기" : `${plan.name} 시작하기`}
+                      {plan.id === "FREE" ? "무료로 시작하기" : `${PLAN_LABEL[plan.id]} 시작하기`}
                     </Link>
                   </Button>
                 </article>

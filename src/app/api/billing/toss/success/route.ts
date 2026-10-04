@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     const login = new URL("/login", clientEnv.NEXT_PUBLIC_SITE_URL);
-    login.searchParams.set("next", requestUrl.pathname + requestUrl.search);
+    login.searchParams.set("redirectTo", requestUrl.pathname + requestUrl.search);
     return NextResponse.redirect(login);
   }
   if (!sessionId) return NextResponse.redirect(failureUrl("INVALID_CALLBACK", "결제 요청 정보가 누락되었습니다."));
