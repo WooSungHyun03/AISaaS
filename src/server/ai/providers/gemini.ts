@@ -18,7 +18,7 @@ export class GeminiProvider implements AIProvider {
     }
 
     const response = await fetchWithRetry(
-      `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_MODEL}:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${serverEnv.AI_MODEL ?? DEFAULT_MODEL}:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

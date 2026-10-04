@@ -156,3 +156,100 @@ describe("MockAIProvider (local dev / CI) produces schema-valid output for every
     expect(assessBlogBody({ bodyHtml: parsed.bodyHtml, keywords: parsed.keywords })).toEqual([]);
   });
 });
+
+describe("AnthropicProvider", () => {
+  it("throws MISSING_API_KEY without calling the network when ANTHROPIC_API_KEY is unset", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const [{ AnthropicProvider }, { AIProviderError }] = await Promise.all([import("./anthropic"), import("../errors")]);
+    const error = await new AnthropicProvider().generateText({ prompt: "hi" }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(AIProviderError);
+    expect((error as InstanceType<typeof AIProviderError>).code).toBe("MISSING_API_KEY");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends a Messages API request (key header, version, Haiku 4.5, system + max_tokens) and joins the text blocks", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    delete process.env.AI_MODEL;
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ type: "text", text: "안녕" }, { type: "text", text: "하세요" }], stop_reason: "end_turn" }), { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { AnthropicProvider, ANTHROPIC_DEFAULT_MODEL } = await import("./anthropic");
+    const result = await new AnthropicProvider().generateText({ system: "시스템", prompt: "질문", maxTokens: 321, temperature: 0.3 });
+
+    expect(result.text).toBe("안녕하세요");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.anthropic.com/v1/messages");
+    const headers = init.headers as Record<string, string>;
+    expect(headers["x-api-key"]).toBe("test-key");
+    expect(headers["anthropic-version"]).toBe("2023-06-01");
+    expect(headers.Authorization).toBeUndefined();
+    expect(JSON.parse(init.body as string)).toEqual({
+      model: ANTHROPIC_DEFAULT_MODEL,
+      max_tokens: 321,
+      temperature: 0.3,
+      system: "시스템",
+      messages: [{ role: "user", content: "질문" }],
+    });
+    expect(ANTHROPIC_DEFAULT_MODEL).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("uses AI_MODEL when set, and omits the system field when none is given", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.AI_MODEL = "claude-sonnet-5-5";
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { AnthropicProvider } = await import("./anthropic");
+    await new AnthropicProvider().generateText({ prompt: "hi" });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.model).toBe("claude-sonnet-5-5");
+    expect(body).not.toHaveProperty("system");
+  });
+
+  it("reports a reply cut off at max_tokens and an empty reply as errors", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    const responses = [
+      { content: [{ type: "text", text: '{"a":' }], stop_reason: "max_tokens" },
+      { content: [], stop_reason: "end_turn" },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify(responses.shift()), { status: 200 }))));
+
+    const [{ AnthropicProvider }, { AIProviderError }] = await Promise.all([import("./anthropic"), import("../errors")]);
+    const provider = new AnthropicProvider();
+    const truncated = await provider.generateText({ prompt: "x" }).catch((e) => e);
+    const empty = await provider.generateText({ prompt: "x" }).catch((e) => e);
+
+    expect(truncated).toBeInstanceOf(AIProviderError);
+    expect((truncated as InstanceType<typeof AIProviderError>).code).toBe("INVALID_STRUCTURED_RESPONSE");
+    expect((empty as InstanceType<typeof AIProviderError>).code).toBe("PROVIDER_UNAVAILABLE");
+  });
+
+  it("maps a 401 to MISSING_API_KEY without retrying", async () => {
+    process.env.ANTHROPIC_API_KEY = "bad-key";
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response("unauthorized", { status: 401 })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { AnthropicProvider } = await import("./anthropic");
+    const error = await new AnthropicProvider().generateText({ prompt: "x" }).catch((e) => e);
+
+    expect((error as { code: string }).code).toBe("MISSING_API_KEY");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getAIProvider", () => {
+  it("selects the Anthropic provider for AI_PROVIDER=anthropic", async () => {
+    process.env.AI_PROVIDER = "anthropic";
+    const { getAIProvider } = await import("../index");
+    expect(getAIProvider().name).toBe("anthropic");
+  });
+});
