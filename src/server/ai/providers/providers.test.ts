@@ -132,3 +132,27 @@ describe("MockAIProvider", () => {
     expect(parsedContent.privacy).toBe("private");
   });
 });
+
+describe("MockAIProvider (local dev / CI) produces schema-valid output for every pipeline", () => {
+  it("covers the website narrative, blog topic + body and passes the blog quality gate", async () => {
+    const [{ MockAIProvider }, { websiteDiagnosisNarrativeSchema }, { blogTopicSchema, blogBodySchema }, { assessBlogBody }] = await Promise.all([
+      import("./mock"),
+      import("@/server/marketing/diagnosis"),
+      import("../prompts/blog"),
+      import("../blog-quality"),
+    ]);
+    const provider = new MockAIProvider();
+
+    const narrative = await provider.generateText({ prompt: "x\n===WEBPAGE_DATA_START===\ny\n===WEBPAGE_DATA_END===" });
+    expect(websiteDiagnosisNarrativeSchema.safeParse(JSON.parse(narrative.text)).success).toBe(true);
+
+    const topic = await provider.generateText({ prompt: "Pick one specific blog topic relevant to this business." });
+    expect(blogTopicSchema.safeParse(JSON.parse(topic.text)).success).toBe(true);
+    const planned = await provider.generateText({ prompt: 'Use exactly this planned topic without replacing it: "봄맞이 메뉴". Create one title.' });
+    expect(JSON.parse(planned.text).topic).toBe("봄맞이 메뉴");
+
+    const body = await provider.generateText({ prompt: 'Write the full marketing blog post body for the topic "봄맞이 메뉴" with the title "t".' });
+    const parsed = blogBodySchema.parse(JSON.parse(body.text));
+    expect(assessBlogBody({ bodyHtml: parsed.bodyHtml, keywords: parsed.keywords })).toEqual([]);
+  });
+});

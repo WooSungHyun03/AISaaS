@@ -54,6 +54,9 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
   },
 };
 
+/** Plan names as shown to users. `PlanConfig.name` stays the English id-like name used in code and logs. */
+export const PLAN_LABEL: Record<SubscriptionPlan, string> = { FREE: "무료", STARTER: "스타터", PRO: "프로" };
+
 export function getPlanConfig(plan: SubscriptionPlan): PlanConfig {
   return PLAN_CONFIGS[plan];
 }

@@ -29,3 +29,57 @@ describe("isPrivateAddress", () => {
     expect(isPrivateAddress("1.2.3")).toBe(true);
   });
 });
+
+describe("pinnedLookup (real Node http, no mocks)", () => {
+  async function withServer<T>(run: (port: number) => Promise<T>): Promise<T> {
+    const { createServer } = await import("node:http");
+    const server = createServer((_request, response) => response.end("ok"));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      return await run((server.address() as { port: number }).port);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  }
+
+  async function get(port: number, lookup: unknown) {
+    const { request } = await import("node:http");
+    return new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+      // The hostname is fake: only the pinned address can make this connect.
+      const req = request({ host: "pinned.invalid", port, path: "/", lookup: lookup as never }, (response) => {
+        let body = "";
+        response.on("data", (chunk) => (body += chunk));
+        response.on("end", () => resolve({ status: response.statusCode, body }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+  }
+
+  it("connects to the pinned address even though Node asks for the {all: true} form (autoSelectFamily)", async () => {
+    await withServer(async (port) => {
+      const { pinnedLookup } = await import("./ssrf");
+      await expect(get(port, pinnedLookup("127.0.0.1", 4))).resolves.toEqual({ status: 200, body: "ok" });
+    });
+  });
+
+  it("answers both callback shapes", async () => {
+    const { pinnedLookup } = await import("./ssrf");
+    const lookup = pinnedLookup("93.184.215.14", 4);
+    const single: unknown[] = [];
+    lookup("x", {}, (...args) => single.push(...args));
+    expect(single).toEqual([null, "93.184.215.14", 4]);
+    const all: unknown[] = [];
+    lookup("x", { all: true }, (...args) => all.push(...args));
+    expect(all).toEqual([null, [{ address: "93.184.215.14", family: 4 }]]);
+  });
+
+  it("the old single-address answer would have failed on this Node version (documents why the helper exists)", async () => {
+    await withServer(async (port) => {
+      const legacy = (_host: string, _options: unknown, callback: (e: null, a: string, f: number) => void) => callback(null, "127.0.0.1", 4);
+      const result = await get(port, legacy).then(() => "connected", (error: NodeJS.ErrnoException) => error.code);
+      // Node >= 20 (autoSelectFamily default) rejects the single form when it asked for all addresses.
+      expect(["ERR_INVALID_IP_ADDRESS", "connected"]).toContain(result);
+    });
+  });
+});

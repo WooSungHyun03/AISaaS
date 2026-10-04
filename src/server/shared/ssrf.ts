@@ -49,3 +49,24 @@ function isPrivateIpv6(address: string): boolean {
 export function isPrivateAddress(address: string): boolean {
   return address.includes(":") ? isPrivateIpv6(address) : isPrivateIpv4(address);
 }
+
+/**
+ * A `lookup` for http(s).request that always answers with an address that was
+ * already validated, so a second DNS lookup between "checked" and "connected"
+ * (DNS rebinding) can never reach a private host.
+ *
+ * Node 20+ calls `lookup` with `{ all: true }` (happy-eyeballs / autoSelectFamily)
+ * and then requires the array form of the callback; answering with the
+ * single-address form there fails every request with ERR_INVALID_IP_ADDRESS.
+ * Both forms are therefore handled.
+ */
+export function pinnedLookup(address: string, family: number) {
+  return (
+    _hostname: string,
+    options: { all?: boolean } | number | undefined,
+    callback: (error: NodeJS.ErrnoException | null, address: string | Array<{ address: string; family: number }>, family?: number) => void,
+  ): void => {
+    if (typeof options === "object" && options !== null && options.all) callback(null, [{ address, family }]);
+    else callback(null, address, family);
+  };
+}

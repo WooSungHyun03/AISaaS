@@ -39,3 +39,26 @@ describe("describeAutomationRunError", () => {
     expect(describeAutomationRunError("sensitive stack trace")).not.toContain("stack trace");
   });
 });
+
+describe("describeAutomationRunError — video, YouTube and plan limits", () => {
+  it("never echoes raw provider text for video rendering failures", () => {
+    const raw = "JSON2Video 렌더링에 실패했습니다: template var voice_script missing at secret-internal-path";
+    const result = describeAutomationRunError(raw);
+    expect(result).toContain("영상");
+    expect(result).not.toContain("secret-internal-path");
+    expect(describeAutomationRunError("JSON2Video 렌더링이 제한 시간 내에 완료되지 않았습니다. timeout")).toContain("오래 걸려");
+    expect(describeAutomationRunError("JSON2Video 렌더링 설정이 없습니다. VIDEO_RENDER_API_KEY와 ... NOT_CONFIGURED")).toContain("설정");
+  });
+
+  it("explains YouTube upload failures in plain Korean", () => {
+    expect(describeAutomationRunError("YouTube upload failed (HTTP 401)")).toContain("유튜브");
+    expect(describeAutomationRunError("YouTube upload failed (HTTP 500)")).toContain("유튜브");
+  });
+
+  it("passes the server's own plan-limit sentences through unchanged", () => {
+    const limit = "스타터 요금제의 이번 달 숏폼 한도(4건)를 모두 썼어요. 다음 달에 다시 쓰거나 요금제를 올려보세요.";
+    expect(describeAutomationRunError(limit)).toBe(limit);
+    const notAllowed = "무료 요금제에서는 이 콘텐츠를 만들 수 없어요. 요금제를 올리면 이용할 수 있어요.";
+    expect(describeAutomationRunError(notAllowed)).toBe(notAllowed);
+  });
+});

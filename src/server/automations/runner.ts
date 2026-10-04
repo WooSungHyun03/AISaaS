@@ -87,6 +87,7 @@ async function executeAutomation(
 ): Promise<RunAutomationResult> {
   const admin = createAdminClient();
   const advanceSchedule = source === "SCHEDULED";
+  const startedAtMs = Date.now();
 
   const { data: automation, error: automationError } = await admin
     .from("automations")
@@ -250,7 +251,14 @@ async function executeAutomation(
 
     await incrementUsage(admin, automation.user_id, { automationRuns: 1, aiGenerations: result.aiGenerationCount ?? 1 });
 
-    logger.info("automation_run_success", { automationId, runId: run.id });
+    logger.info("automation_run_success", {
+      automationId,
+      runId: run.id,
+      businessId: automation.business_id,
+      feature: template.slug,
+      source,
+      durationMs: Date.now() - startedAtMs,
+    });
     return { runId: run.id, status: "SUCCESS", output: result.output, contentHistoryId };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : "Unknown error";
@@ -285,6 +293,10 @@ async function executeAutomation(
     logger.error("automation_run_failed", {
       automationId,
       runId: run.id,
+      businessId: automation.business_id,
+      feature: template.slug,
+      source,
+      durationMs: Date.now() - startedAtMs,
       errorMessage,
       ...(isAppError(err) ? { errorDomain: err.domain, errorCode: err.code, retryable: err.retryable } : {}),
     });

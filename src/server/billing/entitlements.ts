@@ -4,7 +4,7 @@ import type { Database } from "@/types/database.types";
 import type { SubscriptionPlan } from "@/types/domain";
 import { logger } from "@/lib/logger";
 import { getPeriodKey, getPeriodRange } from "@/lib/utils/date";
-import { getPlanConfig } from "./plans";
+import { getPlanConfig, PLAN_LABEL } from "./plans";
 
 type DbClient = SupabaseClient<Database>;
 
@@ -30,7 +30,7 @@ export interface EntitlementCheck {
  * UX, but these checks are the real gate (Rule: never trust the client).
  */
 
-async function getEffectivePlan(supabase: DbClient, userId: string): Promise<SubscriptionPlan> {
+export async function getEffectivePlan(supabase: DbClient, userId: string): Promise<SubscriptionPlan> {
   const { data } = await supabase.from("subscriptions").select("plan, status").eq("user_id", userId).maybeSingle();
 
   if (!data) return "FREE";
@@ -59,7 +59,7 @@ export async function canCreateAutomation(supabase: DbClient, userId: string): P
   if ((count ?? 0) >= config.automationLimit) {
     return {
       allowed: false,
-      reason: `${config.name} 플랜은 자동화를 최대 ${config.automationLimit}개까지 생성할 수 있습니다.`,
+      reason: `${PLAN_LABEL[plan]} 요금제는 만들기 설정을 ${config.automationLimit}개까지 만들 수 있어요. 요금제를 올리면 더 만들 수 있어요.`,
     };
   }
   return { allowed: true };
@@ -74,7 +74,7 @@ export async function canExecuteAutomation(
   const config = getPlanConfig(plan);
 
   if (config.allowedTemplateSlugs && !config.allowedTemplateSlugs.includes(templateSlug)) {
-    return { allowed: false, reason: `${config.name} 플랜에서는 이 자동화 유형을 실행할 수 없습니다.` };
+    return { allowed: false, reason: `${PLAN_LABEL[plan]} 요금제에서는 이 콘텐츠를 만들 수 없어요. 요금제를 올리면 이용할 수 있어요.` };
   }
 
   if (config.monthlyRunLimit === null) return { allowed: true };
@@ -91,7 +91,7 @@ export async function canExecuteAutomation(
   if (used >= config.monthlyRunLimit) {
     return {
       allowed: false,
-      reason: `${config.name} 플랜의 이번 달 실행 한도(${config.monthlyRunLimit}회)를 모두 사용했습니다.`,
+      reason: `${PLAN_LABEL[plan]} 요금제의 이번 달 제작 한도(${config.monthlyRunLimit}회)를 모두 썼어요. 다음 달에 다시 쓰거나 요금제를 올려보세요.`,
     };
   }
 
@@ -104,7 +104,9 @@ export async function canExecuteAutomation(
         const label = CONTENT_TYPE_LABEL[templateSlug as keyof typeof CONTENT_TYPE_LABEL];
         return {
           allowed: false,
-          reason: `${config.name} 플랜의 이번 달 ${label} 실행 한도(${contentLimit}회)를 모두 사용했습니다.`,
+          reason: contentLimit === 0
+            ? `${PLAN_LABEL[plan]} 요금제에서는 ${label}을(를) 만들 수 없어요. 요금제를 올리면 이용할 수 있어요.`
+            : `${PLAN_LABEL[plan]} 요금제의 이번 달 ${label} 한도(${contentLimit}건)를 모두 썼어요. 다음 달에 다시 쓰거나 요금제를 올려보세요.`,
         };
       }
     }

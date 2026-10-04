@@ -179,7 +179,7 @@ export function BusinessOnboardingWizard({ destination }: { destination: string 
             </Button>
           ) : (
             <Button key="submit" type="submit" disabled={isPending}>
-              {isPending ? "저장하는 중…" : destination === "/automations/marketplace" ? "저장하고 콘텐츠 만들러 가기" : "저장하고 요금제 선택하기"} <ArrowRight aria-hidden="true" />
+              {isPending ? "저장하는 중…" : destination === "/marketing/diagnosis" ? "저장하고 마케팅 진단 받으러 가기" : "저장하고 이어서 진행하기"} <ArrowRight aria-hidden="true" />
             </Button>
           )}
         </div>

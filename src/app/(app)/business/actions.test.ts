@@ -107,7 +107,7 @@ describe("createBusiness — marketing profile fields (ticket 2)", () => {
 
     const result = await createBusiness({}, formData({ ...BASE_FIELDS, "snsLinks.instagram": "javascript:alert(1)" }));
 
-    expect(result.error).toBe("SNS 링크는 http 또는 https 주소로 입력해주세요.");
+    expect(result.error).toBe("인스타그램 링크는 http 또는 https 주소로 입력해주세요.");
     expect(inserted).toHaveLength(0);
   });
 
@@ -118,6 +118,18 @@ describe("createBusiness — marketing profile fields (ticket 2)", () => {
     const result = await createBusiness({}, formData({ ...BASE_FIELDS, mainOffering: "a".repeat(301) }));
 
     expect(result.error).toBe("주요 상품/서비스, 강점, 마케팅 목표 입력 길이를 확인해주세요.");
+    expect(inserted).toHaveLength(0);
+  });
+});
+
+describe("createBusiness — SNS link ownership", () => {
+  it("rejects a link on the wrong site saved under a channel", async () => {
+    const { client, inserted } = makeClient();
+    createClientMock.mockResolvedValue(client);
+
+    const result = await createBusiness({}, formData({ name: "우리가게", "snsLinks.instagram": "https://example.com/ourcafe" }));
+
+    expect(result.error).toContain("인스타그램 링크가 아니에요");
     expect(inserted).toHaveLength(0);
   });
 });

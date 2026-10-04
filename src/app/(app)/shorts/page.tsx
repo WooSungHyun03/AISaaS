@@ -6,6 +6,8 @@ import { ShortsCreateButton, ShortsStudio } from "@/components/automations/short
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { toSafeAutomationRunOutput } from "@/server/automations/run-output";
+import { getEffectivePlan } from "@/server/billing/entitlements";
+import { getPlanConfig, PLAN_LABEL } from "@/server/billing/plans";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
 
 /** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
@@ -23,6 +25,21 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const selectedBusiness = businesses?.find((business) => business.id === query.business) ?? businesses?.[0];
 
   if (!selectedBusiness) return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><EmptyState mascot="point" title="먼저 사업체를 등록해주세요" description="사업 정보가 있어야 업종과 고객에 맞는 숏폼 대본과 장면을 만들 수 있어요." action={<Button asChild><Link href="/business">사업체 등록</Link></Button>} /></div>;
+
+  const plan = await getEffectivePlan(supabase as never, user.id);
+  if (getPlanConfig(plan).monthlyShortsLimit === 0) {
+    return (
+      <div className="mx-auto max-w-6xl space-y-8">
+        <PageHeading />
+        <EmptyState
+          mascot="present"
+          title="숏폼 영상은 스타터 요금제부터 만들 수 있어요"
+          description={`지금은 ${PLAN_LABEL[plan]} 요금제예요. 요금제를 올리면 대본, 장면, 자막, 목소리까지 갖춘 세로 영상을 만들고 미리 볼 수 있어요.`}
+          action={<Button asChild><Link href="/pricing">요금제 보기</Link></Button>}
+        />
+      </div>
+    );
+  }
 
   const { data: template, error: templateError } = await supabase.from("automation_templates").select("id").eq("slug", "shorts").maybeSingle();
   if (templateError) throw new Error("숏폼 템플릿을 확인하지 못했습니다.", { cause: templateError });

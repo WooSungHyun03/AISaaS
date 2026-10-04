@@ -37,7 +37,7 @@ export default async function BillingSuccessPage({ searchParams }: PageProps<"/b
         <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">숏폼 영상</dt><dd className="tabular mt-1 text-xl font-extrabold">월 {plan.monthlyShortsLimit}건</dd></div>
       </dl>
       <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:justify-center">
-        <Button asChild size="lg"><Link href="/automations/marketplace">콘텐츠 만들러 가기</Link></Button>
+        <Button asChild size="lg"><Link href="/calendar">콘텐츠 만들러 가기</Link></Button>
         <Button asChild size="lg" variant="outline"><Link href="/billing">요금제·결제 보기</Link></Button>
       </div>
     </div>

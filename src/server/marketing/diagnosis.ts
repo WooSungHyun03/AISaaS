@@ -8,7 +8,7 @@ import { z } from "zod";
 import { generateStructured } from "@/server/ai/generate";
 import { AppError } from "@/server/shared/errors";
 import { stripHtml } from "@/server/shared/html";
-import { isPrivateAddress } from "@/server/shared/ssrf";
+import { isPrivateAddress, pinnedLookup } from "@/server/shared/ssrf";
 import {
   buildRuleBasedRecommendations,
   CHANNEL_LABEL,
@@ -133,7 +133,7 @@ async function fetchHop(urlString: string, redirectsLeft: number, deadlineAt: nu
         // Pins the validated address for the actual request — a second DNS
         // lookup between validation and connection could otherwise reach a
         // private host (same technique as the WordPress connector).
-        lookup: (_host, _options, callback) => callback(null, address, family),
+        lookup: pinnedLookup(address, family) as never,
       },
       (response) => {
         const status = response.statusCode ?? 0;

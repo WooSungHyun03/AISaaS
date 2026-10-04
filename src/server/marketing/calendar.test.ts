@@ -176,6 +176,21 @@ describe("generateCalendarPlan", () => {
     expect(result.skippedDuplicates).toBeGreaterThanOrEqual(1);
   });
 
+  it("does not treat distinct topics as duplicates just because they all start with the business name", async () => {
+    const { client, insertedRows } = makeClient();
+    createClientMock.mockResolvedValue(client);
+    generateStructuredMock.mockResolvedValue([
+      { ...generatedItems[0], topic: "성장 카페 처음 오시는 분을 위한 이용 안내" },
+      { ...generatedItems[1], topic: "성장 카페 단골이 알려주는 숨은 활용법" },
+      { ...generatedItems[2], topic: "성장 카페 계절이 바뀔 때 챙길 준비물" },
+      { ...generatedItems[3], topic: "성장 카페 자주 받는 질문 다섯 가지" },
+    ]);
+
+    await generateCalendarPlan(business.id, 2);
+
+    expect(insertedRows).toHaveLength(4);
+  });
+
   it("fails instead of saving when almost every returned topic repeats an existing one", async () => {
     const existing = generatedItems.map((item, index) => ({ id: `old-${index}`, topic: item.topic, status: "GENERATED", planned_date: "2026-02-20", automation_id: "a-1", created_at: "2026-02-18T00:00:00.000Z" }));
     const { client, insert } = makeClient({ existingItems: existing });

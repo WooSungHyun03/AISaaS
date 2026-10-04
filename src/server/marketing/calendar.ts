@@ -59,6 +59,8 @@ const MAX_ITEMS_PER_DAY = 84;
 const TOPIC_MEMORY_DAYS = 60;
 /** Looser than the blog default (0.5): calendar topics are short phrases that often share a "첫 주 …" style prefix. */
 const CALENDAR_DUPLICATE_THRESHOLD = 0.6;
+/** Inside one plan only near-copies are dropped; two posts on related themes are fine. */
+const PLAN_DUPLICATE_THRESHOLD = 0.75;
 
 export interface MarketingCalendarPageData {
   businesses: BusinessSummary[];
@@ -281,10 +283,15 @@ export async function generateCalendarPlan(businessId: string, weeks: number) {
   const generated = await generateStructured({ system, prompt, schema: calendarPlanSchema, maxTokens: 6000 });
   validateGeneratedPlan(generated, weeks, startDate, endDate);
 
-  // Drop topics that repeat an existing one or another item of this same plan (first one wins).
+  // Drop topics that repeat an existing one (looser threshold on purpose: the business name that
+  // most topics start with is removed first, so it can't make unrelated topics look alike) or
+  // that are near-identical to another item of this same plan (first one wins).
+  const bare = (topic: string) => topic.split(business.name).join(" ");
   const kept: GeneratedCalendarPlanItem[] = [];
   for (const item of generated) {
-    if (isNearDuplicateTopic(item.topic, [...existingTopics, ...kept.map((entry) => entry.topic)], CALENDAR_DUPLICATE_THRESHOLD)) continue;
+    const repeatsExisting = isNearDuplicateTopic(bare(item.topic), existingTopics.map(bare), CALENDAR_DUPLICATE_THRESHOLD);
+    const repeatsPlanItem = isNearDuplicateTopic(bare(item.topic), kept.map((entry) => bare(entry.topic)), PLAN_DUPLICATE_THRESHOLD);
+    if (repeatsExisting || repeatsPlanItem) continue;
     kept.push(item);
   }
   if (kept.length < weeks) {

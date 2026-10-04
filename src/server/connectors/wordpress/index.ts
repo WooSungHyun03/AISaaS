@@ -5,7 +5,7 @@ import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
 import { serverEnv } from "@/lib/env/server";
 import { classifyHttpStatus, ConnectorError } from "@/server/shared/errors";
-import { isPrivateAddress } from "@/server/shared/ssrf";
+import { isPrivateAddress, pinnedLookup } from "@/server/shared/ssrf";
 import type { PlatformConnector, PublishContentParams, PublishResult } from "../types";
 
 export interface WordPressConnection {
@@ -84,7 +84,7 @@ export class WordPressConnector implements PlatformConnector {
           Authorization: `Basic ${Buffer.from(`${username}:${appPassword}`).toString("base64")}`,
           ...(body ? { "Content-Type": "application/json" } : {}),
         },
-        lookup: (_host, _options, callback) => callback(null, selected.address, selected.family),
+        lookup: pinnedLookup(selected.address, selected.family) as never,
       }, (response) => {
         const chunks: Buffer[] = [];
         let bytes = 0;

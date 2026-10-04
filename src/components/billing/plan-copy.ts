@@ -5,11 +5,7 @@ import type { PlanConfig } from "@/types/billing";
  * 화면에 보이는 요금제 이름과 설명. 가격·한도 숫자는 server/billing/plans.ts 가 기준이고,
  * 여기서는 서비스 언어(한국어)로 풀어 쓴 문구만 다룹니다.
  */
-export const PLAN_LABEL: Record<SubscriptionPlan, string> = {
-  FREE: "무료",
-  STARTER: "스타터",
-  PRO: "프로",
-};
+export { PLAN_LABEL } from "@/server/billing/plans";
 
 export const PLAN_TAGLINE: Record<SubscriptionPlan, string> = {
   FREE: "마케팅 진단과 캘린더를 먼저 써보고 싶을 때",

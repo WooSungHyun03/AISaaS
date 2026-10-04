@@ -86,7 +86,7 @@ export function describeAutomationRunError(message: string | null | undefined): 
   // see runner.ts#recordRefusedRun) are already a complete, secret-free
   // Korean sentence meant for direct display; passing them through beats
   // flattening them into the generic fallback below.
-  if (/일시정지 상태|오류 상태|플랜에서는|플랜의 이번 달/.test(message)) {
+  if (/일시정지 상태|오류 상태|요금제에서는|요금제의 이번 달|요금제는 /.test(message)) {
     return message;
   }
 
@@ -105,6 +105,21 @@ export function describeAutomationRunError(message: string | null | undefined): 
       return "WordPress 응답이 늦어 실행이 중단되었습니다. 사이트 상태를 확인한 뒤 다시 시도해주세요.";
     }
     return "WordPress에 글을 저장하지 못했습니다. 사이트 연결과 발행 설정을 확인해주세요.";
+  }
+  if (error.includes("json2video") || /렌더링|render/.test(error)) {
+    if (/시간이 초과|timeout|timed out/.test(error)) {
+      return "영상 만들기가 오래 걸려 중단됐어요. 잠시 후 다시 시도해주세요.";
+    }
+    if (/설정이 없습니다|not_configured|api_key|http 40[13]/.test(error)) {
+      return "영상 만들기 서비스 설정이 아직 끝나지 않았어요. 관리자에게 문의해주세요.";
+    }
+    return "영상을 만들지 못했어요. 잠시 후 다시 시도해주세요.";
+  }
+  if (error.includes("youtube")) {
+    if (/http 40[13]|authentication|access token|권한|연결|만료/.test(error)) {
+      return "유튜브 연결이나 업로드 권한을 확인해주세요. 설정에서 다시 연결할 수 있어요.";
+    }
+    return "유튜브에 영상을 올리지 못했어요. 연결 상태를 확인하고 다시 시도해주세요.";
   }
   if (error.includes("instagram")) {
     if (/http 40[13]|authentication|access token|권한|연결/.test(error)) {

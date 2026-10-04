@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { describeAutomationRunError } from "@/server/shared/errors";
 import { runAutomationNow } from "@/server/automations/runner";
 import { computeNextRunAt } from "@/server/automations/scheduler";
 import { parseScheduleFromForm } from "@/server/automations/schedule-input";
@@ -76,7 +77,7 @@ export async function generateShortsPreview(automationId: string): Promise<Short
   if ("error" in owned) return { error: owned.error };
   try {
     const result = await runAutomationNow(automationId, { shorts: { previewOnly: true } });
-    if (result.status === "FAILED") return { error: result.errorMessage ?? "영상을 만들지 못했습니다.", runId: result.runId };
+    if (result.status === "FAILED") return { error: describeAutomationRunError(result.errorMessage), runId: result.runId };
     revalidatePath("/shorts");
     revalidatePath("/automations/history");
     return { success: true, runId: result.runId };
@@ -103,7 +104,7 @@ export async function publishShortsNow(
 
   try {
     const result = await runAutomationNow(automationId, { shorts: { publish: { sourceRunId, platforms } } });
-    if (result.status === "FAILED") return { error: result.errorMessage ?? "영상을 게시하지 못했습니다.", runId: result.runId };
+    if (result.status === "FAILED") return { error: describeAutomationRunError(result.errorMessage), runId: result.runId };
     revalidatePath("/shorts");
     revalidatePath("/automations/history");
     return { success: true, runId: result.runId };

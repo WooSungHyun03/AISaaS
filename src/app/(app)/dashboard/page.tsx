@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ArrowRight, Check, CircleCheck, CircleX, PlayCircle, Wrench } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPlanConfig } from "@/server/billing/plans";
+import { PLAN_LABEL } from "@/components/billing/plan-copy";
 import { getPeriodKey, SERVICE_TIMEZONE, zonedTimeToUtc } from "@/lib/utils/date";
 import { StatCard, StatGroup } from "@/components/dashboard/stat-card";
 import { Mascot } from "@/components/brand/mascot";
@@ -90,28 +91,30 @@ export default async function DashboardPage() {
   const hasBusiness = Boolean(businessResult.data);
 
   let calendarCount = 0;
+  let diagnosisCount = 0;
   if (businessResult.data) {
-    const { count } = await supabase
-      .from("calendar_items")
-      .select("id", { count: "exact", head: true })
-      .eq("business_id", businessResult.data.id);
-    calendarCount = count ?? 0;
+    const [calendarResult, diagnosisResult] = await Promise.all([
+      supabase.from("calendar_items").select("id", { count: "exact", head: true }).eq("business_id", businessResult.data.id),
+      supabase.from("marketing_diagnoses").select("id", { count: "exact", head: true }).eq("business_id", businessResult.data.id),
+    ]);
+    calendarCount = calendarResult.count ?? 0;
+    diagnosisCount = diagnosisResult.count ?? 0;
   }
 
   const displayName = profileResult.data?.display_name?.trim();
   const hasCreated = automations.length > 0 || recentRuns.some((run) => run.status === "SUCCESS");
   const steps = [
     { label: "가게 정보", href: hasBusiness ? "/business" : "/onboarding", done: hasBusiness },
-    { label: "마케팅 진단", href: "/marketing/diagnosis", done: calendarCount > 0 || hasCreated },
+    { label: "마케팅 진단", href: "/marketing/diagnosis", done: diagnosisCount > 0 },
     { label: "마케팅 캘린더", href: "/calendar", done: calendarCount > 0 },
-    { label: "콘텐츠 만들기", href: "/automations/marketplace", done: hasCreated },
+    { label: "콘텐츠 만들기", href: "/calendar", done: hasCreated },
   ];
   const currentStep = steps.findIndex((step) => !step.done);
   const nextAction = [
     { title: "먼저 가게 정보를 알려주세요", description: "업체명만 적어도 시작할 수 있어요. 나머지는 나중에 채워도 괜찮아요.", cta: "가게 정보 입력하기", href: "/onboarding", pose: "welcome" as const },
     { title: "마케팅 진단부터 받아볼까요?", description: "지금 마케팅이 몇 점인지, 어느 채널이 비어 있는지 알려드려요.", cta: "무료 진단 받기", href: "/marketing/diagnosis", pose: "point" as const },
     { title: "이번 달 마케팅 계획을 세워볼까요?", description: "진단 결과에 맞춰 날짜별로 어떤 콘텐츠를 올릴지 정해드려요.", cta: "캘린더 만들기", href: "/calendar", pose: "guide" as const },
-    { title: "첫 콘텐츠를 만들어볼까요?", description: "계획한 주제로 블로그 글을 써드려요. 만들고 나면 확인하고 직접 올리시면 돼요.", cta: "콘텐츠 만들기 시작", href: "/automations/marketplace", pose: "guide" as const },
+    { title: "첫 콘텐츠를 만들어볼까요?", description: "캘린더에 적어둔 주제 중 하나를 골라 블로그 글이나 숏폼을 만들어요. 만들고 나면 확인하고 고쳐서 직접 올리시면 돼요.", cta: "캘린더에서 만들기", href: "/calendar", pose: "guide" as const },
   ][currentStep] ?? { title: "잘 하고 계세요!", description: "다음 제작 일정과 이번 달 계획을 캘린더에서 확인해보세요.", cta: "캘린더 보기", href: "/calendar", pose: "thumbsUp" as const };
 
   return (
@@ -151,7 +154,7 @@ export default async function DashboardPage() {
         <StatCard
           label="이번 달 만든 콘텐츠"
           value={<>{monthlyRuns.toLocaleString()}<span className="ml-1 text-sm font-semibold text-muted-foreground">개</span></>}
-          hint="한국 시간 기준, 이번 달 제작 횟수"
+          hint={<Link href="/growth-report" className="font-medium text-primary hover:underline">성장 리포트 보기</Link>}
         />
         <StatCard
           label="진행 중인 만들기 설정"
@@ -165,7 +168,7 @@ export default async function DashboardPage() {
         />
         <StatCard
           label="이용 중인 플랜"
-          value={planConfig.name}
+          value={PLAN_LABEL[plan]}
           hint={<Link href="/billing" className="font-medium text-primary hover:underline">플랜 관리</Link>}
         />
       </StatGroup>
@@ -182,7 +185,7 @@ export default async function DashboardPage() {
               mascot={null}
               title="아직 제작 기록이 없어요"
               description="블로그 글이나 숏폼 영상을 만들면 여기에서 바로 확인할 수 있어요."
-              action={<Button asChild size="sm"><Link href="/automations/marketplace">콘텐츠 만들기 시작</Link></Button>}
+              action={<Button asChild size="sm"><Link href="/calendar">캘린더에서 만들기</Link></Button>}
             />
           ) : (
             <ul className="divide-y divide-border">

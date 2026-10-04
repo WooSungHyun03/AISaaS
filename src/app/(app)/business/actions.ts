@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { validateSnsLink, type SnsLinkKey } from "@/lib/sns-links";
 import type { BusinessSnsLinks } from "@/types/domain";
 
 export interface BusinessActionState {
@@ -67,14 +68,10 @@ function validateBusinessFields(fields: ReturnType<typeof businessFieldsFromForm
       return "웹사이트 주소 형식을 확인해주세요.";
     }
   }
-  for (const link of Object.values(fields.sns_links)) {
+  for (const [key, link] of Object.entries(fields.sns_links)) {
     if (!link) continue;
-    try {
-      const url = new URL(link);
-      if (url.protocol !== "http:" && url.protocol !== "https:") return "SNS 링크는 http 또는 https 주소로 입력해주세요.";
-    } catch {
-      return "SNS 링크 형식을 확인해주세요.";
-    }
+    const message = validateSnsLink(key as SnsLinkKey, link);
+    if (message) return message;
   }
   return null;
 }

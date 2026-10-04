@@ -52,7 +52,7 @@ describe("canExecuteAutomation — per-content-type limits (STARTER: blog 8 / sh
 
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain("숏폼");
-    expect(result.reason).toContain("4회");
+    expect(result.reason).toContain("4건");
   });
 
   it("still allows Blog to run when only Shorts' sub-limit is exhausted", async () => {
@@ -82,7 +82,7 @@ describe("canExecuteAutomation — per-content-type limits (STARTER: blog 8 / sh
 
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain("블로그");
-    expect(result.reason).toContain("8회");
+    expect(result.reason).toContain("8건");
   });
 
   it("still allows Shorts to run when only Blog's sub-limit is exhausted", async () => {
@@ -108,7 +108,7 @@ describe("canExecuteAutomation — per-content-type limits (STARTER: blog 8 / sh
     const result = await canExecuteAutomation(supabase as never, "user-1", "blog-marketing");
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("실행 한도");
+    expect(result.reason).toContain("제작 한도");
     expect(result.reason).not.toContain("블로그");
     // The combined-limit check short-circuits before resolving template -> automations -> runs.
     expect(supabase.from).not.toHaveBeenCalledWith("automation_templates");
@@ -148,7 +148,7 @@ describe("canExecuteAutomation — regression (existing behavior unaffected)", (
     const result = await canExecuteAutomation(supabase as never, "user-1", "newsletter");
 
     expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("Starter");
+    expect(result.reason).toContain("스타터");
   });
 });
 
@@ -177,5 +177,25 @@ describe("incrementUsage", () => {
     const from = vi.fn();
     await expect(incrementUsage({ rpc, from } as unknown as AdminArg, "user-1", { automationRuns: 1 })).resolves.toBeUndefined();
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+describe("canExecuteAutomation — free plan enforcement lives on the server", () => {
+  it("blocks Shorts for a FREE user and points to an upgrade (a direct API call cannot bypass the UI)", async () => {
+    const supabase = makeSupabase({ subscriptions: [{ data: { plan: "FREE", status: "ACTIVE" } }] });
+
+    const result = await canExecuteAutomation(supabase as never, "user-1", "shorts");
+
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("무료 요금제");
+    expect(result.reason).toContain("올리면");
+  });
+
+  it("treats a canceled or past-due paid subscription as FREE immediately", async () => {
+    for (const status of ["CANCELED", "PAST_DUE", "INCOMPLETE"] as const) {
+      const supabase = makeSupabase({ subscriptions: [{ data: { plan: "PRO", status } }] });
+      const result = await canExecuteAutomation(supabase as never, "user-1", "shorts");
+      expect(result.allowed).toBe(false);
+    }
   });
 });

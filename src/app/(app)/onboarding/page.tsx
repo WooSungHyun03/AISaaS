@@ -6,7 +6,7 @@ export default async function OnboardingPage({ searchParams }: PageProps<"/onboa
   const { next } = await searchParams;
   const destination = typeof next === "string" && (/^\/billing\?plan=(STARTER|PRO)$/.test(next) || next === "/setup-request")
     ? next
-    : "/automations/marketplace";
+    : "/marketing/diagnosis";
 
   const supabase = await createClient();
   const {
