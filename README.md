@@ -39,6 +39,16 @@ npm run dev
 
 ## Database
 
+팀원이 원격 프로젝트 없이 전체 migration과 로그인 계정을 검증할 때는 로컬 DB 스크립트를 사용합니다.
+
+```bash
+bash scripts/dev-db.sh
+```
+
+이 스크립트는 충돌 migration을 임시 사본에서만 정리하고, 빈 포트를 선택해 Supabase를 시작한 뒤 관리자·일반 사용자 로그인을 검증합니다. 준비물, 시드 계정, 초기화 방법은 [로컬 Supabase 개발 환경](docs/LOCAL_DATABASE.md)을 참고하세요.
+
+원격 Supabase 프로젝트에 적용하는 절차는 다음과 같습니다.
+
 1. [Supabase](https://supabase.com)에서 무료 프로젝트를 생성합니다.
 2. Project Settings → API에서 URL/anon key/service role key를 `.env.local`에 채웁니다.
 3. `supabase/migrations/*.sql`을 순서대로 SQL Editor에 붙여넣거나, Supabase CLI가 있다면:
