@@ -10,19 +10,12 @@ const FOOTER_LINKS = [
       { href: "/pricing", label: "요금제" },
     ],
   },
-  {
-    title: "도움말",
-    links: [
-      { href: "/guides", label: "활용 가이드" },
-      { href: "/setup-request", label: "직접 맡기고 싶어요" },
-    ],
-  },
 ];
 
 export function PublicFooter() {
   return (
     <footer className="border-t border-border bg-card">
-      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-[1.4fr_1fr_1fr]">
+      <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-[1.4fr_1fr]">
         <div className="max-w-sm">
           <Logo />
           <p className="mt-4 text-sm leading-6 text-muted-foreground">

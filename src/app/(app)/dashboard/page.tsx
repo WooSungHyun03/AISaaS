@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowRight, Check, CircleCheck, CircleX, PlayCircle, Wrench } from "lucide-react";
+import { ArrowRight, Check, CircleCheck, CircleX, PlayCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPlanConfig } from "@/server/billing/plans";
 import { PLAN_LABEL } from "@/components/billing/plan-copy";
@@ -12,9 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import type { AutomationRun } from "@/types/domain";
-import { getRecentSetupRequests } from "@/server/setup-requests";
-import { SetupRequestStatusBadge } from "@/components/setup-requests/setup-request-status";
-import { SETUP_REQUEST_STATUS, setupAutomationTypeLabel, setupRequestNumber } from "@/types/setup-request";
 import { EmptyState } from "@/components/ui/page-state";
 
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
@@ -41,12 +38,11 @@ export default async function DashboardPage() {
   const periodKey = getPeriodKey();
   const [year, month] = periodKey.split("-").map(Number);
 
-  const [businessResult, automationResult, subscriptionResult, usageResult, setupRequests, profileResult] = await Promise.all([
+  const [businessResult, automationResult, subscriptionResult, usageResult, profileResult] = await Promise.all([
     supabase.from("businesses").select("id").eq("owner_id", user.id).limit(1).maybeSingle(),
     supabase.from("automations").select("id, name, status, next_run_at").eq("user_id", user.id),
     supabase.from("subscriptions").select("plan, status").eq("user_id", user.id).maybeSingle(),
     supabase.from("usage").select("automation_runs").eq("user_id", user.id).eq("period", periodKey).maybeSingle(),
-    getRecentSetupRequests(user.id),
     supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
   ]);
 
@@ -73,7 +69,7 @@ export default async function DashboardPage() {
         .lt("created_at", zonedTimeToUtc(year, month + 1, 1, 0, 0, SERVICE_TIMEZONE).toISOString()),
     ]);
     const runError = recentResult.error || countResult.error;
-    if (runError) throw new Error("실행 기록을 불러오지 못했습니다.", { cause: runError });
+    if (runError) throw new Error("이용내역을 불러오지 못했습니다.", { cause: runError });
     recentRuns = recentResult.data ?? [];
     monthlyRuns = countResult.count ?? 0;
   }
@@ -159,12 +155,12 @@ export default async function DashboardPage() {
         <StatCard
           label="진행 중인 만들기 설정"
           value={<>{activeAutomations.length}<span className="ml-1 text-sm font-semibold text-muted-foreground">개</span></>}
-          hint={<Link href="/automations" className="font-medium text-primary hover:underline">전체 {automations.length}개 보기</Link>}
+          hint={`전체 ${automations.length}개`}
         />
         <StatCard
           label="다음 제작 예정"
           value={nextAutomation?.next_run_at ? <span className="block text-lg leading-8">{dateFormatter.format(new Date(nextAutomation.next_run_at))}</span> : "예정 없음"}
-          hint={nextAutomation ? <Link href={`/automations/${nextAutomation.id}`} className="font-medium text-primary hover:underline">{nextAutomation.name}</Link> : "만들기를 켜면 일정이 표시돼요"}
+          hint={nextAutomation?.name ?? "만들기를 켜면 일정이 표시돼요"}
         />
         <StatCard
           label="이용 중인 플랜"
@@ -177,7 +173,7 @@ export default async function DashboardPage() {
         <section aria-labelledby="recent-title">
           <div className="flex items-end justify-between gap-3 border-b border-border pb-3">
             <h2 id="recent-title" className="text-lg font-bold tracking-[-0.02em]">최근 제작 기록</h2>
-            <Link href="/automations/history" className="text-sm font-semibold text-primary hover:underline">전체 보기</Link>
+            <Link href="/usage" className="text-sm font-semibold text-primary hover:underline">전체 보기</Link>
           </div>
           {recentRuns.length === 0 ? (
             <EmptyState
@@ -211,7 +207,7 @@ export default async function DashboardPage() {
           )}
         </section>
 
-        <aside className="space-y-8" aria-label="사용량과 도움">
+        <aside aria-label="사용량">
           <section aria-labelledby="usage-title" className="rounded-xl border border-border bg-card p-5">
             <h2 id="usage-title" className="text-base font-bold tracking-[-0.02em]">이번 달 사용량</h2>
             <p className="tabular mt-3 text-2xl font-extrabold tracking-[-0.03em]">
@@ -222,27 +218,6 @@ export default async function DashboardPage() {
             <p className="mt-3 text-[13px] leading-5 text-muted-foreground">플랜의 월 제작 한도에 반영되는 횟수예요.</p>
           </section>
 
-          <section aria-labelledby="setup-title">
-            <div className="flex items-end justify-between gap-3 border-b border-border pb-3">
-              <h2 id="setup-title" className="flex items-center gap-2 text-base font-bold tracking-[-0.02em]"><Wrench className="size-4 text-primary" aria-hidden="true" /> 대신 설정해드려요</h2>
-              <Link href="/setup-request" className="text-sm font-semibold text-primary hover:underline">새 요청</Link>
-            </div>
-            {setupRequests.length === 0 ? (
-              <p className="mt-4 text-[15px] leading-7 text-muted-foreground">직접 설정하기 어려우면 전문가에게 맡길 수 있어요.</p>
-            ) : (
-              <ul className="divide-y divide-border">
-                {setupRequests.map((request) => (
-                  <li key={request.id} className="flex items-center justify-between gap-3 py-3.5">
-                    <div className="min-w-0">
-                      <Link href={`/setup-request/${request.id}`} className="block truncate font-semibold hover:text-primary hover:underline">{setupAutomationTypeLabel(request.automation_type)}</Link>
-                      <p className="mt-0.5 text-[13px] text-muted-foreground">{setupRequestNumber(request.id)} · {SETUP_REQUEST_STATUS[request.status].description}</p>
-                    </div>
-                    <SetupRequestStatusBadge status={request.status} />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
         </aside>
       </div>
     </div>

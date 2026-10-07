@@ -16,7 +16,6 @@ export const NAV_LINKS = [
   { href: "/#features", label: "마케팅 진단" },
   { href: "/#how", label: "이용 방법" },
   { href: "/pricing", label: "요금제" },
-  { href: "/guides", label: "활용 가이드" },
 ];
 
 export function PublicNav({ isAuthenticated }: { isAuthenticated: boolean }) {

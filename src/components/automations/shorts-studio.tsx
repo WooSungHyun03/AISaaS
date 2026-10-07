@@ -189,7 +189,7 @@ export function ShortsStudio({
       </section>
 
       <section aria-labelledby="publish-history-heading" className="space-y-3">
-        <div className="flex items-center justify-between gap-3"><h2 id="publish-history-heading" className="text-lg font-extrabold tracking-[-0.03em]">최근 게시 결과</h2><Link href="/automations/history" className="text-sm font-semibold text-primary hover:underline">전체 제작 기록</Link></div>
+        <div className="flex items-center justify-between gap-3"><h2 id="publish-history-heading" className="text-lg font-extrabold tracking-[-0.03em]">최근 게시 결과</h2><Link href="/usage" className="text-sm font-semibold text-primary hover:underline">전체 이용내역</Link></div>
         {publications.length === 0 ? <p className="rounded-2xl bg-muted px-5 py-6 text-sm text-muted-foreground">아직 게시한 기록이 없어요. 영상을 만든 뒤 플랫폼을 선택해 게시해보세요.</p> : <ul className="divide-y overflow-hidden rounded-2xl border bg-card">{publications.map((item) => <li key={`${item.runId}-${item.platform}`} className="flex flex-wrap items-center gap-3 px-5 py-4 sm:px-6"><Badge variant="success">{PLATFORM[item.platform].label}</Badge><span className="min-w-0 flex-1 text-sm text-muted-foreground">{new Date(item.createdAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} · ID {item.externalId ?? "확인 중"}{item.privacy === "private" ? " · 비공개" : ""}</span>{item.externalUrl ? <Button asChild size="sm" variant="ghost"><a href={item.externalUrl} target="_blank" rel="noopener noreferrer">열기 <ExternalLink aria-hidden="true" /></a></Button> : null}<Button asChild size="sm" variant="ghost"><Link href={`/automations/${automationId}/runs/${item.runId}`}>기록 보기</Link></Button></li>)}</ul>}
       </section>
     </div>

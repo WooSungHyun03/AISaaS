@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu } from "lucide-react";
+import { ArrowLeft, Menu } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,12 +14,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { signOut } from "@/app/(auth)/actions";
-import { APP_NAV, isNavActive } from "./nav-config";
+import { APP_NAV, getActiveNavItem } from "./nav-config";
 
 const PLAN_LABEL: Record<string, string> = { FREE: "무료 플랜", STARTER: "스타터 플랜", PRO: "프로 플랜" };
 
 export function AppHeader({ email, plan }: { email: string; plan: string }) {
   const pathname = usePathname();
+  const activeItem = getActiveNavItem(pathname);
   const initial = (email.trim()[0] ?? "?").toUpperCase();
 
   return (
@@ -32,6 +33,10 @@ export function AppHeader({ email, plan }: { email: string; plan: string }) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="max-h-[min(75vh,34rem)] w-64 overflow-y-auto">
+            <DropdownMenuItem asChild>
+              <Link href="/"><ArrowLeft aria-hidden="true" /> 메인으로</Link>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             {APP_NAV.map((section, index) => (
               <div key={section.label ?? index}>
                 {index > 0 ? <DropdownMenuSeparator /> : null}
@@ -42,8 +47,12 @@ export function AppHeader({ email, plan }: { email: string; plan: string }) {
                       {item.label} <span className="ml-auto text-xs text-muted-foreground">준비 중</span>
                     </DropdownMenuItem>
                   ) : (
-                    <DropdownMenuItem key={item.href} asChild>
-                      <Link href={item.href} aria-current={isNavActive(pathname, item) ? "page" : undefined}>
+                    <DropdownMenuItem
+                      key={item.href}
+                      asChild
+                      className={activeItem?.href === item.href ? "bg-accent text-accent-foreground" : undefined}
+                    >
+                      <Link href={item.href} aria-current={activeItem?.href === item.href ? "page" : undefined}>
                         <item.icon aria-hidden="true" /> {item.label}
                       </Link>
                     </DropdownMenuItem>
@@ -53,8 +62,15 @@ export function AppHeader({ email, plan }: { email: string; plan: string }) {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Logo href="/dashboard" size="sm" />
+        <Logo href="/" size="sm" />
       </div>
+
+      <Link
+        href="/"
+        className="hidden items-center gap-1.5 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground md:inline-flex"
+      >
+        <ArrowLeft className="size-4" aria-hidden="true" /> 메인으로
+      </Link>
 
       <div className="ml-auto flex items-center gap-2">
         <Link

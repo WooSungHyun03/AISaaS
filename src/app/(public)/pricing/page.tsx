@@ -112,15 +112,6 @@ export default async function PricingPage() {
         </div>
       </section>
 
-      <section id="setup-service" className="scroll-mt-20 border-t bg-ink text-white" aria-labelledby="setup-title">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-14 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:py-16">
-          <div className="max-w-2xl">
-            <h2 id="setup-title" className="text-2xl font-extrabold leading-snug tracking-[-0.03em] sm:text-3xl">직접 설정이 어렵다면, 세팅을 맡겨주세요</h2>
-            <p className="mt-3 text-[15px] leading-7 text-white/75">하고 싶은 일과 쓰는 도구를 알려주시면 담당자가 연결과 초기 설정을 도와드려요. 구독 요금과는 따로 견적을 드려요.</p>
-          </div>
-          <Button asChild variant="spark" size="lg" className="shrink-0"><Link href="/setup-request">세팅 맡기기 <ArrowRight aria-hidden="true" /></Link></Button>
-        </div>
-      </section>
     </>
   );
 }

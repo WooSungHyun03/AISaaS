@@ -1,50 +1,68 @@
 import { describe, expect, it } from "vitest";
-import { APP_NAV, isNavActive } from "./nav-config";
+import { APP_NAV, getActiveNavItem, isNavActive } from "./nav-config";
 import { NAV_LINKS } from "./public-nav";
 
 describe("navigation information architecture", () => {
-  it("puts the new-user marketing journey before advanced settings", () => {
-    expect(APP_NAV[0]?.items.map((item) => item.href)).toEqual([
+  it("lists the agreed customer menu in the same shared order", () => {
+    const items = APP_NAV.flatMap((section) => section.items);
+
+    expect(items.map((item) => item.href)).toEqual([
       "/dashboard",
       "/diagnosis",
-      "/business",
       "/calendar",
       "/blog",
       "/shorts",
+      "/usage",
       "/growth-report",
+      "/billing",
+      "/support",
+      "/settings",
     ]);
-    expect(APP_NAV[1]).toMatchObject({
-      label: "고급 설정",
-      items: [
-        { href: "/automations/marketplace" },
-        { href: "/automations" },
-        { href: "/automations/history" },
-      ],
-    });
+    expect(items.map((item) => item.label)).toEqual([
+      "대시보드",
+      "마케팅 진단",
+      "마케팅 캘린더",
+      "블로그",
+      "숏폼",
+      "이용내역",
+      "성장 리포트",
+      "요금제·결제",
+      "문의",
+      "설정",
+    ]);
   });
 
-  it("keeps the diagnosis item active after its compatibility redirect", () => {
+  it("keeps compatibility routes under the correct current menu", () => {
     const diagnosis = APP_NAV[0]!.items[1]!;
+    const usage = APP_NAV[0]!.items[5]!;
+
     expect(isNavActive("/diagnosis", diagnosis)).toBe(true);
     expect(isNavActive("/marketing/diagnosis", diagnosis)).toBe(true);
+    expect(isNavActive("/usage", usage)).toBe(true);
+    expect(isNavActive("/automations/history", usage)).toBe(true);
+    expect(getActiveNavItem("/automations/history")?.href).toBe("/usage");
   });
 
-  it("places resources last and prioritizes diagnosis in the public navigation", () => {
-    expect(APP_NAV.at(-1)?.label).toBe("리소스");
-    expect(APP_NAV.at(-1)?.items.map((item) => item.href)).toEqual(["/guides"]);
+  it("keeps public navigation focused on diagnosis, usage guidance, and pricing", () => {
     expect(NAV_LINKS[0]).toEqual({ href: "/#features", label: "마케팅 진단" });
-    expect(NAV_LINKS.at(-1)).toEqual({ href: "/guides", label: "활용 가이드" });
+    expect(NAV_LINKS.at(-1)).toEqual({ href: "/pricing", label: "요금제" });
   });
 
-  it("no longer surfaces the legacy AI tool directory in either navigation (the page itself is kept, not deleted)", () => {
+  it("does not surface deprecated routes while their code remains available", () => {
     const allApp = APP_NAV.flatMap((section) => section.items.map((item) => item.href));
-    expect(allApp).not.toContain("/directory");
-    expect(NAV_LINKS.map((link) => link.href)).not.toContain("/directory");
+    const allPublic = NAV_LINKS.map((link) => link.href);
+    const deprecated = ["/setup-request", "/directory", "/guides", "/automations", "/automations/marketplace", "/automations/history"];
+
+    for (const href of deprecated) {
+      expect(allApp).not.toContain(href);
+      expect(allPublic).not.toContain(href);
+    }
   });
 
-  it("lists the growth report as a real, linked item (no longer 'coming soon')", () => {
-    const growth = APP_NAV[0]!.items.find((item) => item.href === "/growth-report");
-    expect(growth).toBeDefined();
-    expect(growth?.comingSoon).toBeFalsy();
+  it("does not activate a prefix lookalike route", () => {
+    const settings = APP_NAV[0]!.items.at(-1)!;
+    expect(isNavActive("/settings", settings)).toBe(true);
+    expect(isNavActive("/settings/profile", settings)).toBe(true);
+    expect(isNavActive("/settings-old", settings)).toBe(false);
   });
 });

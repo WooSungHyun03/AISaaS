@@ -4,7 +4,7 @@ import { clientEnv } from "@/lib/env/client";
 
 const PROTECTED_PREFIXES = [
   "/dashboard", "/diagnosis", "/calendar", "/marketing", "/blog", "/shorts", "/growth-report",
-  "/automations", "/business", "/onboarding", "/billing", "/settings", "/setup-request",
+  "/usage", "/support", "/admin", "/automations", "/business", "/onboarding", "/billing", "/settings", "/setup-request",
 ];
 const AUTH_PREFIXES = ["/login", "/signup"];
 

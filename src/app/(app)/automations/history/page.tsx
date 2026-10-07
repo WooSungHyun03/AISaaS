@@ -35,7 +35,7 @@ function historyHref(status: RunHistoryFilter | null, page?: number) {
   if (status) params.set("status", status);
   if (page && page > 1) params.set("page", String(page));
   const query = params.toString();
-  return `/automations/history${query ? `?${query}` : ""}`;
+  return `/usage${query ? `?${query}` : ""}`;
 }
 
 export default async function AutomationHistoryPage({ searchParams }: PageProps<"/automations/history">) {
@@ -57,7 +57,7 @@ export default async function AutomationHistoryPage({ searchParams }: PageProps<
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader
-        title="제작 기록"
+        title="이용내역"
         description={`블로그 글과 숏폼을 언제, 어떻게 만들었는지 한눈에 봐요. 총 ${total.toLocaleString()}건 (한국 시간)`}
       />
 
@@ -82,7 +82,7 @@ export default async function AutomationHistoryPage({ searchParams }: PageProps<
           mascot="guide"
           title={status ? "이 상태의 기록이 없어요" : "아직 만든 기록이 없어요"}
           description="콘텐츠를 만들면 시작과 완료 상태가 여기에 쌓여요."
-          action={status ? <Button asChild variant="outline"><Link href="/automations/history">전체 기록 보기</Link></Button> : <Button asChild><Link href="/automations">만들기 설정으로</Link></Button>}
+          action={status ? <Button asChild variant="outline"><Link href="/usage">전체 내역 보기</Link></Button> : <Button asChild><Link href="/calendar">마케팅 캘린더로</Link></Button>}
         />
       ) : (
         <>

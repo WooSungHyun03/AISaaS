@@ -2,25 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut } from "lucide-react";
+import { ExternalLink, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { signOut } from "@/app/(auth)/actions";
 import { Logo } from "@/components/brand/logo";
-import { APP_NAV, isNavActive } from "./nav-config";
+import { APP_NAV, getActiveNavItem } from "./nav-config";
 
 export function AppSidebar() {
   const pathname = usePathname();
-  // "/automations" 는 하위 경로(/marketplace, /history)를 별도 메뉴로 가지므로,
-  // 더 구체적인 메뉴가 일치하면 상위 메뉴는 활성 표시하지 않는다.
-  const allItems = APP_NAV.flatMap((section) => section.items);
-  const mostSpecific = allItems
-    .filter((item) => !item.comingSoon && isNavActive(pathname, item))
-    .sort((a, b) => b.href.length - a.href.length)[0];
+  const activeItem = getActiveNavItem(pathname);
 
   return (
     <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
       <div className="flex h-16 shrink-0 items-center px-5">
-        <Logo href="/dashboard" tone="dark" />
+        <Logo href="/" tone="dark" />
       </div>
       <nav className="flex-1 space-y-6 overflow-y-auto px-3 pb-6 pt-3" aria-label="앱 주요 메뉴">
         {APP_NAV.map((section, index) => (
@@ -43,7 +38,7 @@ export function AppSidebar() {
                   </div>
                 );
               }
-              const isActive = mostSpecific?.href === item.href;
+              const isActive = activeItem?.href === item.href;
               return (
                 <Link
                   key={item.href}
@@ -65,15 +60,24 @@ export function AppSidebar() {
           </div>
         ))}
       </nav>
-      <form action={signOut} className="shrink-0 border-t border-sidebar-border p-3">
-        <button
-          type="submit"
-          className="flex min-h-10 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-[15px] font-medium text-sidebar-foreground transition-colors hover:bg-white/[0.06] hover:text-white"
+      <div className="shrink-0 border-t border-sidebar-border p-3">
+        <Link
+          href="/"
+          className="flex min-h-10 items-center gap-3 rounded-lg px-3 text-[15px] font-medium text-sidebar-foreground transition-colors hover:bg-white/[0.06] hover:text-white"
         >
-          <LogOut className="size-[18px]" aria-hidden="true" />
-          로그아웃
-        </button>
-      </form>
+          <ExternalLink className="size-[18px]" aria-hidden="true" />
+          메인으로
+        </Link>
+        <form action={signOut}>
+          <button
+            type="submit"
+            className="flex min-h-10 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-[15px] font-medium text-sidebar-foreground transition-colors hover:bg-white/[0.06] hover:text-white"
+          >
+            <LogOut className="size-[18px]" aria-hidden="true" />
+            로그아웃
+          </button>
+        </form>
+      </div>
     </aside>
   );
 }

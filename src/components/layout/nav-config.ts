@@ -1,14 +1,12 @@
 import {
   Activity,
   BookOpen,
-  Building2,
   CalendarDays,
   CreditCard,
   History,
   House,
-  ListChecks,
+  MessageCircleQuestion,
   Settings,
-  Sparkles,
   TrendingUp,
   Video,
   type LucideIcon,
@@ -31,41 +29,20 @@ export interface NavSection {
   items: NavItem[];
 }
 
-/**
- * 신규 사용자의 핵심 동선을 한 섹션에 그대로 배치합니다.
- * 자동화 관리와 실행 기록은 필요할 때 찾는 고급 설정으로 분리합니다.
- */
+/** 신규 사용자가 실제로 사용하는 화면을 작업 순서대로 보여줍니다. */
 export const APP_NAV: NavSection[] = [
   {
     items: [
       { href: "/dashboard", label: "대시보드", icon: House, exact: true },
       { href: "/diagnosis", label: "마케팅 진단", icon: Activity, activePaths: ["/marketing/diagnosis"] },
-      { href: "/business", label: "사업 정보", icon: Building2 },
       { href: "/calendar", label: "마케팅 캘린더", icon: CalendarDays },
       { href: "/blog", label: "블로그", icon: BookOpen },
       { href: "/shorts", label: "숏폼", icon: Video },
+      { href: "/usage", label: "이용내역", icon: History, activePaths: ["/automations/history"] },
       { href: "/growth-report", label: "성장 리포트", icon: TrendingUp },
-    ],
-  },
-  {
-    label: "고급 설정",
-    items: [
-      { href: "/automations/marketplace", label: "자동화 둘러보기", icon: Sparkles },
-      { href: "/automations", label: "내 자동화", icon: ListChecks, exact: true },
-      { href: "/automations/history", label: "실행 기록", icon: History },
-    ],
-  },
-  {
-    label: "내 계정",
-    items: [
       { href: "/billing", label: "요금제·결제", icon: CreditCard },
+      { href: "/support", label: "문의", icon: MessageCircleQuestion },
       { href: "/settings", label: "설정", icon: Settings },
-    ],
-  },
-  {
-    label: "리소스",
-    items: [
-      { href: "/guides", label: "활용 가이드", icon: BookOpen },
     ],
   },
 ];
@@ -74,4 +51,16 @@ export function isNavActive(pathname: string, item: Pick<NavItem, "href" | "exac
   const paths = [item.href, ...(item.activePaths ?? [])];
   if (item.exact) return paths.includes(pathname);
   return paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
+/** 데스크톱과 모바일이 같은 우선순위로 하나의 활성 메뉴만 표시하게 합니다. */
+export function getActiveNavItem(pathname: string): NavItem | undefined {
+  return APP_NAV
+    .flatMap((section) => section.items)
+    .filter((item) => !item.comingSoon && isNavActive(pathname, item))
+    .sort((a, b) => {
+      const longestA = Math.max(a.href.length, ...(a.activePaths ?? []).map((path) => path.length));
+      const longestB = Math.max(b.href.length, ...(b.activePaths ?? []).map((path) => path.length));
+      return longestB - longestA;
+    })[0];
 }

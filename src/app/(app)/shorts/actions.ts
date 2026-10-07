@@ -80,6 +80,7 @@ export async function generateShortsPreview(automationId: string): Promise<Short
     if (result.status === "FAILED") return { error: describeAutomationRunError(result.errorMessage), runId: result.runId };
     revalidatePath("/shorts");
     revalidatePath("/automations/history");
+    revalidatePath("/usage");
     return { success: true, runId: result.runId };
   } catch (error) {
     const message = error instanceof Error && error.message.includes("already has a run")
@@ -107,6 +108,7 @@ export async function publishShortsNow(
     if (result.status === "FAILED") return { error: describeAutomationRunError(result.errorMessage), runId: result.runId };
     revalidatePath("/shorts");
     revalidatePath("/automations/history");
+    revalidatePath("/usage");
     return { success: true, runId: result.runId };
   } catch (error) {
     const message = error instanceof Error && error.message.includes("already has a run")
