@@ -220,11 +220,6 @@ export function buildCharacterScene(scene: VideoRenderScene, index: number, fall
   };
 }
 
-/** True when the render should use the reference-image (character) layout instead of the template. */
-export function isCharacterRender(scenes: VideoRenderScene[]): boolean {
-  return scenes.some((scene) => Boolean(scene.imageUrl || scene.videoUrl));
-}
-
 export function buildCharacterMovie(scenes: VideoRenderScene[]): Record<string, unknown> {
   const fallbackImageUrl = scenes.find((scene) => scene.imageUrl)?.imageUrl ?? "";
   if (!fallbackImageUrl && !scenes.every((scene) => scene.videoUrl)) {

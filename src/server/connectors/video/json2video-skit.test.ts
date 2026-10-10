@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildCharacterMovie, buildCharacterScene, isCharacterRender, motionKeyframes, wrapForBubble } from "./json2video-skit";
-import { VIDEO_MOTIONS, videoRenderInputSchema, type VideoRenderScene } from "./types";
+import { buildCharacterMovie, buildCharacterScene, motionKeyframes, wrapForBubble } from "./json2video-skit";
+import { VIDEO_MOTIONS, videoRenderSceneSchema, type VideoRenderScene } from "./types";
 
 const base = "https://be-celeb.org/shorts-mascot";
 const scenes: VideoRenderScene[] = [
@@ -14,11 +14,6 @@ type Element = Record<string, unknown> & { type: string };
 const elementsOf = (scene: Record<string, unknown>) => scene.elements as Element[];
 
 describe("character movie builder", () => {
-  it("detects character renders from the scene image", () => {
-    expect(isCharacterRender(scenes)).toBe(true);
-    expect(isCharacterRender(scenes.map(({ imageUrl: _imageUrl, ...rest }) => rest))).toBe(false);
-  });
-
   it("builds one voice, one image and one bubble per scene at 9:16 with no template", () => {
     const movie = buildCharacterMovie(scenes) as { width: number; height: number; template?: string; scenes: Array<Record<string, unknown>> };
 
@@ -80,12 +75,18 @@ describe("character movie builder", () => {
     }
   });
 
-  it("is accepted by the shared render input schema", () => {
-    expect(videoRenderInputSchema.safeParse({ scenes, voiceScript: scenes.map((scene) => scene.text).join(" ") }).success).toBe(true);
-    expect(videoRenderInputSchema.safeParse({
-      scenes: scenes.map((scene, index) => (index === 0 ? { ...scene, imageUrl: "http://insecure.example.com/a.png" } : scene)),
-      voiceScript: "x",
-    }).success).toBe(false);
+  it("builds an animated-clip scene (video instead of image) that loops and is muted", () => {
+    const clip = "https://v3.fal.media/clip.mp4";
+    const scene = buildCharacterScene({ ...scenes[1], imageUrl: undefined, videoUrl: clip }, 1, "");
+    const [voice, media, bubble] = elementsOf(scene);
+    expect(elementsOf(scene).map((element) => element.type)).toEqual(["voice", "video", "text"]);
+    expect(media).toMatchObject({ src: clip, loop: -1, muted: true, duration: -2, resize: "cover", width: 1080, height: 1920 });
+    expect(voice.text).toBe(scenes[1].text);
+    expect(bubble).toMatchObject({ "vertical-position": "top" });
+  });
+
+  it("is accepted by the shared scene schema", () => {
+    expect(scenes.every((scene) => videoRenderSceneSchema.safeParse(scene).success)).toBe(true);
   });
 });
 

@@ -4,8 +4,8 @@
  * PNG (when the source has transparency) or JPEG, which are the only formats
  * the video renderer accepts.
  */
-// Photos for the showcase format are shown full-screen (1080x1920), so keep them as sharp as the size cap allows.
-const EDGES = [1600, 1280, 1024, 768, 512];
+// Character images are re-framed to 720x1280 for the animator, so 1024px is plenty.
+const EDGES = [1024, 768, 512];
 const TARGET_BYTES = 2.6 * 1024 * 1024;
 
 function toBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Promise<Blob | null> {

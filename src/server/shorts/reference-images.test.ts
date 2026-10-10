@@ -51,8 +51,8 @@ describe("resolveReferenceImageUrls", () => {
   it("signs uploads and points mascot poses at the site's static files", async () => {
     const sign = vi.fn().mockResolvedValue({ data: { signedUrl: "https://abc.supabase.co/storage/v1/object/sign/shorts-references/user-1/auto-1/u.png?token=t" }, error: null });
     const references: ShortsReference[] = [
-      { id: "u", kind: "upload", source: "user-1/auto-1/u.png", label: "", subject: "other" },
-      { id: "m", kind: "mascot", source: "wave", label: "인사", subject: "character" },
+      { id: "u", kind: "upload", source: "user-1/auto-1/u.png", label: "" },
+      { id: "m", kind: "mascot", source: "wave", label: "인사" },
     ];
 
     const urls = await resolveReferenceImageUrls(adminWith(sign), references, owner);
@@ -67,11 +67,11 @@ describe("resolveReferenceImageUrls", () => {
     clientEnvMock.NEXT_PUBLIC_SITE_URL = "http://localhost:3000";
     try {
       await expect(
-        resolveReferenceImageUrls(adminWith(vi.fn()), [{ id: "m", kind: "mascot", source: "wave", label: "", subject: "character" }], owner),
+        resolveReferenceImageUrls(adminWith(vi.fn()), [{ id: "m", kind: "mascot", source: "wave", label: "" }], owner),
       ).rejects.toMatchObject({ code: "NOT_CONFIGURED" });
 
       serverEnvMock.VIDEO_RENDER_PROVIDER = "mock";
-      const urls = await resolveReferenceImageUrls(adminWith(vi.fn()), [{ id: "m", kind: "mascot", source: "wave", label: "", subject: "character" }], owner);
+      const urls = await resolveReferenceImageUrls(adminWith(vi.fn()), [{ id: "m", kind: "mascot", source: "wave", label: "" }], owner);
       expect(urls[0]).toMatch(/^https:\/\/reference-image\.mock\.invalid\//);
     } finally {
       clientEnvMock.NEXT_PUBLIC_SITE_URL = "https://be-celeb.org";
@@ -82,7 +82,7 @@ describe("resolveReferenceImageUrls", () => {
   it("never signs a path that belongs to another user", async () => {
     const sign = vi.fn();
     await expect(
-      resolveReferenceImageUrls(adminWith(sign), [{ id: "x", kind: "upload", source: "user-2/auto-1/x.png", label: "", subject: "other" }], owner),
+      resolveReferenceImageUrls(adminWith(sign), [{ id: "x", kind: "upload", source: "user-2/auto-1/x.png", label: "" }], owner),
     ).rejects.toMatchObject({ code: "INVALID_TARGET" });
     expect(sign).not.toHaveBeenCalled();
   });
@@ -90,7 +90,7 @@ describe("resolveReferenceImageUrls", () => {
   it("reports an unreadable upload instead of rendering without it", async () => {
     const sign = vi.fn().mockResolvedValue({ data: null, error: { message: "not found" } });
     await expect(
-      resolveReferenceImageUrls(adminWith(sign), [{ id: "u", kind: "upload", source: "user-1/auto-1/u.png", label: "", subject: "other" }], owner),
+      resolveReferenceImageUrls(adminWith(sign), [{ id: "u", kind: "upload", source: "user-1/auto-1/u.png", label: "" }], owner),
     ).rejects.toMatchObject({ code: "INVALID_TARGET" });
   });
 });

@@ -24,7 +24,6 @@ import {
   SHORTS_BRIEF_MAX_LENGTH,
   SHORTS_STYLES,
   parseShortsReferenceSettings,
-  isReferenceSubject,
   type ShortsReference,
   type ShortsStyle,
 } from "@/types/shorts-reference";
@@ -39,6 +38,9 @@ export interface ShortsActionResult {
   pending?: boolean;
   progress?: string;
 }
+
+/** Shorts are always character videos; without a character image there is nothing to animate. */
+const NEEDS_CHARACTER = "캐릭터 이미지를 먼저 추가해주세요. 이지 마케팅 마스코트를 불러오거나 캐릭터 이미지를 올리면 영상을 만들 수 있어요.";
 
 function parsePlatforms(values: string[]): ShortsPublishPlatform[] {
   return [...new Set(values.filter((value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube"))];
@@ -98,6 +100,7 @@ export async function createShortsAutomation(businessId: string): Promise<Shorts
 export async function generateShortsPreview(automationId: string): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
+  if (parseShortsReferenceSettings(owned.automation.config).references.length === 0) return { error: NEEDS_CHARACTER };
   try {
     const result = await runAutomationNow(automationId, { shorts: { previewOnly: true } });
     if (result.status === "FAILED") return { error: describeAutomationRunError(result.errorMessage), runId: result.runId };
@@ -170,6 +173,7 @@ export async function publishShortsNow(
 export async function saveShortsSchedule(automationId: string, formData: FormData): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
+  if (parseShortsReferenceSettings(owned.automation.config).references.length === 0) return { error: NEEDS_CHARACTER };
   const schedule = parseScheduleFromForm(formData, "Asia/Seoul");
   if (!schedule) return { error: "주기, 요일(날짜), 시간을 확인해주세요." };
   const platforms = parsePlatforms(formData.getAll("platforms").map(String));
@@ -235,8 +239,6 @@ export async function uploadShortsReference(automationId: string, formData: Form
   const type = detectImageType(bytes);
   if (!type) return { error: "PNG 또는 JPG 이미지만 올릴 수 있어요." };
   const label = String(formData.get("label") ?? "").trim().slice(0, REFERENCE_LABEL_MAX_LENGTH);
-  const requestedSubject = String(formData.get("subject") ?? "other");
-  const subject = isReferenceSubject(requestedSubject) ? requestedSubject : "other";
 
   const id = crypto.randomUUID();
   const path = referenceStoragePath(owned.user.id, automationId, id, type);
@@ -246,7 +248,7 @@ export async function uploadShortsReference(automationId: string, formData: Form
   } catch {
     return { error: "이미지를 저장하지 못했어요. 잠시 후 다시 시도해주세요." };
   }
-  const failure = await writeShortsConfig(owned, { references: [...settings.references, { id, kind: "upload", source: path, label, subject }] });
+  const failure = await writeShortsConfig(owned, { references: [...settings.references, { id, kind: "upload", source: path, label }] });
   if (failure) {
     await deleteReferenceImage(admin, path);
     return { error: failure };
@@ -265,7 +267,6 @@ export async function addMascotReferences(automationId: string): Promise<ShortsA
     kind: "mascot",
     source: pose.key,
     label: pose.label,
-    subject: "character",
   }));
   if (additions.length === 0) {
     return { error: room <= 0 ? "참고 이미지가 가득 찼어요. 일부를 지운 뒤 마스코트를 불러오세요." : "마스코트 이미지를 이미 모두 불러왔어요." };

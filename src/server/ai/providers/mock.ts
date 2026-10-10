@@ -29,63 +29,21 @@ export class MockAIProvider implements AIProvider {
     }
 
     if (prompt.includes("AUTOBIZ_SHORTS_PLAN_V1")) {
-      // Reference lines look like "2. [character] 설명"; pick images from the group the format may use.
-      const tagged = [...prompt.matchAll(/^(\d+)\. \[(\w+)\]/gm)].map((match) => ({ index: Number(match[1]), subject: match[2] }));
-      const characters = tagged.filter((item) => item.subject === "character").map((item) => item.index);
-      const photos = tagged.filter((item) => item.subject !== "character").map((item) => item.index);
-      const request = prompt.match(/^The owner's request \(follow it\): (.+)$/m)?.[1] ?? "";
-      const onlyShowcase = prompt.includes('Use format "showcase"');
-      const onlyCharacter = prompt.includes('Use format "character"');
-      const showcase = onlyShowcase || (!onlyCharacter && photos.length > 0 && !/마스코트|캐릭터/.test(request));
-      if (showcase && photos.length > 0) {
-        const photo = (turn: number) => photos[turn % photos.length];
-        return {
-          text: JSON.stringify({
-            format: "showcase",
-            hook: "여기 한번 보세요!",
-            scenes: [
-              { text: "여기 한번 보세요!", caption: "여기 한번 보세요!", imageIndex: photo(0), motion: "zoom-in", durationSec: 3 },
-              { text: "정성껏 준비한 공간이에요", caption: "정성껏 준비한 공간", imageIndex: photo(1), motion: "pan-left", durationSec: 4 },
-              { text: "하나하나 직접 챙긴 메뉴와 제품을 만나보세요", caption: "직접 챙긴 메뉴·제품", imageIndex: photo(2), motion: "zoom-out", durationSec: 5 },
-              { text: "찾아오시는 길도 어렵지 않아요", caption: "찾아오시는 길", imageIndex: photo(3), motion: "pan-right", durationSec: 5 },
-              { text: "지금 바로 방문해 보세요!", caption: "지금 바로 방문하세요", imageIndex: photo(4), motion: "zoom-in", durationSec: 4 },
-            ],
-            caption: "우리 동네 공간을 소개합니다 #동네맛집 #소상공인 #숏폼",
-            privacy: "private",
-          }),
-        };
-      }
-      const character = (turn: number) => (characters.length > 0 ? characters[turn % characters.length] : 1);
+      // Image lines look like "2. 설명"; cycle through them so every index is valid.
+      const imageCount = Math.max(1, (prompt.match(/^\d+\. /gm) ?? []).length);
+      const image = (turn: number) => (turn % imageCount) + 1;
       return {
         text: JSON.stringify({
-          format: "character",
           hook: "사장님, 큰일 났어요!",
           scenes: [
-            { text: "사장님, 큰일 났어요!", speaker: "partner", imageIndex: character(0), action: "The character looks panicked and shakes slightly.", motion: "shake", durationSec: 2 },
-            { text: "무슨 일이에요? 말해 보세요!", speaker: "main", imageIndex: character(1), action: "The character tilts its head curiously and waves.", motion: "pop", durationSec: 3 },
-            { text: "마케팅할 시간이 하나도 없어요", speaker: "partner", imageIndex: character(2), action: "The character listens with a worried expression.", motion: "wobble", durationSec: 5 },
-            { text: "걱정 마세요, 제가 뚝딱 만들어 드려요!", speaker: "main", imageIndex: character(3), action: "The character cheerfully gives a thumbs up and bounces.", motion: "bounce", durationSec: 6 },
-            { text: "글도 영상도 한 번에 끝이에요", speaker: "main", imageIndex: character(4), action: "The character spreads its arms proudly.", motion: "zoom", durationSec: 5 },
-            { text: "지금 바로 시작해 보세요!", speaker: "main", imageIndex: character(5), action: "The character points forward and winks.", motion: "pop", durationSec: 4 },
+            { text: "사장님, 큰일 났어요!", speaker: "partner", imageIndex: image(0), action: "The character looks panicked and shakes slightly.", motion: "shake", durationSec: 2 },
+            { text: "무슨 일이에요? 말해 보세요!", speaker: "main", imageIndex: image(1), action: "The character tilts its head curiously and waves.", motion: "pop", durationSec: 3 },
+            { text: "마케팅할 시간이 하나도 없어요", speaker: "partner", imageIndex: image(2), action: "The character listens with a worried expression.", motion: "wobble", durationSec: 5 },
+            { text: "걱정 마세요, 제가 뚝딱 만들어 드려요!", speaker: "main", imageIndex: image(3), action: "The character cheerfully gives a thumbs up and bounces.", motion: "bounce", durationSec: 6 },
+            { text: "글도 영상도 한 번에 끝이에요", speaker: "main", imageIndex: image(4), action: "The character spreads its arms proudly.", motion: "zoom", durationSec: 5 },
+            { text: "지금 바로 시작해 보세요!", speaker: "main", imageIndex: image(5), action: "The character points forward and winks.", motion: "pop", durationSec: 4 },
           ],
           caption: "마케팅이 어려운 사장님을 위한 캐릭터 콩트 #소상공인마케팅 #숏폼 #마케팅자동화",
-          privacy: "private",
-        }),
-      };
-    }
-
-    if (prompt.includes("AUTOBIZ_SHORTS_CONTENT_V1")) {
-      return {
-        text: JSON.stringify({
-          hook: "아직도 이 일에 매일 시간을 쓰고 계신가요?",
-          script: "반복 업무 때문에 중요한 고객을 놓치고 있나요? 필요한 정보를 한 번 정리하면 매일 해야 했던 일을 더 빠르게 처리할 수 있습니다. 오늘부터 반복 업무를 줄이고 고객에게 집중해보세요.",
-          scenes: [
-            { text: "아직도 매일 반복하세요?", visualPrompt: "바쁜 소상공인이 책상 위 할 일 목록을 보며 놀라는 모습, 세로 9:16 클로즈업, 밝은 자연광", durationSec: 3 },
-            { text: "반복 업무가 고객 시간을 빼앗습니다", visualPrompt: "알림과 문서가 쌓인 화면을 빠르게 넘기는 손, 세로 9:16 오버헤드 샷", durationSec: 4 },
-            { text: "정보를 한 번 정리하면 달라집니다", visualPrompt: "복잡한 메모가 깔끔한 한 장의 업무 화면으로 정리되는 장면, 세로 9:16", durationSec: 5 },
-            { text: "반복은 줄이고 고객에게 집중하세요", visualPrompt: "사업자가 고객과 편안하게 대화하는 모습, 세로 9:16 미디엄 샷, 따뜻한 조명", durationSec: 5 },
-          ],
-          caption: "매일 반복하던 업무를 줄이고 고객에게 더 집중해보세요. #업무자동화 #소상공인마케팅 #생산성",
           privacy: "private",
         }),
       };

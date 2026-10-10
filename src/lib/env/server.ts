@@ -51,7 +51,6 @@ const serverSchema = z.object({
 
   VIDEO_RENDER_PROVIDER: z.enum(["mock", "json2video"]).default("mock"),
   VIDEO_RENDER_API_KEY: z.string().optional(),
-  VIDEO_RENDER_TEMPLATE_ID: z.string().optional(),
 
   // Image-to-video service that animates reference characters (src/server/connectors/animation).
   // "mock" never calls the network; "fal" needs FAL_KEY. ANIMATION_MODEL overrides the fal endpoint id.

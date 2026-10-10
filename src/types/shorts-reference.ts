@@ -7,31 +7,12 @@ export const MAX_REFERENCE_UPLOAD_BYTES = 3 * 1024 * 1024;
 export const REFERENCE_LABEL_MAX_LENGTH = 60;
 export const SHORTS_BRIEF_MAX_LENGTH = 300;
 
-/**
- * `auto` lets the AI pick the format from the owner's request and the kind of
- * images; the others pin it. `skit`/`explainer` need a character image,
- * `showcase` needs a photo of a product, place, or similar.
- */
+/** Shorts are always character videos; the style only sets the tone. */
 export const SHORTS_STYLES = {
-  auto: { label: "자동 (요청에 맞게)", description: "요청 사항과 이미지 종류를 보고 가장 알맞은 영상으로 만들어요" },
   skit: { label: "캐릭터 콩트", description: "캐릭터가 움직이며 대사를 주고받는 짧고 웃긴 영상" },
   explainer: { label: "캐릭터 설명", description: "캐릭터가 움직이며 차근차근 알려주는 영상" },
-  showcase: { label: "사진 홍보", description: "가게·제품·사무실 사진을 보여주며 소개하는 영상" },
 } as const;
 export type ShortsStyle = keyof typeof SHORTS_STYLES;
-
-/** What a reference image shows. Only `character` images are ever animated. */
-export const REFERENCE_SUBJECTS = {
-  character: "캐릭터 (일러스트·마스코트)",
-  product: "제품·메뉴",
-  place: "매장·사무실·공간",
-  person: "사람",
-  other: "기타",
-} as const;
-export type ReferenceSubject = keyof typeof REFERENCE_SUBJECTS;
-export function isReferenceSubject(value: string): value is ReferenceSubject {
-  return value in REFERENCE_SUBJECTS;
-}
 
 /**
  * Poses of the 이지 마케팅 mascot shipped in `public/shorts-mascot/*.png`.
@@ -61,8 +42,6 @@ export const shortsReferenceSchema = z.object({
   kind: z.enum(["upload", "mascot"]),
   source: z.string().min(1).max(300),
   label: z.string().trim().max(REFERENCE_LABEL_MAX_LENGTH),
-  /** Older uploads have no subject; they count as "other" (never animated). */
-  subject: z.enum(["character", "product", "place", "person", "other"]).default("other"),
 });
 export type ShortsReference = z.infer<typeof shortsReferenceSchema>;
 
@@ -83,46 +62,20 @@ export function parseShortsReferenceSettings(config: unknown): ShortsReferenceSe
       if (!parsed.success) continue;
       if (parsed.data.kind === "mascot" && !isMascotPoseKey(parsed.data.source)) continue;
       if (references.some((existing) => existing.id === parsed.data.id)) continue;
-      references.push(parsed.data.kind === "mascot" ? { ...parsed.data, subject: "character" } : parsed.data);
+      references.push(parsed.data);
       if (references.length >= MAX_SHORTS_REFERENCES) break;
     }
   }
-  const style: ShortsStyle = typeof record.shortsStyle === "string" && record.shortsStyle in SHORTS_STYLES ? (record.shortsStyle as ShortsStyle) : "auto";
+  const style: ShortsStyle = record.shortsStyle === "explainer" ? "explainer" : "skit";
   const brief = typeof record.shortsBrief === "string" ? record.shortsBrief.trim().slice(0, SHORTS_BRIEF_MAX_LENGTH) : "";
   return { references, style, brief };
 }
 
-/** What the AI is told about each reference image (1-based so it matches `imageIndex`). */
+/** What the AI is told about each character image (1-based so it matches `imageIndex`). */
 export function describeReferenceForPrompt(reference: ShortsReference): string {
   if (reference.kind === "mascot") {
     const pose = MASCOT_POSES.find((item) => item.key === reference.source);
-    return pose ? `[character] 이지 마케팅 마스코트 로봇 · ${pose.description}` : "[character] 이지 마케팅 마스코트 로봇";
+    return pose ? `이지 마케팅 마스코트 로봇 · ${pose.description}` : "이지 마케팅 마스코트 로봇";
   }
-  return `[${reference.subject}] ${reference.label || "사용자가 올린 참고 이미지"}`;
-}
-
-/** 1-based indexes of the references of each group, as the AI sees them. */
-export function referenceIndexes(references: ShortsReference[]): { character: number[]; photo: number[] } {
-  const character: number[] = [];
-  const photo: number[] = [];
-  references.forEach((reference, index) => (reference.subject === "character" ? character : photo).push(index + 1));
-  return { character, photo };
-}
-
-export type ShortsFormat = "character" | "showcase";
-
-/** Which formats the owner's images and chosen style allow. Always at least one for a non-empty list. */
-export function allowedShortsFormats(references: ShortsReference[], style: ShortsStyle): ShortsFormat[] {
-  const { character, photo } = referenceIndexes(references);
-  const formats: ShortsFormat[] = [];
-  const wantsCharacter = style === "auto" || style === "skit" || style === "explainer";
-  const wantsShowcase = style === "auto" || style === "showcase";
-  if (wantsCharacter && character.length > 0) formats.push("character");
-  if (wantsShowcase && photo.length > 0) formats.push("showcase");
-  // A pinned style the images cannot satisfy falls back to whatever the images do allow.
-  if (formats.length === 0) {
-    if (character.length > 0) formats.push("character");
-    if (photo.length > 0) formats.push("showcase");
-  }
-  return formats;
+  return reference.label || "사용자가 올린 캐릭터 이미지";
 }

@@ -46,24 +46,18 @@ of text generation per user.
    subscription-based (Hobby from about $17/month; Professional about $50/month for
    200 Full-HD minutes — verify current pricing and the Hobby minute allowance).
 2. Copy the API key from the dashboard.
-3. Create the template from `docs/json2video-shorts-template.json`
-   (steps in `docs/VIDEO_RENDERING.md`) and copy its **template ID**.
-4. Set in Vercel (Production):
+3. Set in Vercel (Production):
 
    | Name | Value |
    | --- | --- |
    | `VIDEO_RENDER_PROVIDER` | `json2video` |
    | `VIDEO_RENDER_API_KEY` | the API key (Sensitive) |
-   | `VIDEO_RENDER_TEMPLATE_ID` | the template ID |
+
+   No template is needed: the movie is built in code (`docs/VIDEO_RENDERING.md`).
 
 Cost per Shorts video is about 1 credit per second (a 30 s video ≈ 30 credits ≈
 $0.1–0.2 on a paid plan); the voice-over is included. The fixed monthly
 subscription is the real cost until volume grows.
-
-Known limitation: scenes currently use the template's branded background
-colours — the per-scene `visualPrompt` is generated but not used to fetch
-footage. Adding a stock-footage or customer-photo source is the biggest quality
-upgrade available (see docs/QA_AUDIT.md).
 
 ## 2b. Animated characters (optional): fal.ai
 

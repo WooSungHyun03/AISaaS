@@ -2,13 +2,11 @@ import "server-only";
 import { z } from "zod";
 import { generateStructured } from "@/server/ai/generate";
 import {
-  buildShortsContentPrompt,
   buildShortsPlanPrompt,
   buildShortsTopicPrompt,
-  makeShortsPlanSchema,
   shortsContentSchema,
+  shortsPlanSchema,
   shortsTopicSchema,
-  type CharacterPlan,
   type ShortsContent,
   type ShortsTopic,
 } from "@/server/ai/prompts/shorts";
@@ -17,15 +15,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { publishShortsToPlatforms } from "@/server/automations/shorts-publishing";
 import { getAnimationProvider, isAnimationAvailable, type AnimationClipHandle } from "@/server/connectors/animation";
 import { animationClipHandleSchema } from "@/server/connectors/animation/types";
-import {
-  buildCharacterMovie,
-  buildShowcaseMovie,
-  getMovieRenderStatus,
-  renderShortVideo,
-  startMovieRender,
-  type ShowcaseScene,
-  type VideoRenderScene,
-} from "@/server/connectors/video";
+import { buildCharacterMovie, getMovieRenderStatus, startMovieRender, type VideoRenderScene } from "@/server/connectors/video";
 import { canUseAnimatedShorts } from "@/server/billing/entitlements";
 import { prepareCharacterFrame } from "@/server/shorts/character-frame";
 import {
@@ -43,13 +33,7 @@ import type {
   ShortsPublishPlatform,
 } from "@/types/automation";
 import type { Json } from "@/types/domain";
-import {
-  allowedShortsFormats,
-  describeReferenceForPrompt,
-  parseShortsReferenceSettings,
-  referenceIndexes,
-  type ShortsReferenceSettings,
-} from "@/types/shorts-reference";
+import { describeReferenceForPrompt, parseShortsReferenceSettings, type ShortsReferenceSettings } from "@/types/shorts-reference";
 
 /**
  * Selects a topic before writing the full video so a near-duplicate only
@@ -140,10 +124,9 @@ const plannedSceneSchema = z.object({
   text: z.string(),
   visualPrompt: z.string(),
   durationSec: z.number(),
-  speaker: z.enum(["main", "partner"]).optional(),
-  motion: z.string().optional(),
-  action: z.string().optional(),
-  caption: z.string().optional(),
+  speaker: z.enum(["main", "partner"]),
+  motion: z.string(),
+  action: z.string(),
   /** 0-based index into the saved reference list. */
   referenceIndex: z.number().int().min(0),
 });
@@ -162,9 +145,8 @@ type ClipState = z.infer<typeof clipStateSchema>;
 const jobStateSchema = z.object({
   v: z.literal(1),
   stage: z.enum(["ANIMATING", "COMPOSING"]),
-  format: z.enum(["character", "showcase"]),
-  /** video = real animated clips, tween = still image moved by JSON2Video, photos = showcase of photos. */
-  animationMode: z.enum(["video", "tween", "photos"]),
+  /** video = real animated clips, tween = the still image moved by JSON2Video (fallback). */
+  animationMode: z.enum(["video", "tween"]),
   animationNote: z.string().optional(),
   topic: z.string(),
   content: z.looseObject({}),
@@ -182,11 +164,6 @@ function deferred(state: JobState, progress: string): AutomationHandlerOutcome {
   return { deferred: { state: state as unknown as Json, progress } };
 }
 
-/** The AI numbers images from 1; anything outside the group the format may use falls back to that group's first image. */
-function clampReferenceIndex(imageIndex: number, validOneBased: number[]): number {
-  return (validOneBased.includes(imageIndex) ? imageIndex : validOneBased[0]) - 1;
-}
-
 function clipPrompt(action: string): string {
   return `${action} Keep the character's design, colors and proportions exactly the same as in the image. Smooth, natural motion with a steady camera; the plain gradient background stays unchanged; no text, no subtitles, no logos, no new characters.`.slice(0, 600);
 }
@@ -195,14 +172,13 @@ function contentForOutput(plan: { hook: string; caption: string; privacy: "priva
   return {
     hook: plan.hook,
     script: scenes.map((scene) => scene.text).join(" "),
-    scenes: scenes.map(({ text, visualPrompt, durationSec, speaker, motion, action, caption, referenceIndex }) => ({
+    scenes: scenes.map(({ text, visualPrompt, durationSec, speaker, motion, action, referenceIndex }) => ({
       text,
       visualPrompt,
       durationSec,
-      ...(speaker ? { speaker } : {}),
-      ...(motion ? { motion } : {}),
-      ...(action ? { action } : {}),
-      ...(caption ? { caption } : {}),
+      speaker,
+      motion,
+      action,
       imageIndex: referenceIndex + 1,
     })),
     caption: plan.caption,
@@ -211,74 +187,41 @@ function contentForOutput(plan: { hook: string; caption: string; privacy: "priva
 }
 
 /**
- * Reference-image Shorts. The AI plans the video from the owner's request and
- * the kind of each image (a character acts it out, or photos are shown), then
- * the render is started and the run is deferred: clips and the final movie
- * take minutes, which no single request can wait for (see runner.ts).
+ * Character Shorts. The AI plans a skit or explainer around the owner's
+ * character images, each scene's character is animated by the image-to-video
+ * service, and the clips are voiced and assembled by JSON2Video. Clips and the
+ * final render take minutes, which no single request can wait for, so the run
+ * is deferred and advanced in short steps (see runner.ts).
  */
-async function startReferenceRun(ctx: AutomationRunContext, settings: ShortsReferenceSettings): Promise<AutomationHandlerOutcome> {
+async function startCharacterRun(ctx: AutomationRunContext, settings: ShortsReferenceSettings): Promise<AutomationHandlerOutcome> {
   const owner = { userId: ctx.automation.user_id, automationId: ctx.automation.id };
   const { topic } = await generateTopic(ctx, settings.brief || undefined);
-  const allowed = allowedShortsFormats(settings.references, settings.style);
   const plan = await generateStructured({
     ...buildShortsPlanPrompt(ctx.business, topic, {
       references: settings.references.map(describeReferenceForPrompt),
-      allowedFormats: allowed,
       style: settings.style,
       brief: settings.brief || undefined,
       mascot: settings.references.some((reference) => reference.kind === "mascot"),
       calendar: ctx.calendarItem ? { goal: ctx.calendarItem.goal, summary: ctx.calendarItem.summary, cta: ctx.calendarItem.cta } : undefined,
     }),
-    schema: makeShortsPlanSchema(allowed),
+    schema: shortsPlanSchema,
     maxTokens: 1_800,
   });
 
   const admin = createAdminClient();
-  const groups = referenceIndexes(settings.references);
   const previewOnly = Boolean(ctx.shorts?.previewOnly);
   const platforms = previewOnly ? [] : scheduledPlatforms(ctx.config);
   const base = { v: 1 as const, topic, previewOnly, platforms, startedAt: new Date().toISOString() };
 
-  if (plan.format === "showcase") {
-    const scenes: PlannedScene[] = plan.scenes.map((scene) => ({
-      text: scene.text,
-      visualPrompt: scene.visualPrompt,
-      durationSec: scene.durationSec,
-      motion: scene.motion,
-      caption: scene.caption,
-      referenceIndex: clampReferenceIndex(scene.imageIndex, groups.photo),
-    }));
-    const urls = await resolveReferenceImageUrls(admin, settings.references, owner);
-    const showcaseScenes: ShowcaseScene[] = scenes.map((scene) => ({
-      text: scene.text,
-      caption: scene.caption,
-      imageUrl: urls[scene.referenceIndex],
-      motion: scene.motion as ShowcaseScene["motion"],
-    }));
-    const projectId = await startMovieRender(buildShowcaseMovie(showcaseScenes, ctx.business.name));
-    const state: JobState = {
-      ...base,
-      stage: "COMPOSING",
-      format: "showcase",
-      animationMode: "photos",
-      content: contentForOutput(plan, scenes),
-      scenes,
-      clips: [],
-      framePaths: [],
-      projectId,
-    };
-    return deferred(state, "사진으로 영상을 만드는 중이에요");
-  }
-
-  // Character format.
-  const scenes: PlannedScene[] = (plan as CharacterPlan).scenes.map((scene) => ({
+  // The AI numbers images from 1; a number outside the list falls back to the first image.
+  const scenes: PlannedScene[] = plan.scenes.map((scene) => ({
     text: scene.text,
     visualPrompt: scene.visualPrompt,
     durationSec: scene.durationSec,
     speaker: scene.speaker,
     motion: scene.motion,
     action: scene.action,
-    referenceIndex: clampReferenceIndex(scene.imageIndex, groups.character),
+    referenceIndex: scene.imageIndex >= 1 && scene.imageIndex <= settings.references.length ? scene.imageIndex - 1 : 0,
   }));
   const content = contentForOutput(plan, scenes);
 
@@ -305,7 +248,7 @@ async function startReferenceRun(ctx: AutomationRunContext, settings: ShortsRefe
       imageUrl: urls[scene.referenceIndex],
     }));
     const projectId = await startMovieRender(buildCharacterMovie(renderScenes));
-    const state: JobState = { ...base, stage: "COMPOSING", format: "character", animationMode: "tween", animationNote, content, scenes, clips: [], framePaths: [], projectId };
+    const state: JobState = { ...base, stage: "COMPOSING", animationMode: "tween", animationNote, content, scenes, clips: [], framePaths: [], projectId };
     return deferred(state, "영상을 만드는 중이에요");
   }
 
@@ -319,14 +262,14 @@ async function startReferenceRun(ctx: AutomationRunContext, settings: ShortsRefe
     const framePath = `${owner.userId}/${owner.automationId}/frames/${ctx.runId}-${sceneIndex}.png`;
     await uploadReferenceImage(admin, framePath, frame, "png");
     framePaths.push(framePath);
-    const handle = await provider.startClip({ imageUrl: await signStoragePath(admin, framePath), prompt: clipPrompt(scene.action ?? "") });
+    const handle = await provider.startClip({ imageUrl: await signStoragePath(admin, framePath), prompt: clipPrompt(scene.action) });
     clips.push({ sceneIndex, handle, status: "pending", attempts: 1, framePath });
   }
-  const state: JobState = { ...base, stage: "ANIMATING", format: "character", animationMode: "video", content, scenes, clips, framePaths };
+  const state: JobState = { ...base, stage: "ANIMATING", animationMode: "video", content, scenes, clips, framePaths };
   return deferred(state, `캐릭터를 움직이는 중이에요 (0/${clips.length})`);
 }
 
-async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise<AutomationHandlerOutcome> {
+async function resumeCharacterRun(ctx: AutomationRunContext, raw: Json): Promise<AutomationHandlerOutcome> {
   const parsed = jobStateSchema.safeParse(raw);
   if (!parsed.success) throw new Error("진행 중인 숏폼 작업 정보를 읽지 못했어요. 영상을 다시 만들어주세요.");
   const state = parsed.data;
@@ -397,7 +340,6 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
       ...content,
       topic: state.topic,
       videoUrl,
-      format: state.format,
       animationMode: state.animationMode,
       ...(state.animationNote ? { animationNote: state.animationNote } : {}),
       publicationResults,
@@ -410,47 +352,19 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
   };
 }
 
-async function runClassic(ctx: AutomationRunContext): Promise<AutomationHandlerResult> {
-  const { topic } = await generateTopic(ctx);
-  const content = await generateStructured({
-    ...buildShortsContentPrompt(ctx.business, topic, ctx.calendarItem),
-    schema: shortsContentSchema,
-    maxTokens: 1_600,
-  });
-  const videoUrl = await renderShortVideo(content.scenes, content.script);
-  const platforms = ctx.shorts?.previewOnly ? [] : scheduledPlatforms(ctx.config);
-  const publicationResults = platforms.length > 0
-    ? await publishShortsToPlatforms({
-      userId: ctx.automation.user_id,
-      businessId: ctx.business.id,
-      title: content.hook,
-      caption: content.caption,
-      videoUrl,
-      platforms,
-    })
-    : {};
-
-  return {
-    output: { ...content, topic, videoUrl, publicationResults } as unknown as Json,
-    externalUrl: videoUrl,
-    title: content.hook,
-    topic,
-    content: content.script,
-    contentType: "shorts",
-  };
-}
-
 export const shortsAutomationHandler: AutomationHandler = {
   templateSlug: "shorts",
 
   async run(ctx: AutomationRunContext): Promise<AutomationHandlerOutcome> {
     if (ctx.shorts?.publish) return publishExistingPreview(ctx);
     const settings = parseShortsReferenceSettings(ctx.config);
-    if (settings.references.length > 0) return startReferenceRun(ctx, settings);
-    return runClassic(ctx);
+    if (settings.references.length === 0) {
+      throw new Error("캐릭터 이미지를 먼저 추가해주세요. 이지 마케팅 마스코트를 불러오거나 캐릭터 이미지를 올리면 영상을 만들 수 있어요.");
+    }
+    return startCharacterRun(ctx, settings);
   },
 
   async resume(ctx: AutomationRunContext, state: Json): Promise<AutomationHandlerOutcome> {
-    return resumeReferenceRun(ctx, state);
+    return resumeCharacterRun(ctx, state);
   },
 };
