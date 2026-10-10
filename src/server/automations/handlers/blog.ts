@@ -64,7 +64,7 @@ async function generateTopic(ctx: AutomationRunContext, config?: BlogAutomationC
  * the first vertical slice (Section 20). Every other handler in this folder
  * follows the same shape once its connector is ready.
  */
-export const blogAutomationHandler: AutomationHandler = {
+export const blogAutomationHandler: AutomationHandler<AutomationHandlerResult> = {
   templateSlug: "blog-marketing",
 
   async run(ctx: AutomationRunContext): Promise<AutomationHandlerResult> {

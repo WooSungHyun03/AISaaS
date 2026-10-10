@@ -47,6 +47,9 @@ describe("toSafeAutomationRunOutput", () => {
       caption: null,
       script: null,
       scenes: [],
+      format: null,
+      animationMode: null,
+      animationNote: null,
       publicationResults: {},
     }));
     expect(JSON.stringify(result)).not.toContain("secret");

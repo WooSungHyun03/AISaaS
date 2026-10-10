@@ -101,6 +101,47 @@ function renderableUrl(url: string): string {
   return `https://reference-image.mock.invalid/${encodeURIComponent(url.split("/").pop() ?? "image")}`;
 }
 
+const MAX_REFERENCE_BYTES = 3 * 1024 * 1024 + 64 * 1024;
+
+/** Raw bytes of a reference image (a mascot pose from our own site, or a private upload). */
+export async function loadReferenceBytes(
+  admin: AdminClient,
+  reference: ShortsReference,
+  owner: { userId: string; automationId: string },
+): Promise<Uint8Array> {
+  if (reference.kind === "mascot") {
+    const base = clientEnv.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
+    let response: Response;
+    try {
+      response = await fetch(`${base}/shorts-mascot/${reference.source}.png`, { cache: "force-cache", signal: AbortSignal.timeout(15_000) });
+    } catch (cause) {
+      throw new ConnectorError("video-render", "NETWORK_FAILURE", "마스코트 이미지를 불러오지 못했습니다.", { cause });
+    }
+    if (!response.ok) throw new ConnectorError("video-render", "UPSTREAM_SERVER_ERROR", `마스코트 이미지를 불러오지 못했습니다. (HTTP ${response.status})`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
+  if (!isOwnedReferencePath(reference.source, owner.userId, owner.automationId)) {
+    throw new ConnectorError("video-render", "INVALID_TARGET", "참고 이미지 정보가 올바르지 않습니다. 이미지를 다시 올려주세요.");
+  }
+  const { data, error } = await admin.storage.from(REFERENCE_BUCKET).download(reference.source);
+  if (error || !data) {
+    throw new ConnectorError("video-render", "INVALID_TARGET", "참고 이미지를 불러오지 못했습니다. 이미지를 다시 올려주세요.", { cause: error });
+  }
+  if (data.size > MAX_REFERENCE_BYTES) {
+    throw new ConnectorError("video-render", "INVALID_TARGET", "참고 이미지가 너무 큽니다.");
+  }
+  return new Uint8Array(await data.arrayBuffer());
+}
+
+/** A one-hour signed HTTPS URL for a file this module stored (reference or generated frame). */
+export async function signStoragePath(admin: AdminClient, path: string): Promise<string> {
+  const { data, error } = await admin.storage.from(REFERENCE_BUCKET).createSignedUrl(path, SIGNED_URL_TTL_SEC);
+  if (error || !data?.signedUrl) {
+    throw new ConnectorError("video-render", "INVALID_TARGET", "이미지 주소를 만들지 못했습니다.", { cause: error });
+  }
+  return renderableUrl(data.signedUrl);
+}
+
 /** One render-ready HTTPS URL per reference, in the same order. */
 export async function resolveReferenceImageUrls(
   admin: AdminClient,

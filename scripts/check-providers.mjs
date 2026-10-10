@@ -39,6 +39,12 @@ if (env.AI_PROVIDER !== "anthropic") {
 }
 
 // --- Video ----------------------------------------------------------------
+if (env.ANIMATION_PROVIDER === "fal") {
+  if (!env.FAL_KEY) bad("FAL_KEY", "not set — ANIMATION_PROVIDER=fal needs it (characters would fall back to the simple motion effect)");
+  else ok("FAL_KEY", "설정됨(유효성은 첫 캐릭터 영상에서 확인돼요 — 클립당 약 $0.35)");
+} else {
+  bad("ANIMATION_PROVIDER", `"${env.ANIMATION_PROVIDER ?? "(unset → mock)"}" — set fal to really animate characters (optional)`);
+}
 if (env.VIDEO_RENDER_PROVIDER !== "json2video") {
   bad("VIDEO_RENDER_PROVIDER", `"${env.VIDEO_RENDER_PROVIDER ?? "(unset → mock)"}" — set json2video for real videos`);
 } else {

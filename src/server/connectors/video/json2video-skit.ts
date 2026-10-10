@@ -163,9 +163,45 @@ function bubbleElement(text: string, speaker: VideoSpeaker): Record<string, unkn
   };
 }
 
+/**
+ * A clip from the image-to-video service already contains the character's own
+ * movement, so it fills the frame; it loops (and is cut to the voice) so a line
+ * shorter or longer than the 5 s clip never leaves a black or frozen scene.
+ */
+function animatedClipElement(videoUrl: string): Record<string, unknown> {
+  return {
+    type: "video",
+    src: videoUrl,
+    duration: -2,
+    loop: -1,
+    muted: true,
+    position: "custom",
+    resize: "cover",
+    x: 0,
+    y: 0,
+    width: WIDTH,
+    height: HEIGHT,
+  };
+}
+
+function tweenedImageElement(imageUrl: string, speaker: VideoSpeaker, motion: VideoMotion): Record<string, unknown> {
+  const frame = baseFrame(speaker);
+  return {
+    type: "image",
+    src: imageUrl,
+    duration: -2,
+    position: "custom",
+    resize: "contain",
+    x: Math.round(frame.x),
+    y: Math.round(frame.y),
+    width: Math.round(frame.size),
+    height: Math.round(frame.size),
+    keyframes: motionKeyframes(motion, frame),
+  };
+}
+
 export function buildCharacterScene(scene: VideoRenderScene, index: number, fallbackImageUrl: string): Record<string, unknown> {
   const speaker: VideoSpeaker = scene.speaker ?? "main";
-  const frame = baseFrame(speaker);
   const motion: VideoMotion = scene.motion ?? (speaker === "main" ? "pop" : "wobble");
   return {
     "background-color": SCENE_BACKGROUNDS[index % SCENE_BACKGROUNDS.length],
@@ -178,18 +214,7 @@ export function buildCharacterScene(scene: VideoRenderScene, index: number, fall
         voice: VOICES[speaker],
         "extra-time": 0.35,
       },
-      {
-        type: "image",
-        src: scene.imageUrl ?? fallbackImageUrl,
-        duration: -2,
-        position: "custom",
-        resize: "contain",
-        x: Math.round(frame.x),
-        y: Math.round(frame.y),
-        width: Math.round(frame.size),
-        height: Math.round(frame.size),
-        keyframes: motionKeyframes(motion, frame),
-      },
+      scene.videoUrl ? animatedClipElement(scene.videoUrl) : tweenedImageElement(scene.imageUrl ?? fallbackImageUrl, speaker, motion),
       bubbleElement(scene.text, speaker),
     ],
   };
@@ -197,12 +222,14 @@ export function buildCharacterScene(scene: VideoRenderScene, index: number, fall
 
 /** True when the render should use the reference-image (character) layout instead of the template. */
 export function isCharacterRender(scenes: VideoRenderScene[]): boolean {
-  return scenes.some((scene) => Boolean(scene.imageUrl));
+  return scenes.some((scene) => Boolean(scene.imageUrl || scene.videoUrl));
 }
 
 export function buildCharacterMovie(scenes: VideoRenderScene[]): Record<string, unknown> {
-  const fallbackImageUrl = scenes.find((scene) => scene.imageUrl)?.imageUrl;
-  if (!fallbackImageUrl) throw new Error("캐릭터 영상에는 참고 이미지가 한 장 이상 필요합니다.");
+  const fallbackImageUrl = scenes.find((scene) => scene.imageUrl)?.imageUrl ?? "";
+  if (!fallbackImageUrl && !scenes.every((scene) => scene.videoUrl)) {
+    throw new Error("캐릭터 영상에는 참고 이미지 또는 움직이는 영상이 필요합니다.");
+  }
   return {
     resolution: "custom",
     width: WIDTH,

@@ -75,22 +75,38 @@ export async function findDueAutomations(limit = 20): Promise<Automation[]> {
 
 /** A run that has been RUNNING/QUEUED this long was killed (timeout, deploy, crash) and will never finish on its own. */
 export const STALE_RUN_MINUTES = 10;
+/** Deferred runs (clips + render) legitimately take minutes, so they get a longer window (the handler gives up at 30). */
+export const STALE_DEFERRED_RUN_MINUTES = 45;
 
 /**
  * Marks abandoned runs FAILED. The partial unique index on automation_runs
  * allows one in-flight run per automation, so a run orphaned by a serverless
  * timeout would otherwise block that automation from ever running again.
- * Returns how many runs were reaped.
+ * A deferred run is recognised by `output.job` and judged on its own, longer
+ * window. Returns how many runs were reaped.
  */
 export async function reapStaleRuns(now: Date = new Date()): Promise<number> {
   const admin = createAdminClient();
-  const cutoff = new Date(now.getTime() - STALE_RUN_MINUTES * 60_000).toISOString();
-  const { data, error } = await admin
+  const failure = { status: "FAILED" as const, error_message: "실행이 중간에 멈춰 자동으로 종료했어요. 다시 시도해주세요.", completed_at: now.toISOString() };
+  const cutoff = (minutes: number) => new Date(now.getTime() - minutes * 60_000).toISOString();
+
+  const plain = await admin
     .from("automation_runs")
-    .update({ status: "FAILED", error_message: "실행이 중간에 멈춰 자동으로 종료했어요. 다시 시도해주세요.", completed_at: now.toISOString() })
+    .update(failure)
     .in("status", ["QUEUED", "RUNNING"])
-    .lt("created_at", cutoff)
+    .lt("created_at", cutoff(STALE_RUN_MINUTES))
+    .is("output", null)
     .select("id");
-  if (error) throw error;
-  return data?.length ?? 0;
+  if (plain.error) throw plain.error;
+
+  const deferred = await admin
+    .from("automation_runs")
+    .update(failure)
+    .in("status", ["QUEUED", "RUNNING"])
+    .lt("created_at", cutoff(STALE_DEFERRED_RUN_MINUTES))
+    .not("output->job", "is", null)
+    .select("id");
+  if (deferred.error) throw deferred.error;
+
+  return (plain.data?.length ?? 0) + (deferred.data?.length ?? 0);
 }

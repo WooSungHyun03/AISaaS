@@ -133,17 +133,33 @@ describe("MockAIProvider", () => {
   });
 });
 
-describe("MockAIProvider character skit", () => {
-  it("returns a schema-valid skit whose image numbers stay inside the listed references", async () => {
-    const [{ MockAIProvider }, { shortsSkitContentSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
-    const provider = new MockAIProvider();
+describe("MockAIProvider reference-image plans", () => {
+  const listing = (tags: string[]) => tags.map((tag, index) => `${index + 1}. [${tag}] 참고 이미지 ${index + 1}`).join("\n");
 
-    for (const count of [1, 2, 8]) {
-      const references = Array.from({ length: count }, (_, index) => `${index + 1}. 참고 이미지 ${index + 1}`).join("\n");
-      const { text } = await provider.generateText({ prompt: `AUTOBIZ_SHORTS_SKIT_V1\n${references}\nRules:` });
-      const skit = shortsSkitContentSchema.parse(JSON.parse(text));
-      expect(skit.scenes.every((scene) => scene.imageIndex >= 1 && scene.imageIndex <= count)).toBe(true);
-    }
+  it("plans a character skit that only uses the listed character images", async () => {
+    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+    const provider = new MockAIProvider();
+    const { text } = await provider.generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "character".\n${listing(["place", "character", "character"])}\nRules:` });
+    const plan = makeShortsPlanSchema(["character"]).parse(JSON.parse(text));
+    expect(plan.format).toBe("character");
+    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
+  });
+
+  it("plans a photo showcase from the non-character images", async () => {
+    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+    const provider = new MockAIProvider();
+    const { text } = await provider.generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "showcase".\n${listing(["character", "place", "product"])}\nRules:` });
+    const plan = makeShortsPlanSchema(["showcase"]).parse(JSON.parse(text));
+    expect(plan.format).toBe("showcase");
+    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
+  });
+
+  it("follows the request when both formats are allowed", async () => {
+    const { MockAIProvider } = await import("./mock");
+    const provider = new MockAIProvider();
+    const both = (request: string) => `AUTOBIZ_SHORTS_PLAN_V1\nThe owner's request (follow it): ${request}\n${listing(["character", "place"])}\nRules:`;
+    expect((JSON.parse((await provider.generateText({ prompt: both("마스코트가 나와서 소개해줘") })).text) as { format: string }).format).toBe("character");
+    expect((JSON.parse((await provider.generateText({ prompt: both("매장 분위기를 소개해줘") })).text) as { format: string }).format).toBe("showcase");
   });
 });
 

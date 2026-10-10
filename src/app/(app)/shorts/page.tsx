@@ -10,6 +10,7 @@ import { parseShortsReferenceSettings } from "@/types/shorts-reference";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { toSafeAutomationRunOutput } from "@/server/automations/run-output";
+import { readDeferredJob } from "@/server/automations/runner";
 import { getEffectivePlan } from "@/server/billing/entitlements";
 import { getPlanConfig, PLAN_LABEL } from "@/server/billing/plans";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
@@ -58,7 +59,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const [runsResult, connectionsResult, inFlightResult] = await Promise.all([
     supabase.from("automation_runs").select("id,status,output,created_at").eq("automation_id", automation.id).order("created_at", { ascending: false }).limit(30),
     supabase.from("integration_connections").select("provider,status").eq("user_id", user.id).eq("business_id", selectedBusiness.id).in("provider", ["instagram", "youtube"]),
-    supabase.from("automation_runs").select("id").eq("automation_id", automation.id).in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle(),
+    supabase.from("automation_runs").select("id,output").eq("automation_id", automation.id).in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle(),
   ]);
   if (runsResult.error || connectionsResult.error || inFlightResult.error) throw new Error("숏폼 작업 상태를 불러오지 못했습니다.");
 
@@ -76,6 +77,9 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     caption: previewRun.safe.caption,
     script: previewRun.safe.script,
     scenes: previewRun.safe.scenes,
+    format: previewRun.safe.format,
+    animationMode: previewRun.safe.animationMode,
+    animationNote: previewRun.safe.animationNote,
   } : null;
   const publications = safeRuns.flatMap((run) => (Object.entries(run.safe?.publicationResults ?? {}) as Array<[ShortsPublishPlatform, NonNullable<typeof run.safe>["publicationResults"][ShortsPublishPlatform]]>)
     .filter((entry): entry is [ShortsPublishPlatform, NonNullable<typeof entry[1]>] => Boolean(entry[1]))
@@ -87,7 +91,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const referenceSettings = parseShortsReferenceSettings(automation.config);
   const referenceViews = await referenceViewsFor(referenceSettings.references, user.id, automation.id);
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} nextRunAt={automation.next_run_at} /></div>;
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
 }
 
 function PageHeading() {
@@ -113,6 +117,7 @@ async function referenceViewsFor(
     id: item.id,
     kind: item.kind,
     label: item.label,
+    subject: item.subject,
     previewUrl: item.kind === "mascot" ? `/shorts-mascot/${item.source}.png` : signed.get(item.source) ?? null,
   }));
 }

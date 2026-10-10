@@ -65,6 +65,10 @@ colours — the per-scene `visualPrompt` is generated but not used to fetch
 footage. Adding a stock-footage or customer-photo source is the biggest quality
 upgrade available (see docs/QA_AUDIT.md).
 
+## 2b. Animated characters (optional): fal.ai
+
+Character Shorts can be *really animated* (not just moved) by an image-to-video model through fal.ai: set `ANIMATION_PROVIDER=fal` and `FAL_KEY`. Cost is about US$0.35 per scene (a video is 4–6 scenes) and plans cap animated videos per month. Setup, limits and the step-by-step run flow: `docs/ANIMATED_CHARACTERS.md`.
+
 ## 3. Verify before announcing
 
 ```bash

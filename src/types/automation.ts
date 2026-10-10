@@ -80,13 +80,36 @@ export interface AutomationHandlerResult {
 }
 
 /**
+ * Returned instead of a result when the work needs longer than one request
+ * (e.g. waiting minutes for an animation service). The runner keeps the run
+ * RUNNING, stores `state`, and calls `handler.resume` from the cron tick or the
+ * open page until a real result comes back.
+ */
+export interface AutomationDeferred {
+  deferred: {
+    /** Anything JSON-serialisable the handler needs to continue (never secrets or signed URLs). */
+    state: Json;
+    /** Short Korean status shown to the owner while the run is in flight. */
+    progress?: string;
+  };
+}
+
+export type AutomationHandlerOutcome = AutomationHandlerResult | AutomationDeferred;
+
+export function isDeferredOutcome(outcome: AutomationHandlerOutcome): outcome is AutomationDeferred {
+  return "deferred" in outcome;
+}
+
+/**
  * One handler per automation template. The runner (src/server/automations/runner.ts)
  * owns loading context and persisting results — handlers only implement the
  * "what does this automation actually do" step.
  */
-export interface AutomationHandler {
+export interface AutomationHandler<TRun extends AutomationHandlerOutcome = AutomationHandlerOutcome> {
   templateSlug: AutomationTemplateSlug;
-  run(ctx: AutomationRunContext): Promise<AutomationHandlerResult>;
+  run(ctx: AutomationRunContext): Promise<TRun>;
+  /** Continues a deferred run from the state it last returned. Bounded: one quick step per call. */
+  resume?(ctx: AutomationRunContext, state: Json): Promise<AutomationHandlerOutcome>;
 }
 
 export type AutomationAvailability = "AVAILABLE" | "BETA" | "COMING_SOON";

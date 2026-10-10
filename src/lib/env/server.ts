@@ -53,6 +53,12 @@ const serverSchema = z.object({
   VIDEO_RENDER_API_KEY: z.string().optional(),
   VIDEO_RENDER_TEMPLATE_ID: z.string().optional(),
 
+  // Image-to-video service that animates reference characters (src/server/connectors/animation).
+  // "mock" never calls the network; "fal" needs FAL_KEY. ANIMATION_MODEL overrides the fal endpoint id.
+  ANIMATION_PROVIDER: z.enum(["mock", "fal"]).default("mock"),
+  FAL_KEY: z.string().optional(),
+  ANIMATION_MODEL: z.string().min(1).optional(),
+
   // Which backend collects channel diagnosis/growth metrics (src/server/channels).
   // "mock" must never run in production — see instrumentation.ts, which
   // fails the server at boot instead of silently serving fabricated
