@@ -70,7 +70,12 @@
   스키마/RLS가 설계와 정확히 일치(update/delete 정책 없음도 확인). 테스트 작성 중
   `buildRuleBasedNarrative`의 조건 순서 버그 발견(COLLECTING 상태인데 current가 null이라 메시지가
   통째로 빠짐) → 순서 수정. 채널 177개 테스트 + typecheck + lint 통과.
-- [ ] **4단계** — `growth-line-chart.tsx`(의존성 없음, 반응형, sr-only, 0/1개 처리) + 좌표 변환 테스트
+- [x] **4단계** — `growth-line-chart.tsx`: 의존성 없는 SVG(`viewBox`+`preserveAspectRatio="none"`로
+  JS 측정 없이 반응형), `role="img"`+`aria-label` 요약 + 중복 `sr-only` 텍스트, 데이터 0개면
+  "데이터 없음" 문구, 1개면 점만(선 없음). 좌표 변환은 순수 함수(`scaleGrowthPoints`,
+  `buildLinePath`)로 분리해서 테스트(9개) — 이 저장소엔 .tsx 컴포넌트 테스트가 전혀 없고
+  vitest도 node 환경이라(jsdom 없음) 순수 로직만 테스트하는 기존 관례를 그대로 따름.
+  전체 테스트 935개 + typecheck + lint 통과.
 - [ ] **5단계** — `/growth-report` 페이지 개편 + `index.ts` export
 - [ ] **6단계** — `supabase db reset` + 시드 적용 → 7/30/90일 증감이 시드 데이터와 맞는지 직접 확인 → lint/typecheck/test/build → git status → 브라우저 체크리스트 전달 (push는 사람1이 직접)
 
