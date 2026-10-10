@@ -36,4 +36,4 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
   3. Supabase Free's built-in mailer is rate-limited (a few emails per hour). For the demo that is fine; for more, configure custom SMTP in Supabase Auth settings.
   - No new migration in this run (DB stays at 0001–0033).
 - **Next run priorities:** F-005 account deletion; re-review teammate commits (channel diagnosis YouTube/Naver/Tistory, credits, admin `requireAdmin`); SSRF/prompt-injection review of any new external-fetch code; F-001..F-004 follow-up with owners.
-- **Commit:** see `git log` (message `feat(auth): password reset, auth callback, terms/privacy, robots/sitemap`).
+- **Commit:** `f8b77b0` (feat(auth): password reset, auth callback, terms/privacy, robots/sitemap)
