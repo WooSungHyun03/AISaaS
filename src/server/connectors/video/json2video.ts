@@ -1,6 +1,7 @@
 import "server-only";
 import { serverEnv } from "@/lib/env/server";
 import { classifyHttpStatus, ConnectorError } from "@/server/shared/errors";
+import { buildCharacterMovie, isCharacterRender } from "./json2video-skit";
 import type { VideoRenderProvider, VideoRenderScene } from "./types";
 
 const API_BASE_URL = "https://api.json2video.com/v2";
@@ -78,19 +79,23 @@ export class Json2VideoRenderProvider implements VideoRenderProvider {
     this.maxPollAttempts = options.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
   }
 
-  private credentials(): { apiKey: string; templateId: string } {
-    if (!this.apiKey || !this.templateId) {
+  /** The reference-image (character) layout is sent as a full movie, so it only needs the API key. */
+  private credentials(options: { needsTemplate?: boolean } = { needsTemplate: true }): { apiKey: string; templateId: string } {
+    const needsTemplate = options.needsTemplate !== false;
+    if (!this.apiKey || (needsTemplate && !this.templateId)) {
       throw new ConnectorError(
         "json2video",
         "NOT_CONFIGURED",
-        "JSON2Video 렌더링 설정이 없습니다. VIDEO_RENDER_API_KEY와 VIDEO_RENDER_TEMPLATE_ID를 확인해주세요.",
+        needsTemplate
+          ? "JSON2Video 렌더링 설정이 없습니다. VIDEO_RENDER_API_KEY와 VIDEO_RENDER_TEMPLATE_ID를 확인해주세요."
+          : "JSON2Video 렌더링 설정이 없습니다. VIDEO_RENDER_API_KEY를 확인해주세요.",
       );
     }
-    return { apiKey: this.apiKey, templateId: this.templateId };
+    return { apiKey: this.apiKey, templateId: this.templateId ?? "" };
   }
 
   private async fetchJson<T>(url: URL, init: RequestInit, fallbackMessage: string): Promise<T> {
-    const { apiKey } = this.credentials();
+    const { apiKey } = this.credentials({ needsTemplate: false });
     let response: Response;
     try {
       response = await this.fetchFn(url, {
@@ -149,6 +154,19 @@ export class Json2VideoRenderProvider implements VideoRenderProvider {
     return result.project;
   }
 
+  private async createCharacterRender(scenes: VideoRenderScene[]): Promise<string> {
+    this.credentials({ needsTemplate: false });
+    const result = await this.fetchJson<CreateMovieResponse>(
+      new URL(`${API_BASE_URL}/movies`),
+      { method: "POST", body: JSON.stringify(buildCharacterMovie(scenes)) },
+      "JSON2Video 렌더링을 시작하지 못했습니다.",
+    );
+    if (!result.success || !result.project) {
+      throw new ConnectorError("json2video", "UPSTREAM_SERVER_ERROR", "JSON2Video가 렌더 작업 ID를 반환하지 않았습니다.");
+    }
+    return result.project;
+  }
+
   private async waitForRender(projectId: string): Promise<string> {
     for (let attempt = 0; attempt < this.maxPollAttempts; attempt++) {
       const url = new URL(`${API_BASE_URL}/movies`);
@@ -180,7 +198,9 @@ export class Json2VideoRenderProvider implements VideoRenderProvider {
   }
 
   async renderShortVideo(scenes: VideoRenderScene[], voiceScript: string): Promise<string> {
-    const projectId = await this.createRender(scenes, voiceScript);
+    const projectId = isCharacterRender(scenes)
+      ? await this.createCharacterRender(scenes)
+      : await this.createRender(scenes, voiceScript);
     return this.waitForRender(projectId);
   }
 }

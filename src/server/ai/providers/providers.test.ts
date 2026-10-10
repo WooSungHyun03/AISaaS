@@ -133,6 +133,20 @@ describe("MockAIProvider", () => {
   });
 });
 
+describe("MockAIProvider character skit", () => {
+  it("returns a schema-valid skit whose image numbers stay inside the listed references", async () => {
+    const [{ MockAIProvider }, { shortsSkitContentSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+    const provider = new MockAIProvider();
+
+    for (const count of [1, 2, 8]) {
+      const references = Array.from({ length: count }, (_, index) => `${index + 1}. 참고 이미지 ${index + 1}`).join("\n");
+      const { text } = await provider.generateText({ prompt: `AUTOBIZ_SHORTS_SKIT_V1\n${references}\nRules:` });
+      const skit = shortsSkitContentSchema.parse(JSON.parse(text));
+      expect(skit.scenes.every((scene) => scene.imageIndex >= 1 && scene.imageIndex <= count)).toBe(true);
+    }
+  });
+});
+
 describe("MockAIProvider (local dev / CI) produces schema-valid output for every pipeline", () => {
   it("covers the website narrative, blog topic + body and passes the blog quality gate", async () => {
     const [{ MockAIProvider }, { websiteDiagnosisNarrativeSchema }, { blogTopicSchema, blogBodySchema }, { assessBlogBody }] = await Promise.all([

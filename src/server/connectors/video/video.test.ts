@@ -141,4 +141,41 @@ describe("video render providers", () => {
     await expect(provider.renderShortVideo(scenes, voiceScript)).rejects.toMatchObject({ code: "UPSTREAM_SERVER_ERROR" });
     expect(videoRenderInputSchema.safeParse({ scenes: scenes.slice(0, 1), voiceScript }).success).toBe(false);
   });
+
+  it("sends reference-image scenes as a full movie without a template and needs only the API key", async () => {
+    const characterScenes: VideoRenderScene[] = scenes.map((scene, index) => ({
+      ...scene,
+      speaker: index === 0 ? "partner" : "main",
+      motion: "pop",
+      imageUrl: `https://be-celeb.org/shorts-mascot/wave.png`,
+    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ success: true, project: "project-12345678" }))
+      .mockResolvedValueOnce(jsonResponse({
+        success: true,
+        movie: { status: "done", url: "https://assets.example.com/rendered/skit.mp4", width: 1080, height: 1920 },
+      }));
+    const provider = new Json2VideoRenderProvider({ apiKey: "test-api-key", templateId: "", fetchFn: fetchMock, pollIntervalMs: 0, maxPollAttempts: 2 });
+
+    const url = await provider.renderShortVideo(characterScenes, voiceScript);
+
+    expect(url).toBe("https://assets.example.com/rendered/skit.mp4");
+    const [, createInit] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    const body = JSON.parse(String(createInit.body)) as { template?: string; scenes: Array<{ elements: Array<{ type: string }> }> };
+    expect(body.template).toBeUndefined();
+    expect(body.scenes).toHaveLength(characterScenes.length);
+    expect(body.scenes[0].elements.map((element) => element.type)).toEqual(["voice", "image", "text"]);
+  });
+
+  it("still requires the API key for reference-image renders", async () => {
+    const fetchMock = vi.fn();
+    const provider = new Json2VideoRenderProvider({ apiKey: "", templateId: "template-123", fetchFn: fetchMock });
+    const error = await provider.renderShortVideo(
+      scenes.map((scene) => ({ ...scene, imageUrl: "https://be-celeb.org/shorts-mascot/wave.png" })),
+      voiceScript,
+    ).catch((caught: unknown) => caught);
+
+    expect((error as { code: string }).code).toBe("NOT_CONFIGURED");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

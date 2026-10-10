@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClock, Check, ExternalLink, Film, LoaderCircle, Play, Send } from "lucide-react";
 import { toast } from "sonner";
@@ -61,6 +61,7 @@ export function ShortsStudio({
   publications,
   hasInFlightRun,
   nextRunAt,
+  referencesSlot,
 }: {
   automationId: string;
   automationStatus: string;
@@ -71,6 +72,8 @@ export function ShortsStudio({
   publications: Publication[];
   hasInFlightRun: boolean;
   nextRunAt: string | null;
+  /** The reference-image card; rendered between the preview and the schedule. */
+  referencesSlot?: ReactNode;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -177,6 +180,8 @@ export function ShortsStudio({
           </div>
         </div>
       </section>
+
+      {referencesSlot}
 
       <section aria-labelledby="schedule-heading" className="rounded-2xl border bg-card p-5 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-start gap-3"><span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-primary"><CalendarClock className="size-5" aria-hidden="true" /></span><div><h2 id="schedule-heading" className="text-lg font-extrabold tracking-[-0.03em]">예약 만들기</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">저장하면 예약 시각마다 새 영상을 만들어요. 위에서 게시할 플랫폼을 골라두면 만든 영상을 그곳에 바로 올리고, 고르지 않으면 영상만 만들어 둬요.</p></div></div>{nextRunAt && automationStatus === "ACTIVE" ? <Badge variant="brand">다음 만들기 {new Date(nextRunAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</Badge> : <Badge variant="secondary">예약 꺼짐</Badge>}</div>

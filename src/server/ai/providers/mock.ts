@@ -28,6 +28,27 @@ export class MockAIProvider implements AIProvider {
       return { text: JSON.stringify({ topic: "고객의 시간을 아껴주는 우리 서비스 활용법" }) };
     }
 
+    if (prompt.includes("AUTOBIZ_SHORTS_SKIT_V1")) {
+      // One numbered line per reference image ("1. …"); cycle through them so every index is valid.
+      const imageCount = Math.max(1, (prompt.match(/^\d+\. /gm) ?? []).length);
+      const image = (turn: number) => (turn % imageCount) + 1;
+      return {
+        text: JSON.stringify({
+          hook: "사장님, 큰일 났어요!",
+          scenes: [
+            { text: "사장님, 큰일 났어요!", speaker: "partner", imageIndex: image(0), motion: "shake", durationSec: 2 },
+            { text: "무슨 일이에요? 말해 보세요!", speaker: "main", imageIndex: image(1), motion: "pop", durationSec: 3 },
+            { text: "마케팅할 시간이 하나도 없어요", speaker: "partner", imageIndex: image(2), motion: "wobble", durationSec: 5 },
+            { text: "걱정 마세요, 제가 뚝딱 만들어 드려요!", speaker: "main", imageIndex: image(3), motion: "bounce", durationSec: 6 },
+            { text: "글도 영상도 한 번에 끝이에요", speaker: "main", imageIndex: image(4), motion: "zoom", durationSec: 5 },
+            { text: "지금 바로 시작해 보세요!", speaker: "main", imageIndex: image(5), motion: "pop", durationSec: 4 },
+          ],
+          caption: "마케팅이 어려운 사장님을 위한 캐릭터 콩트 #소상공인마케팅 #숏폼 #마케팅자동화",
+          privacy: "private",
+        }),
+      };
+    }
+
     if (prompt.includes("AUTOBIZ_SHORTS_CONTENT_V1")) {
       return {
         text: JSON.stringify({

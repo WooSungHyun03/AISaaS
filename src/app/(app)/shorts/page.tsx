@@ -3,6 +3,10 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/layout/page-header";
 import { ShortsCreateButton, ShortsStudio } from "@/components/automations/shorts-studio";
+import { ShortsReferencesCard, type ReferenceView } from "@/components/automations/shorts-references";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { REFERENCE_BUCKET, isOwnedReferencePath } from "@/server/shorts/reference-images";
+import { parseShortsReferenceSettings } from "@/types/shorts-reference";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { toSafeAutomationRunOutput } from "@/server/automations/run-output";
@@ -80,11 +84,35 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const config = automation.config && typeof automation.config === "object" && !Array.isArray(automation.config) ? automation.config as Record<string, unknown> : {};
   const configuredPlatforms: ShortsPublishPlatform[] = Array.isArray(config.platforms) ? config.platforms.filter((item): item is ShortsPublishPlatform => item === "instagram" || item === "youtube") : [];
   const schedule = automation.schedule as unknown as AutomationSchedule;
+  const referenceSettings = parseShortsReferenceSettings(automation.config);
+  const referenceViews = await referenceViewsFor(referenceSettings.references, user.id, automation.id);
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading />{businessPicker}<ShortsStudio automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} nextRunAt={automation.next_run_at} /></div>;
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} nextRunAt={automation.next_run_at} /></div>;
 }
 
 function PageHeading() {
   return <PageHeader title="숏폼 스튜디오" description="AI 영상 생성부터 미리보기, Instagram과 YouTube 게시, 예약 운영까지 한곳에서 관리해요." />;
 }
 
+
+/** Thumbnails for the reference card: mascot poses are static files, uploads get a short-lived signed URL. */
+async function referenceViewsFor(
+  references: ReturnType<typeof parseShortsReferenceSettings>["references"],
+  userId: string,
+  automationId: string,
+): Promise<ReferenceView[]> {
+  const uploadPaths = references
+    .filter((item) => item.kind === "upload" && isOwnedReferencePath(item.source, userId, automationId))
+    .map((item) => item.source);
+  const signed = new Map<string, string>();
+  if (uploadPaths.length > 0) {
+    const { data } = await createAdminClient().storage.from(REFERENCE_BUCKET).createSignedUrls(uploadPaths, 60 * 30);
+    for (const item of data ?? []) if (item.path && item.signedUrl) signed.set(item.path, item.signedUrl);
+  }
+  return references.map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    label: item.label,
+    previewUrl: item.kind === "mascot" ? `/shorts-mascot/${item.source}.png` : signed.get(item.source) ?? null,
+  }));
+}

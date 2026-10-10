@@ -26,6 +26,8 @@ const {
   };
 });
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ kind: "admin-test-client" }) }));
+const { resolveReferenceImageUrlsMock } = vi.hoisted(() => ({ resolveReferenceImageUrlsMock: vi.fn() }));
+vi.mock("@/server/shorts/reference-images", () => ({ resolveReferenceImageUrls: resolveReferenceImageUrlsMock }));
 vi.mock("@/server/connectors/instagram", () => ({
   InstagramConnector: class {
     isConfigured = instagramIsConfiguredMock;
@@ -220,5 +222,84 @@ describe("shortsAutomationHandler", () => {
       publicationResults: {},
     });
     expect(instagramPublishMock).not.toHaveBeenCalled();
+  });
+
+  describe("with reference images", () => {
+    const skit = {
+      hook: "사장님, 큰일 났어요!",
+      scenes: [
+        { text: "사장님, 큰일 났어요!", speaker: "partner", imageIndex: 2, motion: "shake", durationSec: 2, visualPrompt: "참고 이미지 캐릭터 장면" },
+        { text: "무슨 일이에요?", speaker: "main", imageIndex: 1, motion: "pop", durationSec: 3, visualPrompt: "참고 이미지 캐릭터 장면" },
+        { text: "글을 일주일째 못 올렸어요", speaker: "partner", imageIndex: 2, motion: "wobble", durationSec: 5, visualPrompt: "참고 이미지 캐릭터 장면" },
+        { text: "걱정 마세요, 제가 3분 만에 써요!", speaker: "main", imageIndex: 9, motion: "bounce", durationSec: 6, visualPrompt: "참고 이미지 캐릭터 장면" },
+        { text: "이지 마케팅에서 시작해요!", speaker: "main", imageIndex: 1, motion: "zoom", durationSec: 5, visualPrompt: "참고 이미지 캐릭터 장면" },
+      ],
+      caption: "마케팅이 어려운 사장님을 위해 #이지마케팅 #소상공인 #숏폼",
+      privacy: "private" as const,
+    };
+    const configWithReferences = {
+      shortsBrief: "이지 마케팅을 웃기게 소개",
+      references: [
+        { id: "m-wave", kind: "mascot", source: "wave", label: "인사" },
+        { id: "m-point", kind: "mascot", source: "point", label: "아이디어" },
+      ],
+    };
+
+    it("writes a skit, maps each line to its image and renders with the signed URLs", async () => {
+      resolveReferenceImageUrlsMock.mockResolvedValue(["https://img.example.com/wave.png", "https://img.example.com/point.png"]);
+      generateStructuredMock
+        .mockResolvedValueOnce({ topic: "마케팅 대신 해주는 로봇" })
+        .mockResolvedValueOnce(skit);
+
+      const result = await shortsAutomationHandler.run(baseContext({ config: configWithReferences as never, shorts: { previewOnly: true } }));
+
+      const topicRequest = generateStructuredMock.mock.calls[0][0] as { prompt: string };
+      const skitRequest = generateStructuredMock.mock.calls[1][0] as { prompt: string; system: string };
+      expect(topicRequest.prompt).toContain("이지 마케팅을 웃기게 소개");
+      expect(skitRequest.prompt).toContain("1. 이지 마케팅 마스코트 로봇");
+      expect(skitRequest.system).toContain("이지 마케팅");
+
+      const [renderedScenes, voiceScript] = renderShortVideoMock.mock.calls[0] as [Array<Record<string, unknown>>, string];
+      expect(renderedScenes.map((scene) => scene.imageUrl)).toEqual([
+        "https://img.example.com/point.png",
+        "https://img.example.com/wave.png",
+        "https://img.example.com/point.png",
+        "https://img.example.com/wave.png", // imageIndex 9 is out of range -> first image
+        "https://img.example.com/wave.png",
+      ]);
+      expect(renderedScenes[0]).toMatchObject({ speaker: "partner", motion: "shake" });
+      expect(voiceScript).toBe(skit.scenes.map((scene) => scene.text).join(" "));
+      expect(result.output).toMatchObject({ hook: skit.hook, videoUrl: "https://cdn.example.com/shorts/result.mp4", topic: "마케팅 대신 해주는 로봇" });
+      // signed image URLs must not be stored in the run output
+      expect(JSON.stringify(result.output)).not.toContain("img.example.com");
+    });
+
+    it("keeps a calendar-fixed topic and skips topic generation", async () => {
+      resolveReferenceImageUrlsMock.mockResolvedValue(["https://img.example.com/wave.png", "https://img.example.com/point.png"]);
+      generateStructuredMock.mockResolvedValueOnce(skit);
+
+      await shortsAutomationHandler.run(baseContext({
+        config: configWithReferences as never,
+        calendarItem: {
+          id: "cal-1", businessId: "biz-1", plannedDate: "2026-10-12", platform: "YOUTUBE_SHORTS", contentType: "shorts",
+          topic: "신메뉴 소개", goal: "신규 방문", summary: "신메뉴를 소개", cta: "예약하기",
+        } as never,
+      }));
+
+      expect(generateStructuredMock).toHaveBeenCalledTimes(1);
+      expect((generateStructuredMock.mock.calls[0][0] as { prompt: string }).prompt).toContain("신메뉴 소개");
+    });
+
+    it("uses the classic scene flow when no reference image is configured", async () => {
+      generateStructuredMock
+        .mockResolvedValueOnce({ topic: "출근길 소금빵 예약 팁" })
+        .mockResolvedValueOnce(generatedContent);
+
+      await shortsAutomationHandler.run(baseContext({ config: { references: [] } as never }));
+
+      expect(resolveReferenceImageUrlsMock).not.toHaveBeenCalled();
+      const [renderedScenes] = renderShortVideoMock.mock.calls[0] as [Array<Record<string, unknown>>];
+      expect(renderedScenes.every((scene) => scene.imageUrl === undefined)).toBe(true);
+    });
   });
 });
