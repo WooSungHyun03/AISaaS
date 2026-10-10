@@ -64,6 +64,10 @@ const serverSchema = z.object({
   // no OAuth/user connection involved, unlike YOUTUBE_CLIENT_ID/SECRET above
   // which belong to the Shorts-publishing connector).
   YOUTUBE_API_KEY: z.string().optional(),
+  // Naver Search API (blog.json) — sent as X-Naver-Client-Id/Secret headers.
+  // Public-data search, not the blog owner's own credentials.
+  NAVER_CLIENT_ID: z.string().optional(),
+  NAVER_CLIENT_SECRET: z.string().optional(),
 
   GITHUB_TOKEN: z.string().optional(),
 

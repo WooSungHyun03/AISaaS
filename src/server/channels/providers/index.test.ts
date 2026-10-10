@@ -46,3 +46,18 @@ describe("getTistoryCollector", () => {
     expect(getTistoryCollector()).toBe(collectTistoryRssMetrics);
   });
 });
+
+describe("getNaverBlogCollector", () => {
+  it("returns the mock collector when CHANNEL_DATA_PROVIDER=mock", async () => {
+    const { getNaverBlogCollector } = await import("./index");
+    const { collectMockNaverBlogMetrics } = await import("./naver-blog-mock");
+    expect(getNaverBlogCollector()).toBe(collectMockNaverBlogMetrics);
+  });
+
+  it("returns the live collector when CHANNEL_DATA_PROVIDER=live", async () => {
+    serverEnvMock.CHANNEL_DATA_PROVIDER = "live";
+    const { getNaverBlogCollector } = await import("./index");
+    const { collectNaverBlogMetrics } = await import("./naver-blog");
+    expect(getNaverBlogCollector()).toBe(collectNaverBlogMetrics);
+  });
+});

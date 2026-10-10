@@ -8,5 +8,6 @@ export * from "./summary";
 export * from "./provider-guard";
 export * from "./youtube-scoring";
 export * from "./tistory-scoring";
+export * from "./naver-blog-scoring";
 export * from "./diagnose";
 export * from "./providers";
