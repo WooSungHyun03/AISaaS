@@ -55,7 +55,9 @@
 
 ## 진행 단계
 
-- [ ] **1단계** — `scripts/seed-growth-demo.sql` 190일 확장 + 재실행 멱등성 로컬 확인
+- [x] **1단계** — `scripts/seed-growth-demo.sql` 190일 확장(youtube/naver_blog/tistory 채널 각 1개,
+  네이버·티스토리엔 조회수류 없음). 로컬에서 두 번 실행해 확인: DEMO_SEED 950행(190일×5지표) 그대로,
+  채널 중복 생성 없음(멱등성 확인됨). 데모 business_id는 로컬 DB에 남겨둠(6단계 브라우저 확인용).
 - [ ] **2단계** — `growth-series.ts`(허용 지표 목록, 시계열, DEMO_SEED, 수집 중, absoluteDelta, 구독자 숨김 null 처리) + 테스트, `summary.ts`의 `latestBefore` export
 - [ ] **3단계** — migration 0042 + `growth-narrative.ts`(캐시 + AI + ai-number-guard 재사용) + 테스트
 - [ ] **4단계** — `growth-line-chart.tsx`(의존성 없음, 반응형, sr-only, 0/1개 처리) + 좌표 변환 테스트
