@@ -583,6 +583,7 @@ export interface Database {
           url: string;
           status: string;
           next_snapshot_at: string | null;
+          consecutive_failure_count: number;
           created_at: string;
           updated_at: string;
         };
@@ -594,6 +595,7 @@ export interface Database {
           url: string;
           status?: string;
           next_snapshot_at?: string | null;
+          consecutive_failure_count?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -641,6 +643,8 @@ export interface Database {
           metric: string;
           value: number;
           recorded_at: string;
+          /** Generated column (0038) — KST (UTC+9) calendar date of recorded_at. Never set directly; Postgres computes it. */
+          recorded_date: string;
           source: string;
           created_at: string;
         };

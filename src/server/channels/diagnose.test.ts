@@ -45,7 +45,10 @@ function tableBuilder({ selectResult, insertResult }: { selectResult: { data: un
 
 function makeClient(args: { selectResult: { data: unknown; error: unknown }; insertResult?: { data: unknown; error: unknown } }) {
   const table = tableBuilder(args);
-  return { from: vi.fn(() => table), table };
+  const upsertSpy = vi.fn((_payload: Record<string, unknown>, _opts?: unknown) => Promise.resolve({ data: null, error: null }));
+  const snapshotsTable = { upsert: upsertSpy };
+  const from = vi.fn((name: string) => (name === "marketing_metric_snapshots" ? snapshotsTable : table));
+  return { from, table, upsertSpy };
 }
 
 beforeEach(() => {
@@ -80,6 +83,7 @@ describe("diagnoseYouTubeChannel", () => {
     expect(result.dataSource).toBe("mock");
     expect(collectMock).not.toHaveBeenCalled();
     expect(client.table.insert).not.toHaveBeenCalled();
+    expect(client.upsertSpy).not.toHaveBeenCalled(); // cache hit: no fresh collection, so no new snapshot either
   });
 
   it("collects, scores, and persists a new diagnosis when there is no cached row", async () => {
@@ -108,6 +112,11 @@ describe("diagnoseYouTubeChannel", () => {
     expect(insertArg.data_source).toBe("mock");
     expect(insertArg.metrics).toEqual({ viewCount: 50000, videoCount: 10, uploadsLast30Days: expect.any(Number), subscriberCount: 1000, averageRecentViews: 500 });
     expect(result.collectedAt).toBe(NOW.toISOString());
+
+    // Ticket 1-6 (a): a fresh diagnosis also saves metric snapshots, reusing the already-fetched metrics (collectMock called only once above).
+    expect(client.upsertSpy).toHaveBeenCalledTimes(3); // viewCount, videoCount, subscriberCount
+    const upsertedMetrics = client.upsertSpy.mock.calls.map((call) => (call[0] as { metric: string }).metric);
+    expect(upsertedMetrics.sort()).toEqual(["subscriberCount", "videoCount", "viewCount"]);
   });
 
   it("re-collects when the cached row is older than 1 hour", async () => {

@@ -20,3 +20,15 @@ export const CHANNEL_SNAPSHOT_SOURCES = ["live", "mock"] as const;
 export type ChannelSnapshotSource = (typeof CHANNEL_SNAPSHOT_SOURCES)[number];
 
 export const channelSnapshotSourceSchema = z.enum(CHANNEL_SNAPSHOT_SOURCES);
+
+/**
+ * DB-only: `marketing_metric_snapshots.source` additionally allows
+ * 'DEMO_SEED' (ticket 1-6) — written only by scripts/seed-growth-demo.sql
+ * via raw SQL, a local-only path that never goes through app code.
+ * `channelSnapshotSourceSchema` above deliberately excludes it, so no app
+ * code path can produce a DEMO_SEED row even by mistake. This constant
+ * exists only so snapshot-source.test.ts can assert that exact,
+ * intentional gap instead of requiring the DB constraint to exactly match
+ * CHANNEL_SNAPSHOT_SOURCES the way every other enum in this domain does.
+ */
+export const MARKETING_METRIC_SNAPSHOTS_DB_SOURCES = [...CHANNEL_SNAPSHOT_SOURCES, "DEMO_SEED"] as const;

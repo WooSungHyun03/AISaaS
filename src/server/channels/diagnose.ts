@@ -5,6 +5,7 @@ import { ChannelsError } from "./summary";
 import { getYouTubeDataProvider } from "./providers";
 import type { YouTubeRawMetrics } from "./providers/youtube-types";
 import { scoreYouTubeChannel, uploadsWithinDays } from "./youtube-scoring";
+import { saveMetricSnapshot } from "./snapshot";
 import type { ChannelDiagnosis } from "./types";
 import type { TrackedChannel } from "@/types/domain";
 
@@ -115,5 +116,18 @@ export async function diagnoseYouTubeChannel(
     .single();
   if (insertError) throw new ChannelsError("DATABASE_ERROR", "채널 진단 결과를 저장하지 못했습니다.", { cause: insertError });
 
+  // Ticket 1-6's "(a) 진단 시 자동 저장" — reuses the metrics already
+  // fetched above instead of calling the provider again.
+  await saveSnapshotsFromMetrics(trackedChannel.id, metrics, now);
+
   return mapRowToChannelDiagnosis(inserted as ChannelDiagnosisSelection);
+}
+
+async function saveSnapshotsFromMetrics(channelId: string, metrics: YouTubeRawMetrics, now: Date): Promise<void> {
+  const source = serverEnv.CHANNEL_DATA_PROVIDER;
+  await saveMetricSnapshot({ channelId, metric: "viewCount", value: metrics.viewCount, source, recordedAt: now });
+  await saveMetricSnapshot({ channelId, metric: "videoCount", value: metrics.videoCount, source, recordedAt: now });
+  if (metrics.subscriberCount !== null) {
+    await saveMetricSnapshot({ channelId, metric: "subscriberCount", value: metrics.subscriberCount, source, recordedAt: now });
+  }
 }
