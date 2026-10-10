@@ -40,6 +40,6 @@
 - 화면 티켓은 내가 브라우저로 확인할 체크리스트를 같이 준다.
 
 ## 진행 현황
-- 완료: 1-1, 1-2, 1-3, 1-4, 1-6, 1-5
-- 남음: 1-7, 1-8, 1-9, 1-10
-- 참고 문서: docs/person1/ 아래 PLAN_1-5.md, CHANNEL_DASHBOARD_API.md, MIGRATION_NUMBERING_NOTES.md 등
+- 완료: 1-1, 1-2, 1-3, 1-4, 1-6, 1-5, 1-7
+- 남음: 1-8, 1-9, 1-10
+- 참고 문서: docs/person1/ 아래 PLAN_1-5.md, PLAN_1-7.md, CHANNEL_DASHBOARD_API.md, MIGRATION_NUMBERING_NOTES.md 등
