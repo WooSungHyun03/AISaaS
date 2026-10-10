@@ -82,7 +82,24 @@
   그대로 아래에 유지(로직 변경 없음). `PLATFORM_LABEL`을 `platform.ts`로 옮겨 3곳에서 재사용
   (channel-diagnosis-card, channel-narrative, channel-growth-card)으로 중복 제거.
   `next build` 포함 전체 테스트 935개 + typecheck + lint 통과.
-- [ ] **6단계** — `supabase db reset` + 시드 적용 → 7/30/90일 증감이 시드 데이터와 맞는지 직접 확인 → lint/typecheck/test/build → git status → 브라우저 체크리스트 전달 (push는 사람1이 직접)
+- [x] **6단계** — `scripts/dev-db.sh reset`(0001~0042 전체 에러 없이 적용) → 데모 시드 재적용 →
+  실제 로그인 세션으로 `/growth-report`를 7/30/90일 세 번 호출, DB에 SQL로 직접 계산한 기대값과
+  RSC 응답에서 파싱한 실제 값을 대조:
+  - 구독자 수: 현재 1,567명으로 고정, 7일 전 1,546명(+21, +1%) / 30일 전 1,477명(+90, +6%) /
+    90일 전 1,297명(+270, +21%) — **전부 SQL 기대값과 정확히 일치**.
+  - 네이버/티스토리 카드엔 "검색된 글 수"/"게시글 수"만 보이고 조회수·방문자 없음(구조적 차단 +
+    육안 확인).
+  - "데모 데이터" 배지 노출 확인.
+  - AI 해석 캐시 확인: 3채널×3기간 첫 호출 후 `channel_growth_narratives`에 정확히 9행 생성,
+    같은 (채널,기간)으로 재방문해도 10번째 행이 생기지 않음(캐시 재사용, 응답도 빠름).
+  - **참고**: mock 모드에서 AI 해석 텍스트는 `MockAIProvider`의 범용 에코 응답으로 나옴(1-5의
+    `channel-narrative.ts`도 동일 — growth-narrative 전용 mock 분기가 없어서). 지어낸 숫자는
+    없음(`ai_used: true`로 저장됨 — 에코된 숫자가 전부 입력 JSON 그대로라 검증을 통과함).
+    실제 서비스에서 `AI_PROVIDER=openai`/`gemini`로 바꾸면 실제 해석 문장이 나옴. 버그 아님,
+    알려진 mock 동작.
+  - `.env.local`은 검증 동안만 로컬 Supabase로 바꿨다가 원래 placeholder 값으로 복구함.
+  - `.next` 캐시 삭제 후 재빌드 → lint/typecheck/test(935개)/`next build` 전부 통과 재확인.
+  - git status 깨끗함(`docs/PROJECT_OVERVIEW.md`만 untracked로 남음, 커밋 안 함).
 
 ## 기본 규칙 (AGENT_RULES.md 상속)
 
