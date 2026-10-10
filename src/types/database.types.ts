@@ -674,6 +674,28 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["channel_diagnosis_attempts"]["Insert"]>;
         Relationships: [];
       };
+      channel_growth_narratives: {
+        Row: {
+          id: string;
+          business_id: string;
+          channel_id: string;
+          days: number;
+          narrative: string;
+          ai_used: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          channel_id: string;
+          days: number;
+          narrative: string;
+          ai_used: boolean;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["channel_growth_narratives"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

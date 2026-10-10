@@ -64,7 +64,12 @@
   일별 시계열, `absoluteDelta`(둘 다 있을 때만), `hasDemoSeedData`, 스냅샷 2개 미만이면
   `status: "COLLECTING"`. 유튜브 구독자 숨김 채널은 `subscriberCount` 항목이 null로 계속
   나오는 것 확인(10개 테스트). 채널 167개 테스트 + typecheck + lint 통과.
-- [ ] **3단계** — migration 0042 + `growth-narrative.ts`(캐시 + AI + ai-number-guard 재사용) + 테스트
+- [x] **3단계** — migration 0042(`channel_growth_narratives`, select/insert own RLS, update/delete 없음)
+  + `growth-narrative.ts`(`buildGrowthNarrative` + `getOrCreateGrowthNarrative` 캐시 래퍼,
+  `ai-number-guard` 재사용, 실패/전부 제거 시 규칙 기반 대체). 로컬 `db reset`으로 0042 적용 확인,
+  스키마/RLS가 설계와 정확히 일치(update/delete 정책 없음도 확인). 테스트 작성 중
+  `buildRuleBasedNarrative`의 조건 순서 버그 발견(COLLECTING 상태인데 current가 null이라 메시지가
+  통째로 빠짐) → 순서 수정. 채널 177개 테스트 + typecheck + lint 통과.
 - [ ] **4단계** — `growth-line-chart.tsx`(의존성 없음, 반응형, sr-only, 0/1개 처리) + 좌표 변환 테스트
 - [ ] **5단계** — `/growth-report` 페이지 개편 + `index.ts` export
 - [ ] **6단계** — `supabase db reset` + 시드 적용 → 7/30/90일 증감이 시드 데이터와 맞는지 직접 확인 → lint/typecheck/test/build → git status → 브라우저 체크리스트 전달 (push는 사람1이 직접)

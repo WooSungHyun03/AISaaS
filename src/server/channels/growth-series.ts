@@ -75,8 +75,8 @@ export interface GrowthSeriesResult {
 
 type SnapshotRow = { channel_id: string; metric: string; value: number; recorded_at: string; source: string };
 
-/** KST (UTC+9) calendar date for an instant. */
-function kstDate(timeMs: number): string {
+/** KST (UTC+9) calendar date for an instant. Exported for reuse by growth-narrative.ts's "already generated today" cache check. */
+export function kstDate(timeMs: number): string {
   return new Date(timeMs + 9 * 3_600_000).toISOString().slice(0, 10);
 }
 
