@@ -68,7 +68,16 @@
 
   테스트: `register.test.ts`(8개), `channel-narrative.test.ts`(6개). 전체 테스트 893개 +
   typecheck + lint 통과.
-- [ ] **4단계** — migration 0041(channel_diagnosis_attempts, RLS) — 0040은 2단계에서 이미 적용함
+- [x] **4단계** — migration 0041(`channel_diagnosis_attempts`, select/insert own RLS, delete 정책 없음)
+  + `src/server/channels/diagnosis-rate-limit.ts`(`recordDiagnosisAttempt`). `diagnoseChannel()`의
+  캐시 미스 분기(실제 수집기 호출 직전)에서만 호출 — business 기준 5회/시간, 초과 시
+  `DiagnosisRateLimitError`. 1-6의 크론(`processDueChannels`)/"지금 수집"
+  (`collectChannelNow`)은 `snapshotChannelMetrics`를 직접 호출하는 별도 경로라 이 체크를
+  타지 않음(가드 코드가 아니라 호출 그래프 자체가 분리되어 있어서 자연히 제외됨).
+  오래된 행(1일 이상) 정리는 삭제 RLS 정책이 없어서 서비스 롤 클라이언트(`createAdminClient`)로
+  "가끔"(10% 확률) 수행, 실패해도 호출자의 진단 요청은 막지 않음(로그만 남김).
+  0040은 2단계에서 이미 적용함. 테스트: `diagnosis-rate-limit.test.ts`(7개) +
+  `diagnose.test.ts`에 레이트리밋 연동 테스트 2개 추가. 전체 테스트 901개 + typecheck + lint 통과.
 - [ ] **5단계** — 화면단: `/diagnosis` 새 진단 화면, `/marketing/diagnosis` 308 리다이렉트(쿼리스트링
   보존)로 교체, `readiness.ts` + `ReadinessScoreCard` 분리 후 `/diagnosis` 상단 배치,
   `docs/person1/READINESS_SCORE_FOR_DASHBOARD.md` 메모, 홈페이지 진단 버튼화(prefill.ts 재사용),

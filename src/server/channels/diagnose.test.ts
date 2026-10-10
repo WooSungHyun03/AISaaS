@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, serverEnvMock, collectMock, tistoryCollectMock, naverCollectMock } = vi.hoisted(() => ({
+const { createClientMock, serverEnvMock, collectMock, tistoryCollectMock, naverCollectMock, recordDiagnosisAttemptMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   serverEnvMock: { CHANNEL_DATA_PROVIDER: "mock" as string },
   collectMock: vi.fn(),
   tistoryCollectMock: vi.fn(),
   naverCollectMock: vi.fn(),
+  recordDiagnosisAttemptMock: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
@@ -15,6 +16,7 @@ vi.mock("./providers", () => ({
   getTistoryCollector: () => tistoryCollectMock,
   getNaverBlogCollector: () => naverCollectMock,
 }));
+vi.mock("./diagnosis-rate-limit", () => ({ recordDiagnosisAttempt: recordDiagnosisAttemptMock }));
 
 const { diagnoseChannel } = await import("./diagnose");
 
@@ -60,6 +62,7 @@ function makeClient(args: { selectResult: { data: unknown; error: unknown }; ins
 beforeEach(() => {
   serverEnvMock.CHANNEL_DATA_PROVIDER = "mock";
   collectMock.mockResolvedValue(SAMPLE_METRICS);
+  recordDiagnosisAttemptMock.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -90,6 +93,7 @@ describe("diagnoseChannel: youtube", () => {
     expect(collectMock).not.toHaveBeenCalled();
     expect(client.table.insert).not.toHaveBeenCalled();
     expect(client.upsertSpy).not.toHaveBeenCalled(); // cache hit: no fresh collection, so no new snapshot either
+    expect(recordDiagnosisAttemptMock).not.toHaveBeenCalled(); // cache hit never counts against the hourly limit
   });
 
   it("collects, scores, and persists a new diagnosis when there is no cached row", async () => {
@@ -110,6 +114,7 @@ describe("diagnoseChannel: youtube", () => {
 
     const result = await diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW });
 
+    expect(recordDiagnosisAttemptMock).toHaveBeenCalledWith("business-1", NOW); // cache miss: counts against the hourly limit
     expect(collectMock).toHaveBeenCalledWith("@mychannel", NOW);
     expect(client.table.insert).toHaveBeenCalledTimes(1);
     const insertArg = client.table.insert.mock.calls[0][0];
@@ -188,6 +193,16 @@ describe("diagnoseChannel: youtube", () => {
     collectMock.mockRejectedValueOnce(Object.assign(new Error("quota"), { name: "YouTubeCollectorError", code: "QUOTA_EXCEEDED" }));
 
     await expect(diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW })).rejects.toMatchObject({ code: "QUOTA_EXCEEDED" });
+    expect(client.table.insert).not.toHaveBeenCalled();
+  });
+
+  it("propagates the hourly rate limit error without calling the provider or inserting a row", async () => {
+    const client = makeClient({ selectResult: { data: null, error: null } });
+    createClientMock.mockResolvedValue(client);
+    recordDiagnosisAttemptMock.mockRejectedValueOnce(Object.assign(new Error("limit"), { name: "DiagnosisRateLimitError" }));
+
+    await expect(diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW })).rejects.toMatchObject({ name: "DiagnosisRateLimitError" });
+    expect(collectMock).not.toHaveBeenCalled();
     expect(client.table.insert).not.toHaveBeenCalled();
   });
 });

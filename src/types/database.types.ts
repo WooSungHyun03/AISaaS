@@ -660,6 +660,20 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["marketing_metric_snapshots"]["Insert"]>;
         Relationships: [];
       };
+      channel_diagnosis_attempts: {
+        Row: {
+          id: string;
+          business_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["channel_diagnosis_attempts"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

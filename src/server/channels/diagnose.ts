@@ -8,6 +8,7 @@ import { scoreYouTubeChannel, uploadsWithinDays } from "./youtube-scoring";
 import { scoreTistoryChannel, postsWithinDays } from "./tistory-scoring";
 import { scoreNaverBlogChannel } from "./naver-blog-scoring";
 import { saveMetricSnapshot } from "./snapshot";
+import { recordDiagnosisAttempt } from "./diagnosis-rate-limit";
 import type { ChannelDiagnosis } from "./types";
 
 /**
@@ -132,6 +133,10 @@ export async function diagnoseChannel(
   if (cached && isFresh(cached.created_at, now) && cached.data_source === serverEnv.CHANNEL_DATA_PROVIDER) {
     return mapRowToChannelDiagnosis(cached, trackedChannel.platform);
   }
+
+  // Cache miss from here on — this is a real collector call, so it counts
+  // against the hourly per-business limit (see diagnosis-rate-limit.ts).
+  await recordDiagnosisAttempt(trackedChannel.business_id, now);
 
   const raw = await collectRawChannelMetrics(trackedChannel, businessName, now);
   const scored = scoreRawMetrics(raw, now);
