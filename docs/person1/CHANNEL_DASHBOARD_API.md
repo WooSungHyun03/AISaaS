@@ -23,7 +23,7 @@ interface ChannelDiagnosisSummaryItem {
   overallScore: number;      // 0-100
   activityScore: number;     // 0-100
   consistencyScore: number;  // 0-100
-  contentScore: number;      // 0-100
+  contentScore: number | null; // 0-100, tistory/naver_blog는 항상 null (조회수/방문자 데이터가 없음 — 화면에 "측정 불가"로 표시하고, 이유는 findings에 있음)
   metrics: Record<string, number>;  // 플랫폼마다 키가 다름, 화면에 그대로 찍지 말고 findings/recommendations 위주로 노출 추천
   findings: string[];
   recommendations: string[];

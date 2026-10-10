@@ -18,10 +18,11 @@ export interface NaverBlogScoreItem {
 }
 
 export interface NaverBlogScoreResult {
-  /** Average of activityScore/consistencyScore — no contentScore: blog.json has no view/visitor data (see NAVER_SEARCH_LIMITATION_NOTICE). */
+  /** Average of activityScore/consistencyScore only — contentScore is always null: blog.json has no view/visitor data (see NAVER_SEARCH_LIMITATION_NOTICE, always included in `findings`). */
   overallScore: number;
   activityScore: number;
   consistencyScore: number;
+  contentScore: number | null;
   items: NaverBlogScoreItem[];
   findings: string[];
   recommendations: string[];
@@ -64,6 +65,7 @@ export function scoreNaverBlogChannel(metrics: NaverBlogMetrics): NaverBlogScore
       overallScore: 0,
       activityScore: 0,
       consistencyScore: 0,
+      contentScore: null,
       items: [],
       findings: [NAVER_SEARCH_LIMITATION_NOTICE],
       recommendations: [],
@@ -82,5 +84,5 @@ export function scoreNaverBlogChannel(metrics: NaverBlogMetrics): NaverBlogScore
 
   const completeness: ChannelDiagnosisCompleteness = metrics.matchedPostCount < 2 ? "PARTIAL" : "COMPLETE";
 
-  return { overallScore, activityScore: activityItem.points, consistencyScore: consistencyItem.points, items, findings: [NAVER_SEARCH_LIMITATION_NOTICE], recommendations, completeness };
+  return { overallScore, activityScore: activityItem.points, consistencyScore: consistencyItem.points, contentScore: null, items, findings: [NAVER_SEARCH_LIMITATION_NOTICE], recommendations, completeness };
 }

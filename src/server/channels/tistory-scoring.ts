@@ -10,11 +10,21 @@ export interface TistoryScoreItem {
   detail: string;
 }
 
+/**
+ * RSS has no view/subscriber data, so contentScore is always null here.
+ * Included in `findings` whenever the diagnosis is otherwise meaningful
+ * (feed reachable) — omitted when the feed itself was unavailable, since
+ * `metrics.unavailableReason` already explains the whole INSUFFICIENT_DATA
+ * result and repeating a second, narrower reason would be redundant.
+ */
+export const TISTORY_CONTENT_SCORE_UNAVAILABLE_NOTICE = "RSS 피드엔 조회수 정보가 없어 콘텐츠 점수는 측정할 수 없어요.";
+
 export interface TistoryScoreResult {
-  /** Average of activityScore/consistencyScore — Tistory RSS has no view/subscriber data, so there is no contentScore here (unlike YouTube's). */
+  /** Average of activityScore/consistencyScore only — contentScore (always null) is excluded, same as consistencyScore/activityScore averaging in scoreTistoryChannel below. */
   overallScore: number;
   activityScore: number;
   consistencyScore: number;
+  contentScore: number | null;
   items: TistoryScoreItem[];
   findings: string[];
   recommendations: string[];
@@ -30,8 +40,8 @@ function kstDayStartMs(timeMs: number): number {
   return Math.floor(kstTime / DAY_MS) * DAY_MS - KST_OFFSET_MS;
 }
 
-/** Posts within the last `days` KST calendar days (today counts as day 0). */
-function postsWithinDays(posts: TistoryRssMetrics["posts"], now: Date, days: number): number {
+/** Posts within the last `days` KST calendar days (today counts as day 0). Exported for reuse by diagnose.ts when it persists `metrics.postsLast30Days` alongside the score, so both stay in sync if this window logic ever changes. */
+export function postsWithinDays(posts: TistoryRssMetrics["posts"], now: Date, days: number): number {
   const todayStart = kstDayStartMs(now.getTime());
   return posts.filter((post) => {
     const postDayStart = kstDayStartMs(Date.parse(post.publishedAt));
@@ -80,6 +90,7 @@ export function scoreTistoryChannel(metrics: TistoryRssMetrics, now: Date): Tist
       overallScore: 0,
       activityScore: 0,
       consistencyScore: 0,
+      contentScore: null,
       items: [],
       findings: [metrics.unavailableReason],
       recommendations: [],
@@ -92,8 +103,9 @@ export function scoreTistoryChannel(metrics: TistoryRssMetrics, now: Date): Tist
       overallScore: 0,
       activityScore: 0,
       consistencyScore: 0,
+      contentScore: null,
       items: [],
-      findings: ["이 블로그에는 아직 게시글이 없어요."],
+      findings: ["이 블로그에는 아직 게시글이 없어요.", TISTORY_CONTENT_SCORE_UNAVAILABLE_NOTICE],
       recommendations: ["첫 글을 게시하면 진단을 시작할 수 있어요."],
       completeness: "INSUFFICIENT_DATA",
     };
@@ -104,7 +116,7 @@ export function scoreTistoryChannel(metrics: TistoryRssMetrics, now: Date): Tist
   const items = [activityItem, consistencyItem];
   const overallScore = Math.round((activityItem.points + consistencyItem.points) / 2);
 
-  const findings: string[] = [];
+  const findings: string[] = [TISTORY_CONTENT_SCORE_UNAVAILABLE_NOTICE];
   if (postsWithinDays(metrics.posts, now, 30) === 0) findings.push("최근 30일간 게시글이 없어요.");
   if (metrics.observedCapped) {
     findings.push("최근 30개 글 기준으로 계산했어요 — 그보다 오래된 글은 포함되지 않았어요.");
@@ -116,5 +128,5 @@ export function scoreTistoryChannel(metrics: TistoryRssMetrics, now: Date): Tist
 
   const completeness: ChannelDiagnosisCompleteness = metrics.posts.length < 2 ? "PARTIAL" : "COMPLETE";
 
-  return { overallScore, activityScore: activityItem.points, consistencyScore: consistencyItem.points, items, findings, recommendations, completeness };
+  return { overallScore, activityScore: activityItem.points, consistencyScore: consistencyItem.points, contentScore: null, items, findings, recommendations, completeness };
 }

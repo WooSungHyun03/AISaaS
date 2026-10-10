@@ -15,7 +15,8 @@ export interface ChannelDiagnosis {
   overallScore: number;
   activityScore: number;
   consistencyScore: number;
-  contentScore: number;
+  /** Null for tistory/naver_blog — those collectors have no view/visitor data to score content with (see the platform-specific "content score unavailable" notice, always included in `findings`). */
+  contentScore: number | null;
   /** Raw measured values the scores were computed from (e.g. { subscriberCount: 1200, uploadsLast28Days: 3 }). Shape varies by platform. */
   metrics: Record<string, number>;
   findings: string[];

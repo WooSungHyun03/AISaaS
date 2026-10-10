@@ -610,7 +610,7 @@ export interface Database {
           overall_score: number;
           activity_score: number;
           consistency_score: number;
-          content_score: number;
+          content_score: number | null;
           metrics: Json;
           findings: string[];
           recommendations: string[];
@@ -625,7 +625,7 @@ export interface Database {
           overall_score: number;
           activity_score: number;
           consistency_score: number;
-          content_score: number;
+          content_score: number | null;
           metrics?: Json;
           findings?: string[];
           recommendations?: string[];

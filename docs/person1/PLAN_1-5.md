@@ -40,10 +40,17 @@
 ## 진행 단계
 
 - [x] **1단계** — `ai-number-guard.ts` + 테스트 (11/11 통과)
-- [ ] **2단계** — `raw-metrics.ts` 추출(`collectRawChannelMetrics`), `diagnose.ts`/`collect-pipeline.ts`
-  리팩터, `diagnoseChannel()` 공용 오케스트레이터. 1-2/1-6 기존 테스트 그대로 통과 확인.
+- [x] **2단계** — `raw-metrics.ts` 추출(`collectRawChannelMetrics`, `toSnapshotMetricsRecord`),
+  `diagnose.ts`를 `diagnoseYouTubeChannel` → 세 플랫폼 공용 `diagnoseChannel()`로 일반화,
+  `collect-pipeline.ts`도 `raw-metrics.ts` 경유로 리팩터. 티스토리/네이버 스코어링에
+  `contentScore: null` + 사유(findings) 추가, `ChannelDiagnosis.contentScore`를
+  `number | null`로 변경, `docs/person1/CHANNEL_DASHBOARD_API.md` 갱신.
+  **순서 변경**: migration 0040(content_score nullable)을 4단계에서 앞당겨 이 단계에서 같이
+  적용함 — null을 insert하려면 DB 제약이 먼저 nullable이어야 해서(0035가 `not null`이었음)
+  분리할 수 없었음. `src/types/database.types.ts`의 `content_score` 타입도 함께 갱신.
+  채널/스코어링 전체 테스트(135개) + 전체 테스트(879개) + typecheck + lint 통과.
 - [ ] **3단계** — `channel-narrative.ts`(+ `ai-number-guard` 연동) + register.ts 연동 + 테스트
-- [ ] **4단계** — migration 0040(content_score nullable) + 0041(channel_diagnosis_attempts, RLS)
+- [ ] **4단계** — migration 0041(channel_diagnosis_attempts, RLS) — 0040은 2단계에서 이미 적용함
 - [ ] **5단계** — 화면단: `/diagnosis` 새 진단 화면, `/marketing/diagnosis` 308 리다이렉트(쿼리스트링
   보존)로 교체, `readiness.ts` + `ReadinessScoreCard` 분리 후 `/diagnosis` 상단 배치,
   `docs/person1/READINESS_SCORE_FOR_DASHBOARD.md` 메모, 홈페이지 진단 버튼화(prefill.ts 재사용),

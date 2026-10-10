@@ -25,7 +25,7 @@ type ChannelDiagnosisRow = {
   overall_score: number;
   activity_score: number;
   consistency_score: number;
-  content_score: number;
+  content_score: number | null;
   metrics: Record<string, number> | null;
   findings: string[];
   recommendations: string[];

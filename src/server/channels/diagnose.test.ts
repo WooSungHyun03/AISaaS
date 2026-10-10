@@ -1,18 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, serverEnvMock, collectMock } = vi.hoisted(() => ({
+const { createClientMock, serverEnvMock, collectMock, tistoryCollectMock, naverCollectMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   serverEnvMock: { CHANNEL_DATA_PROVIDER: "mock" as string },
   collectMock: vi.fn(),
+  tistoryCollectMock: vi.fn(),
+  naverCollectMock: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
 vi.mock("@/lib/env/server", () => ({ serverEnv: serverEnvMock }));
-vi.mock("./providers", () => ({ getYouTubeDataProvider: () => ({ collect: collectMock }) }));
+vi.mock("./providers", () => ({
+  getYouTubeDataProvider: () => ({ collect: collectMock }),
+  getTistoryCollector: () => tistoryCollectMock,
+  getNaverBlogCollector: () => naverCollectMock,
+}));
 
-const { diagnoseYouTubeChannel } = await import("./diagnose");
+const { diagnoseChannel } = await import("./diagnose");
 
-const TRACKED_CHANNEL = { id: "channel-1", business_id: "business-1", external_id: "@mychannel" };
+const TRACKED_CHANNEL = { id: "channel-1", business_id: "business-1", external_id: "@mychannel", url: "", platform: "youtube" as const };
 const NOW = new Date("2026-10-10T12:00:00.000Z");
 
 const SAMPLE_METRICS = {
@@ -60,7 +66,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("diagnoseYouTubeChannel", () => {
+describe("diagnoseChannel: youtube", () => {
   it("reuses a fresh same-provider cached diagnosis without calling the provider", async () => {
     const cachedRow = {
       overall_score: 70,
@@ -77,7 +83,7 @@ describe("diagnoseYouTubeChannel", () => {
     const client = makeClient({ selectResult: { data: cachedRow, error: null } });
     createClientMock.mockResolvedValue(client);
 
-    const result = await diagnoseYouTubeChannel(TRACKED_CHANNEL, { now: NOW });
+    const result = await diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW });
 
     expect(result.overallScore).toBe(70);
     expect(result.dataSource).toBe("mock");
@@ -102,7 +108,7 @@ describe("diagnoseYouTubeChannel", () => {
     const client = makeClient({ selectResult: { data: null, error: null }, insertResult: { data: insertedRow, error: null } });
     createClientMock.mockResolvedValue(client);
 
-    const result = await diagnoseYouTubeChannel(TRACKED_CHANNEL, { now: NOW });
+    const result = await diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW });
 
     expect(collectMock).toHaveBeenCalledWith("@mychannel", NOW);
     expect(client.table.insert).toHaveBeenCalledTimes(1);
@@ -136,7 +142,7 @@ describe("diagnoseYouTubeChannel", () => {
     const client = makeClient({ selectResult: { data: staleRow, error: null }, insertResult: { data: insertedRow, error: null } });
     createClientMock.mockResolvedValue(client);
 
-    await diagnoseYouTubeChannel(TRACKED_CHANNEL, { now: NOW });
+    await diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW });
     expect(collectMock).toHaveBeenCalledTimes(1);
   });
 
@@ -158,7 +164,7 @@ describe("diagnoseYouTubeChannel", () => {
     const client = makeClient({ selectResult: { data: cachedFromLive, error: null }, insertResult: { data: insertedRow, error: null } });
     createClientMock.mockResolvedValue(client);
 
-    await diagnoseYouTubeChannel(TRACKED_CHANNEL, { now: NOW });
+    await diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW });
     expect(collectMock).toHaveBeenCalledTimes(1);
   });
 
@@ -166,14 +172,14 @@ describe("diagnoseYouTubeChannel", () => {
     const client = makeClient({ selectResult: { data: null, error: new Error("boom") } });
     createClientMock.mockResolvedValue(client);
 
-    await expect(diagnoseYouTubeChannel(TRACKED_CHANNEL, { now: NOW })).rejects.toMatchObject({ name: "ChannelsError", code: "DATABASE_ERROR" });
+    await expect(diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW })).rejects.toMatchObject({ name: "ChannelsError", code: "DATABASE_ERROR" });
   });
 
   it("throws ChannelsError when persisting the new diagnosis fails", async () => {
     const client = makeClient({ selectResult: { data: null, error: null }, insertResult: { data: null, error: new Error("boom") } });
     createClientMock.mockResolvedValue(client);
 
-    await expect(diagnoseYouTubeChannel(TRACKED_CHANNEL, { now: NOW })).rejects.toMatchObject({ name: "ChannelsError", code: "DATABASE_ERROR" });
+    await expect(diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW })).rejects.toMatchObject({ name: "ChannelsError", code: "DATABASE_ERROR" });
   });
 
   it("propagates the provider's error (e.g. quota exceeded) without inserting a row", async () => {
@@ -181,7 +187,75 @@ describe("diagnoseYouTubeChannel", () => {
     createClientMock.mockResolvedValue(client);
     collectMock.mockRejectedValueOnce(Object.assign(new Error("quota"), { name: "YouTubeCollectorError", code: "QUOTA_EXCEEDED" }));
 
-    await expect(diagnoseYouTubeChannel(TRACKED_CHANNEL, { now: NOW })).rejects.toMatchObject({ code: "QUOTA_EXCEEDED" });
+    await expect(diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW })).rejects.toMatchObject({ code: "QUOTA_EXCEEDED" });
     expect(client.table.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe("diagnoseChannel: tistory (ticket 1-5 platform generalization)", () => {
+  const TISTORY_CHANNEL = { id: "channel-2", business_id: "business-1", external_id: "myname", url: "https://myname.tistory.com/", platform: "tistory" as const };
+
+  it("collects via the Tistory RSS collector, scores with contentScore null, and persists content_score: null", async () => {
+    tistoryCollectMock.mockResolvedValue({
+      posts: [
+        { publishedAt: "2026-10-09T00:00:00.000Z" },
+        { publishedAt: "2026-10-01T00:00:00.000Z" },
+      ],
+      observedCapped: false,
+      unavailableReason: null,
+    });
+    const insertedRow = {
+      overall_score: 70,
+      activity_score: 70,
+      consistency_score: 70,
+      content_score: null,
+      metrics: { postCount: 2, postsLast30Days: 2 },
+      findings: [],
+      recommendations: [],
+      completeness: "PARTIAL",
+      data_source: "mock",
+      created_at: NOW.toISOString(),
+    };
+    const client = makeClient({ selectResult: { data: null, error: null }, insertResult: { data: insertedRow, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await diagnoseChannel(TISTORY_CHANNEL, undefined, { now: NOW });
+
+    expect(tistoryCollectMock).toHaveBeenCalledWith("https://myname.tistory.com/", NOW);
+    const insertArg = client.table.insert.mock.calls[0][0];
+    expect(insertArg.content_score).toBeNull();
+    expect(insertArg.metrics).toEqual({ postCount: 2, postsLast30Days: 2 });
+    expect(result.contentScore).toBeNull();
+    expect(result.channel).toBe("tistory");
+  });
+});
+
+describe("diagnoseChannel: naver_blog (ticket 1-5 platform generalization)", () => {
+  const NAVER_CHANNEL = { id: "channel-3", business_id: "business-1", external_id: "myblogid", url: "", platform: "naver_blog" as const };
+
+  it("collects via the Naver Blog search collector, passing the business name through, and persists content_score: null", async () => {
+    naverCollectMock.mockResolvedValue({ matchedPostCount: 4, postsLast30Days: 3, averageGapDays: 5, lastPostDate: "2026-10-09", firstPostDate: "2026-09-20" });
+    const insertedRow = {
+      overall_score: 80,
+      activity_score: 100,
+      consistency_score: 70,
+      content_score: null,
+      metrics: { matchedPostCount: 4, postsLast30Days: 3, averageGapDays: 5 },
+      findings: [],
+      recommendations: [],
+      completeness: "COMPLETE",
+      data_source: "mock",
+      created_at: NOW.toISOString(),
+    };
+    const client = makeClient({ selectResult: { data: null, error: null }, insertResult: { data: insertedRow, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await diagnoseChannel(NAVER_CHANNEL, "우리동네 빵집", { now: NOW });
+
+    expect(naverCollectMock).toHaveBeenCalledWith("myblogid", "우리동네 빵집", NOW);
+    const insertArg = client.table.insert.mock.calls[0][0];
+    expect(insertArg.content_score).toBeNull();
+    expect(result.contentScore).toBeNull();
+    expect(result.channel).toBe("naver_blog");
   });
 });

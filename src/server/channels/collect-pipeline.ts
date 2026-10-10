@@ -4,10 +4,9 @@ import { serverEnv } from "@/lib/env/server";
 import { logger } from "@/lib/logger";
 import { ChannelsError } from "./summary";
 import { saveMetricSnapshot } from "./snapshot";
-import { getNaverBlogCollector, getTistoryCollector, getYouTubeDataProvider } from "./providers";
-import type { TrackedChannel } from "@/types/domain";
+import { collectRawChannelMetrics, toSnapshotMetricsRecord } from "./raw-metrics";
+import type { TrackedChannelForCollection } from "./raw-metrics";
 import { channelPlatformSchema } from "./platform";
-import type { ChannelPlatform } from "./platform";
 import type { Database } from "@/types/database.types";
 
 /** Current-period + previous-period comparison (see getGrowthSummary) needs up to ~180 days; this adds a buffer so that comparison never silently loses its older half. Not literally "90일" per the ticket text — see docs/person1/MIGRATION_NUMBERING_NOTES.md-style note below. */
@@ -16,36 +15,17 @@ const RETENTION_DAYS = 200;
 const MAX_CONSECUTIVE_FAILURES = 5;
 const RESNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-type TrackedChannelForCollection = Pick<TrackedChannel, "id" | "external_id" | "url"> & { platform: ChannelPlatform };
 type TrackedChannelUpdate = Database["public"]["Tables"]["tracked_channels"]["Update"];
 
 /**
- * Dispatches to whichever of 1-2/1-3/1-4's collectors matches the
- * channel's platform and reduces its result to a flat metric map — no
- * scoring here, just the numbers the growth graph plots over time.
+ * Collects fresh metrics for the channel's platform and reduces them to a
+ * flat metric map — no scoring here, just the numbers the growth graph
+ * plots over time. Platform dispatch itself lives in raw-metrics.ts, shared
+ * with diagnose.ts.
  */
 async function collectChannelMetrics(channel: TrackedChannelForCollection, businessName: string | undefined, now: Date): Promise<Record<string, number>> {
-  switch (channel.platform) {
-    case "youtube": {
-      const metrics = await getYouTubeDataProvider().collect(channel.external_id, now);
-      const result: Record<string, number> = { viewCount: metrics.viewCount, videoCount: metrics.videoCount };
-      if (metrics.subscriberCount !== null) result.subscriberCount = metrics.subscriberCount;
-      return result;
-    }
-    case "tistory": {
-      const metrics = await getTistoryCollector()(channel.url, now);
-      return { postCount: metrics.posts.length };
-    }
-    case "naver_blog": {
-      const metrics = await getNaverBlogCollector()(channel.external_id, businessName, now);
-      return { matchedPostCount: metrics.matchedPostCount, postsLast30Days: metrics.postsLast30Days };
-    }
-    default: {
-      // Exhaustiveness guard — a new ChannelPlatform value without a case here is a bug, not a runtime "unsupported platform" a caller should handle.
-      const unreachable: never = channel.platform;
-      throw new Error(`Unhandled channel platform: ${unreachable}`);
-    }
-  }
+  const raw = await collectRawChannelMetrics(channel, businessName, now);
+  return toSnapshotMetricsRecord(raw);
 }
 
 /**
