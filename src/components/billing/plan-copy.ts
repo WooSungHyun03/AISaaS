@@ -21,6 +21,7 @@ export function planFeatures(plan: PlanConfig): string[] {
     `블로그 글 ${quota(plan.monthlyBlogLimit, "건")}`,
     `숏폼 영상 ${quota(plan.monthlyShortsLimit, "건")}`,
   ];
+  if (plan.monthlyAnimatedShortsLimit !== 0) features.push(`움직이는 캐릭터 영상 ${quota(plan.monthlyAnimatedShortsLimit, "건")} 포함`);
   if (plan.id === "FREE") return [...features, "블로그 글은 직접 확인하고 올려요"];
   features.push("정해둔 때마다 자동으로 만들기");
   features.push("제작 기록 보기");

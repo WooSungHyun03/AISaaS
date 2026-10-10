@@ -40,7 +40,7 @@ interface SendFailure {
   error: string;
 }
 
-export const newsletterAutomationHandler: AutomationHandler = {
+export const newsletterAutomationHandler: AutomationHandler<AutomationHandlerResult> = {
   templateSlug: "newsletter",
 
   async run(ctx: AutomationRunContext): Promise<AutomationHandlerResult> {

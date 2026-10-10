@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClock, Check, ExternalLink, Film, LoaderCircle, Play, Send } from "lucide-react";
 import { toast } from "sonner";
-import { createShortsAutomation, generateShortsPreview, publishShortsNow, saveShortsSchedule } from "@/app/(app)/shorts/actions";
+import { advanceShortsJob, createShortsAutomation, generateShortsPreview, publishShortsNow, saveShortsSchedule } from "@/app/(app)/shorts/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form-message";
@@ -27,7 +27,16 @@ interface Preview {
   caption: string | null;
   script: string | null;
   scenes: Array<{ text: string; durationSec: number }>;
+  format: "character" | "showcase" | null;
+  animationMode: "video" | "tween" | "photos" | null;
+  animationNote: string | null;
 }
+
+const FORMAT_BADGE = {
+  video: "움직이는 캐릭터 영상",
+  tween: "기본 움직임 효과",
+  photos: "사진 홍보 영상",
+} as const;
 
 interface Publication {
   runId: string;
@@ -60,7 +69,9 @@ export function ShortsStudio({
   latestPreview,
   publications,
   hasInFlightRun,
+  progress,
   nextRunAt,
+  referencesSlot,
 }: {
   automationId: string;
   automationStatus: string;
@@ -70,7 +81,11 @@ export function ShortsStudio({
   latestPreview: Preview | null;
   publications: Publication[];
   hasInFlightRun: boolean;
+  /** Short status of a video that is being made in the background, if any. */
+  progress: string | null;
   nextRunAt: string | null;
+  /** The reference-image card; rendered between the preview and the schedule. */
+  referencesSlot?: ReactNode;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -81,23 +96,40 @@ export function ShortsStudio({
   );
   const busy = pending || hasInFlightRun;
 
+  // While a video is being made in the background, nudge it forward every few seconds (the cron tick
+  // does the same when nobody has the page open) and show what changed.
+  const stepping = useRef(false);
   useEffect(() => {
     if (!hasInFlightRun) return;
-    const timer = window.setInterval(() => router.refresh(), 8_000);
+    const step = async () => {
+      if (stepping.current) return;
+      stepping.current = true;
+      try {
+        const result = await advanceShortsJob(automationId);
+        if (result.error) toast.error(result.error);
+        else if (result.pending === false) toast.success("영상이 완성됐어요.");
+      } catch {
+        // The next tick retries.
+      } finally {
+        stepping.current = false;
+        router.refresh();
+      }
+    };
+    const timer = window.setInterval(() => void step(), 6_000);
     return () => window.clearInterval(timer);
-  }, [hasInFlightRun, router]);
+  }, [hasInFlightRun, automationId, router]);
 
   const togglePlatform = (platform: ShortsPublishPlatform) => {
     setPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]);
   };
 
-  const run = (kind: typeof busyAction, task: () => Promise<{ error?: string }>, success: string) => {
+  const run = (kind: typeof busyAction, task: () => Promise<{ error?: string; pending?: boolean }>, success: string, pendingMessage?: string) => {
     setBusyAction(kind);
     startTransition(async () => {
       try {
         const result = await task();
         if (result.error) toast.error(result.error);
-        else toast.success(success);
+        else toast.success(result.pending && pendingMessage ? pendingMessage : success);
       } catch {
         toast.error("요청을 처리하지 못했어요. 잠시 후 다시 시도해주세요.");
       } finally {
@@ -109,7 +141,7 @@ export function ShortsStudio({
 
   return (
     <div className="space-y-8">
-      {hasInFlightRun ? <FormMessage variant="info">영상 생성 또는 게시가 진행 중이에요. 완료될 때까지 중복 실행을 막고 자동으로 상태를 확인합니다.</FormMessage> : null}
+      {hasInFlightRun ? <FormMessage variant="info">{progress ? `${progress}. ` : ""}영상 생성 또는 게시가 진행 중이에요. 움직이는 캐릭터 영상은 몇 분 걸릴 수 있고, 이 화면을 닫아도 계속 만들어져요.</FormMessage> : null}
       {automationStatus === "ERROR" ? <FormMessage>최근 실행 오류로 예약이 멈췄어요. 연결을 확인한 뒤 아래 예약 설정을 다시 저장해주세요.</FormMessage> : null}
 
       <section aria-labelledby="preview-heading" className="grid gap-6 lg:grid-cols-[minmax(280px,380px)_1fr]">
@@ -136,7 +168,7 @@ export function ShortsStudio({
           <div>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div><h2 id="preview-heading" className="text-xl font-extrabold tracking-[-0.03em]">영상 만들기와 미리보기</h2><p className="mt-1 text-sm text-muted-foreground">게시 전에 영상과 문구를 직접 확인할 수 있어요.</p></div>
-              <Button variant="spark" disabled={busy} onClick={() => run("generate", () => generateShortsPreview(automationId), "새 미리보기를 만들었어요.")}>
+              <Button variant="spark" disabled={busy} onClick={() => run("generate", () => generateShortsPreview(automationId), "새 미리보기를 만들었어요.", "영상 만들기를 시작했어요. 완성되면 여기에 나타나요.")}>
                 {busy && (busyAction === "generate" || hasInFlightRun) ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Film aria-hidden="true" />}
                 {busy && (busyAction === "generate" || hasInFlightRun) ? "만드는 중…" : latestPreview ? "새 영상 만들기" : "영상 만들기"}
               </Button>
@@ -144,6 +176,8 @@ export function ShortsStudio({
           </div>
 
           {latestPreview ? <div className="space-y-4 rounded-2xl border bg-card p-5 sm:p-6">
+            {latestPreview.animationMode ? <div className="flex flex-wrap items-center gap-2"><Badge variant="brand">{FORMAT_BADGE[latestPreview.animationMode]}</Badge></div> : null}
+            {latestPreview.animationNote ? <p className="rounded-xl bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">{latestPreview.animationNote}</p> : null}
             <div><p className="text-xs font-semibold text-muted-foreground">후킹 문구</p><p className="mt-1 text-lg font-bold leading-7">{latestPreview.hook ?? "제목 없음"}</p>{latestPreview.topic ? <p className="mt-1 text-sm text-muted-foreground">주제 · {latestPreview.topic}</p> : null}</div>
             {latestPreview.caption ? <div><p className="text-xs font-semibold text-muted-foreground">게시 문구</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{latestPreview.caption}</p></div> : null}
             {latestPreview.scenes.length ? <details className="group"><summary className="cursor-pointer text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring">장면 구성 {latestPreview.scenes.length}개 보기</summary><ol className="mt-3 space-y-2">{latestPreview.scenes.map((scene, index) => <li key={`${index}-${scene.text}`} className="flex gap-3 rounded-xl bg-muted px-3 py-2 text-sm"><span className="font-bold text-primary">{index + 1}</span><span className="flex-1">{scene.text}</span><span className="text-muted-foreground">{scene.durationSec}초</span></li>)}</ol></details> : null}
@@ -177,6 +211,8 @@ export function ShortsStudio({
           </div>
         </div>
       </section>
+
+      {referencesSlot}
 
       <section aria-labelledby="schedule-heading" className="rounded-2xl border bg-card p-5 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-start gap-3"><span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-primary"><CalendarClock className="size-5" aria-hidden="true" /></span><div><h2 id="schedule-heading" className="text-lg font-extrabold tracking-[-0.03em]">예약 만들기</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">저장하면 예약 시각마다 새 영상을 만들어요. 위에서 게시할 플랫폼을 골라두면 만든 영상을 그곳에 바로 올리고, 고르지 않으면 영상만 만들어 둬요.</p></div></div>{nextRunAt && automationStatus === "ACTIVE" ? <Badge variant="brand">다음 만들기 {new Date(nextRunAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</Badge> : <Badge variant="secondary">예약 꺼짐</Badge>}</div>

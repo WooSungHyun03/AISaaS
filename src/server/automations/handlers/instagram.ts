@@ -42,7 +42,7 @@ function buildCaptionText(caption: InstagramCaption): string {
  * no automation-type-specific forking of the AutomationRunner lifecycle.
  * The connector's REELS branch is used separately by the Shorts handler.
  */
-export const instagramAutomationHandler: AutomationHandler = {
+export const instagramAutomationHandler: AutomationHandler<AutomationHandlerResult> = {
   templateSlug: "instagram-marketing",
 
   async run(ctx: AutomationRunContext): Promise<AutomationHandlerResult> {

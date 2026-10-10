@@ -2,12 +2,32 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { describeAutomationRunError } from "@/server/shared/errors";
-import { runAutomationNow } from "@/server/automations/runner";
+import { advanceDeferredRun, runAutomationNow } from "@/server/automations/runner";
 import { computeNextRunAt } from "@/server/automations/scheduler";
 import { parseScheduleFromForm } from "@/server/automations/schedule-input";
 import { canCreateAutomation } from "@/server/billing/entitlements";
+import {
+  deleteReferenceImage,
+  detectImageType,
+  isOwnedReferencePath,
+  referenceStoragePath,
+  uploadReferenceImage,
+} from "@/server/shorts/reference-images";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
+import {
+  MASCOT_POSES,
+  MAX_REFERENCE_UPLOAD_BYTES,
+  MAX_SHORTS_REFERENCES,
+  REFERENCE_LABEL_MAX_LENGTH,
+  SHORTS_BRIEF_MAX_LENGTH,
+  SHORTS_STYLES,
+  parseShortsReferenceSettings,
+  isReferenceSubject,
+  type ShortsReference,
+  type ShortsStyle,
+} from "@/types/shorts-reference";
 import type { Json } from "@/types/domain";
 
 export interface ShortsActionResult {
@@ -15,6 +35,9 @@ export interface ShortsActionResult {
   success?: boolean;
   automationId?: string;
   runId?: string;
+  /** True when the video is still being made in the background (animated Shorts take minutes). */
+  pending?: boolean;
+  progress?: string;
 }
 
 function parsePlatforms(values: string[]): ShortsPublishPlatform[] {
@@ -81,12 +104,38 @@ export async function generateShortsPreview(automationId: string): Promise<Short
     revalidatePath("/shorts");
     revalidatePath("/automations/history");
     revalidatePath("/usage");
-    return { success: true, runId: result.runId };
+    return { success: true, runId: result.runId, pending: result.status === "RUNNING", progress: result.progress };
   } catch (error) {
     const message = error instanceof Error && error.message.includes("already has a run")
       ? "이미 영상을 만들고 있습니다. 완료 후 다시 시도해주세요."
       : "영상을 만들지 못했습니다. 잠시 후 다시 시도해주세요.";
     return { error: message };
+  }
+}
+
+/**
+ * Moves an in-flight (deferred) video forward by one quick step. The Shorts page calls this every
+ * few seconds while it is open; the cron tick does the same when nobody is looking, and a lease
+ * inside advanceDeferredRun keeps the two from stepping on each other.
+ */
+export async function advanceShortsJob(automationId: string): Promise<ShortsActionResult> {
+  const owned = await ownedShortsAutomation(automationId);
+  if ("error" in owned) return { error: owned.error };
+  const { data: run } = await owned.supabase.from("automation_runs").select("id")
+    .eq("automation_id", automationId).eq("status", "RUNNING").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (!run) return { success: true, pending: false };
+  try {
+    const step = await advanceDeferredRun(run.id);
+    if (step.status === "SUCCESS" || step.status === "FAILED") {
+      revalidatePath("/shorts");
+      revalidatePath("/automations/history");
+      revalidatePath("/usage");
+    }
+    if (step.status === "FAILED") return { error: describeAutomationRunError(step.errorMessage), runId: run.id, pending: false };
+    return { success: true, runId: run.id, pending: step.status === "RUNNING" || step.status === "BUSY", progress: step.progress };
+  } catch {
+    // A transient problem while stepping is retried by the next poll or cron tick.
+    return { success: true, runId: run.id, pending: true };
   }
 }
 
@@ -152,3 +201,105 @@ export async function saveShortsSchedule(automationId: string, formData: FormDat
   return { success: true };
 }
 
+
+type OwnedShorts = Exclude<Awaited<ReturnType<typeof ownedShortsAutomation>>, { error: string }>;
+
+const DEFAULT_MASCOT_BRIEF = "이지 마케팅 서비스(마케팅 진단, 콘텐츠 캘린더, 블로그 글, 숏폼 영상을 AI가 만들어 줘요)를 사장님께 소개하는 웃긴 캐릭터 콩트";
+
+/** Writes the reference list / creative settings into `automations.config`, keeping every other key (platforms …). */
+async function writeShortsConfig(
+  owned: OwnedShorts,
+  patch: { references?: ShortsReference[]; shortsStyle?: ShortsStyle; shortsBrief?: string },
+): Promise<string | null> {
+  const current = owned.automation.config && typeof owned.automation.config === "object" && !Array.isArray(owned.automation.config)
+    ? owned.automation.config as Record<string, Json | undefined>
+    : {};
+  const { error } = await owned.supabase.from("automations").update({
+    config: { ...current, ...patch } as unknown as Json,
+  }).eq("id", owned.automation.id).eq("user_id", owned.user.id);
+  if (error) return "설정을 저장하지 못했어요. 잠시 후 다시 시도해주세요.";
+  revalidatePath("/shorts");
+  return null;
+}
+
+export async function uploadShortsReference(automationId: string, formData: FormData): Promise<ShortsActionResult> {
+  const owned = await ownedShortsAutomation(automationId);
+  if ("error" in owned) return { error: owned.error };
+  const settings = parseShortsReferenceSettings(owned.automation.config);
+  if (settings.references.length >= MAX_SHORTS_REFERENCES) return { error: `참고 이미지는 최대 ${MAX_SHORTS_REFERENCES}장까지 쓸 수 있어요.` };
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) return { error: "이미지 파일을 선택해주세요." };
+  if (file.size > MAX_REFERENCE_UPLOAD_BYTES) return { error: "이미지가 너무 커요. 3MB 이하로 줄여서 올려주세요." };
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const type = detectImageType(bytes);
+  if (!type) return { error: "PNG 또는 JPG 이미지만 올릴 수 있어요." };
+  const label = String(formData.get("label") ?? "").trim().slice(0, REFERENCE_LABEL_MAX_LENGTH);
+  const requestedSubject = String(formData.get("subject") ?? "other");
+  const subject = isReferenceSubject(requestedSubject) ? requestedSubject : "other";
+
+  const id = crypto.randomUUID();
+  const path = referenceStoragePath(owned.user.id, automationId, id, type);
+  const admin = createAdminClient();
+  try {
+    await uploadReferenceImage(admin, path, bytes, type);
+  } catch {
+    return { error: "이미지를 저장하지 못했어요. 잠시 후 다시 시도해주세요." };
+  }
+  const failure = await writeShortsConfig(owned, { references: [...settings.references, { id, kind: "upload", source: path, label, subject }] });
+  if (failure) {
+    await deleteReferenceImage(admin, path);
+    return { error: failure };
+  }
+  return { success: true };
+}
+
+export async function addMascotReferences(automationId: string): Promise<ShortsActionResult> {
+  const owned = await ownedShortsAutomation(automationId);
+  if ("error" in owned) return { error: owned.error };
+  const settings = parseShortsReferenceSettings(owned.automation.config);
+  const have = new Set(settings.references.filter((item) => item.kind === "mascot").map((item) => item.source));
+  const room = MAX_SHORTS_REFERENCES - settings.references.length;
+  const additions: ShortsReference[] = MASCOT_POSES.filter((pose) => !have.has(pose.key)).slice(0, Math.max(0, room)).map((pose) => ({
+    id: `mascot-${pose.key}`,
+    kind: "mascot",
+    source: pose.key,
+    label: pose.label,
+    subject: "character",
+  }));
+  if (additions.length === 0) {
+    return { error: room <= 0 ? "참고 이미지가 가득 찼어요. 일부를 지운 뒤 마스코트를 불러오세요." : "마스코트 이미지를 이미 모두 불러왔어요." };
+  }
+  const failure = await writeShortsConfig(owned, {
+    references: [...settings.references, ...additions],
+    ...(settings.brief ? {} : { shortsBrief: DEFAULT_MASCOT_BRIEF }),
+  });
+  return failure ? { error: failure } : { success: true };
+}
+
+export async function removeShortsReference(automationId: string, referenceId: string): Promise<ShortsActionResult> {
+  const owned = await ownedShortsAutomation(automationId);
+  if ("error" in owned) return { error: owned.error };
+  const settings = parseShortsReferenceSettings(owned.automation.config);
+  const target = settings.references.find((item) => item.id === referenceId);
+  if (!target) return { success: true };
+  const failure = await writeShortsConfig(owned, { references: settings.references.filter((item) => item.id !== referenceId) });
+  if (failure) return { error: failure };
+  if (target.kind === "upload" && isOwnedReferencePath(target.source, owned.user.id, automationId)) {
+    await deleteReferenceImage(createAdminClient(), target.source);
+  }
+  return { success: true };
+}
+
+export async function saveShortsCreativeSettings(
+  automationId: string,
+  input: { style: string; brief: string },
+): Promise<ShortsActionResult> {
+  const owned = await ownedShortsAutomation(automationId);
+  if ("error" in owned) return { error: owned.error };
+  if (!(input.style in SHORTS_STYLES)) return { error: "영상 스타일을 확인해주세요." };
+  const brief = input.brief.trim();
+  if (brief.length > SHORTS_BRIEF_MAX_LENGTH) return { error: `요청 사항은 ${SHORTS_BRIEF_MAX_LENGTH}자 이내로 적어주세요.` };
+  const failure = await writeShortsConfig(owned, { shortsStyle: input.style as ShortsStyle, shortsBrief: brief });
+  return failure ? { error: failure } : { success: true };
+}

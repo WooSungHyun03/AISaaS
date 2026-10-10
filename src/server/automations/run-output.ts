@@ -19,6 +19,10 @@ export interface SafeAutomationRunOutput {
   caption: string | null;
   script: string | null;
   scenes: Array<{ text: string; durationSec: number }>;
+  /** Shorts built from reference images: how the characters were produced. */
+  format: "character" | "showcase" | null;
+  animationMode: "video" | "tween" | "photos" | null;
+  animationNote: string | null;
   publicationResults: Partial<Record<"instagram" | "youtube", {
     externalId: string | null;
     externalUrl: string | null;
@@ -128,6 +132,9 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
         return text && durationSec !== null ? [{ text, durationSec }] : [];
       })
       : [],
+    format: output.format === "character" || output.format === "showcase" ? output.format : null,
+    animationMode: output.animationMode === "video" || output.animationMode === "tween" || output.animationMode === "photos" ? output.animationMode : null,
+    animationNote: safeText(output.animationNote, 300),
     publicationResults: safePublicationResults(output.publicationResults),
   };
 

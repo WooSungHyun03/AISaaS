@@ -117,22 +117,28 @@ describe("computeNextRunAt (MONTHLY)", () => {
 });
 
 describe("reapStaleRuns", () => {
-  it("fails only QUEUED/RUNNING runs older than the stale window", async () => {
-    const calls: Record<string, unknown[]> = {};
+  it("fails plain runs after the stale window and deferred runs only after the longer one", async () => {
+    const lt: unknown[][] = [];
+    const filters: unknown[][] = [];
     const builder: Record<string, unknown> = {};
-    builder.update = (payload: unknown) => ((calls.update = [payload]), builder);
-    builder.in = (...args: unknown[]) => ((calls.in = args), builder);
-    builder.lt = (...args: unknown[]) => ((calls.lt = args), builder);
+    builder.update = vi.fn(() => builder);
+    builder.in = vi.fn(() => builder);
+    builder.lt = (...args: unknown[]) => (lt.push(args), builder);
+    builder.is = (...args: unknown[]) => (filters.push(["is", ...args]), builder);
+    builder.not = (...args: unknown[]) => (filters.push(["not", ...args]), builder);
     builder.select = () => Promise.resolve({ data: [{ id: "r1" }, { id: "r2" }], error: null });
     vi.doMock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: () => builder }) }));
     vi.resetModules();
-    const { reapStaleRuns, STALE_RUN_MINUTES } = await import("./scheduler");
+    const { reapStaleRuns, STALE_RUN_MINUTES, STALE_DEFERRED_RUN_MINUTES } = await import("./scheduler");
 
     const now = new Date("2026-10-01T12:00:00.000Z");
-    await expect(reapStaleRuns(now)).resolves.toBe(2);
+    await expect(reapStaleRuns(now)).resolves.toBe(4);
 
-    expect(calls.update?.[0]).toMatchObject({ status: "FAILED", completed_at: now.toISOString() });
-    expect(calls.in).toEqual(["status", ["QUEUED", "RUNNING"]]);
-    expect(calls.lt).toEqual(["created_at", new Date(now.getTime() - STALE_RUN_MINUTES * 60_000).toISOString()]);
+    expect(lt).toEqual([
+      ["created_at", new Date(now.getTime() - STALE_RUN_MINUTES * 60_000).toISOString()],
+      ["created_at", new Date(now.getTime() - STALE_DEFERRED_RUN_MINUTES * 60_000).toISOString()],
+    ]);
+    expect(filters).toEqual([["is", "output", null], ["not", "output->job", "is", null]]);
+    expect(STALE_DEFERRED_RUN_MINUTES).toBeGreaterThan(STALE_RUN_MINUTES);
   });
 });

@@ -133,6 +133,36 @@ describe("MockAIProvider", () => {
   });
 });
 
+describe("MockAIProvider reference-image plans", () => {
+  const listing = (tags: string[]) => tags.map((tag, index) => `${index + 1}. [${tag}] 참고 이미지 ${index + 1}`).join("\n");
+
+  it("plans a character skit that only uses the listed character images", async () => {
+    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+    const provider = new MockAIProvider();
+    const { text } = await provider.generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "character".\n${listing(["place", "character", "character"])}\nRules:` });
+    const plan = makeShortsPlanSchema(["character"]).parse(JSON.parse(text));
+    expect(plan.format).toBe("character");
+    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
+  });
+
+  it("plans a photo showcase from the non-character images", async () => {
+    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+    const provider = new MockAIProvider();
+    const { text } = await provider.generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "showcase".\n${listing(["character", "place", "product"])}\nRules:` });
+    const plan = makeShortsPlanSchema(["showcase"]).parse(JSON.parse(text));
+    expect(plan.format).toBe("showcase");
+    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
+  });
+
+  it("follows the request when both formats are allowed", async () => {
+    const { MockAIProvider } = await import("./mock");
+    const provider = new MockAIProvider();
+    const both = (request: string) => `AUTOBIZ_SHORTS_PLAN_V1\nThe owner's request (follow it): ${request}\n${listing(["character", "place"])}\nRules:`;
+    expect((JSON.parse((await provider.generateText({ prompt: both("마스코트가 나와서 소개해줘") })).text) as { format: string }).format).toBe("character");
+    expect((JSON.parse((await provider.generateText({ prompt: both("매장 분위기를 소개해줘") })).text) as { format: string }).format).toBe("showcase");
+  });
+});
+
 describe("MockAIProvider (local dev / CI) produces schema-valid output for every pipeline", () => {
   it("covers the website narrative, blog topic + body and passes the blog quality gate", async () => {
     const [{ MockAIProvider }, { websiteDiagnosisNarrativeSchema }, { blogTopicSchema, blogBodySchema }, { assessBlogBody }] = await Promise.all([

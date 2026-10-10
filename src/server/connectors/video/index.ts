@@ -5,7 +5,9 @@ import { Json2VideoRenderProvider } from "./json2video";
 import { MockVideoRenderProvider } from "./mock";
 import { videoRenderInputSchema, type VideoRenderProvider, type VideoRenderScene } from "./types";
 
-export type { VideoRenderProvider, VideoRenderScene } from "./types";
+export type { VideoRenderProvider, VideoRenderScene, VideoRenderStatus } from "./types";
+export { buildCharacterMovie } from "./json2video-skit";
+export { buildShowcaseMovie, type ShowcaseScene } from "./json2video-showcase";
 
 export function getVideoRenderProvider(): VideoRenderProvider {
   return serverEnv.VIDEO_RENDER_PROVIDER === "json2video"
@@ -21,4 +23,13 @@ export async function renderShortVideo(scenes: VideoRenderScene[], voiceScript: 
     });
   }
   return getVideoRenderProvider().renderShortVideo(parsed.data.scenes, parsed.data.voiceScript);
+}
+
+/** Starts a full-movie render and returns its project id without waiting (see getMovieRenderStatus). */
+export async function startMovieRender(movie: Record<string, unknown>): Promise<string> {
+  return getVideoRenderProvider().startMovie(movie);
+}
+
+export async function getMovieRenderStatus(projectId: string) {
+  return getVideoRenderProvider().getMovieStatus(projectId);
 }

@@ -22,6 +22,11 @@ const nextConfig: NextConfig = {
   // additive: safe for both deployment targets.
   output: "standalone",
   poweredByHeader: false,
+  // Shorts reference-image uploads go through a Server Action (the browser downsizes them first,
+  // each file is capped at 3MB); the default 1MB body limit would reject most photos.
+  experimental: {
+    serverActions: { bodySizeLimit: "4mb" },
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

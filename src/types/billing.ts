@@ -13,6 +13,12 @@ export interface PlanConfig {
   monthlyBlogLimit: number | null;
   /** Max SUCCESS runs of the "shorts" template per calendar month. null = unlimited. */
   monthlyShortsLimit: number | null;
+  /**
+   * Max SUCCESS Shorts per calendar month whose characters were really animated
+   * (image-to-video clips cost far more than the rest of the pipeline). Beyond it,
+   * character Shorts still render with the simple motion effect. null = unlimited.
+   */
+  monthlyAnimatedShortsLimit: number | null;
   /** Automation templates this plan is allowed to use. null = all. */
   allowedTemplateSlugs: string[] | null;
   features: string[];

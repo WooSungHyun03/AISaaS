@@ -156,6 +156,47 @@ export async function getContentTypeUsage(supabase: DbClient, userId: string, te
   return count ?? 0;
 }
 
+/**
+ * Whether one more "really animated" character Short fits in this month's plan
+ * allowance. Counts this month's SUCCESS Shorts runs that were rendered with
+ * animation clips (`output.animationMode = "video"`).
+ */
+export async function canUseAnimatedShorts(supabase: DbClient, userId: string): Promise<EntitlementCheck> {
+  const plan = await getEffectivePlan(supabase, userId);
+  const limit = getPlanConfig(plan).monthlyAnimatedShortsLimit;
+  if (limit === null) return { allowed: true };
+  if (limit === 0) {
+    return { allowed: false, reason: `${PLAN_LABEL[plan]} 요금제에서는 움직이는 캐릭터 영상을 만들 수 없어요.` };
+  }
+
+  const { data: template } = await supabase.from("automation_templates").select("id").eq("slug", "shorts").maybeSingle();
+  if (!template) return { allowed: true };
+  const { data: automations, error: automationsError } = await supabase
+    .from("automations")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("template_id", template.id);
+  if (automationsError) throw automationsError;
+  const ids = (automations ?? []).map((item) => item.id);
+  if (ids.length === 0) return { allowed: true };
+
+  const { start, end } = getPeriodRange();
+  const { count, error } = await supabase
+    .from("automation_runs")
+    .select("id", { count: "exact", head: true })
+    .in("automation_id", ids)
+    .eq("status", "SUCCESS")
+    .eq("output->>animationMode", "video")
+    .gte("completed_at", start.toISOString())
+    .lt("completed_at", end.toISOString());
+  if (error) throw error;
+
+  if ((count ?? 0) >= limit) {
+    return { allowed: false, reason: `${PLAN_LABEL[plan]} 요금제의 이번 달 움직이는 캐릭터 영상 한도(${limit}건)를 모두 썼어요.` };
+  }
+  return { allowed: true };
+}
+
 export async function getAutomationLimit(plan: SubscriptionPlan): Promise<number | null> {
   return getPlanConfig(plan).automationLimit;
 }

@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findDueMock, runDueMock, reapMock, envState } = vi.hoisted(() => ({
+const { findDueMock, runDueMock, reapMock, advanceMock, envState } = vi.hoisted(() => ({
   findDueMock: vi.fn(),
   runDueMock: vi.fn(),
   reapMock: vi.fn(),
+  advanceMock: vi.fn(),
   envState: { CRON_SECRET: "test-cron-secret" as string | undefined },
 }));
 
 vi.mock("@/lib/env/server", () => ({ serverEnv: envState }));
-vi.mock("@/server/automations", () => ({ findDueAutomations: findDueMock, runDueAutomation: runDueMock, reapStaleRuns: reapMock }));
+vi.mock("@/server/automations", () => ({ findDueAutomations: findDueMock, runDueAutomation: runDueMock, reapStaleRuns: reapMock, advanceDeferredRuns: advanceMock }));
 
 const { POST } = await import("./route");
 
@@ -18,6 +19,7 @@ const request = (secret?: string) =>
 beforeEach(() => {
   envState.CRON_SECRET = "test-cron-secret";
   reapMock.mockResolvedValue(0);
+  advanceMock.mockResolvedValue([]);
   findDueMock.mockResolvedValue([]);
 });
 afterEach(() => {
@@ -66,13 +68,29 @@ describe("POST /api/cron/run-automations", () => {
     vi.setSystemTime(new Date("2026-10-01T00:00:00.000Z"));
     findDueMock.mockResolvedValue([{ id: "a-1" }, { id: "a-2" }, { id: "a-3" }]);
     runDueMock.mockImplementation(async () => {
-      vi.setSystemTime(new Date(Date.now() + 40_000)); // each run "takes" 40s
+      vi.setSystemTime(new Date(Date.now() + 40_000)); // each run "takes" 40s (budget is 70s from the start of the tick)
       return { runId: "r", status: "SUCCESS" };
     });
 
     const body = await (await POST(request("test-cron-secret"))).json();
 
-    expect(runDueMock).toHaveBeenCalledTimes(1);
-    expect(body.processed).toBe(1);
+    expect(runDueMock).toHaveBeenCalledTimes(2); // started at 0s and 40s; at 80s the 70s budget is spent
+    expect(body.processed).toBe(2);
+  });
+
+  it("advances in-flight deferred runs before starting due automations, and a failure there does not stop the tick", async () => {
+    const order: string[] = [];
+    advanceMock.mockImplementation(async () => (order.push("advance"), [{ runId: "r1", status: "RUNNING" }]));
+    findDueMock.mockResolvedValue([{ id: "a-1" }]);
+    runDueMock.mockImplementation(async () => (order.push("run"), { runId: "r", status: "RUNNING" }));
+
+    const body = await (await POST(request("test-cron-secret"))).json();
+
+    expect(order).toEqual(["advance", "run"]);
+    expect(body).toMatchObject({ advanced: 1, processed: 1 });
+
+    advanceMock.mockRejectedValueOnce(new Error("db down"));
+    const second = await (await POST(request("test-cron-secret"))).json();
+    expect(second).toMatchObject({ advanced: 0, processed: 1 });
   });
 });
