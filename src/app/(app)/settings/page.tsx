@@ -5,6 +5,7 @@ import { FormMessage } from "@/components/ui/form-message";
 import { PageHeader } from "@/components/layout/page-header";
 import { IntegrationSettings, type SafeConnection } from "@/components/settings/integration-settings";
 import { ProfileForm } from "@/components/settings/profile-form";
+import { PasswordForm } from "@/components/settings/password-form";
 import { EmptyState } from "@/components/ui/page-state";
 
 const INSTAGRAM_MESSAGE: Record<string, { variant: "success" | "info" | "error"; text: string }> = {
@@ -70,6 +71,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <h2 id="profile-heading" className="text-lg font-extrabold tracking-[-0.03em]">프로필</h2>
         <div className="rounded-2xl border bg-card px-5 py-6 sm:px-6">
           <ProfileForm email={user.email ?? ""} displayName={profile?.display_name ?? null} />
+        </div>
+      </section>
+
+      <section aria-labelledby="password-heading" className="space-y-4">
+        <div><h2 id="password-heading" className="text-lg font-extrabold tracking-[-0.03em]">비밀번호 변경</h2><p className="mt-1 text-sm text-muted-foreground">현재 비밀번호를 확인한 뒤 바꿔요. 기억나지 않으면 로그아웃 후 &lsquo;비밀번호를 잊으셨나요?&rsquo;를 이용해주세요.</p></div>
+        <div className="rounded-2xl border bg-card px-5 py-6 sm:px-6">
+          <PasswordForm />
         </div>
       </section>
     </div>

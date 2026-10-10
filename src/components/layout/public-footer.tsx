@@ -38,9 +38,13 @@ export function PublicFooter() {
         ))}
       </div>
       <div className="border-t border-border">
-        <p className="mx-auto max-w-6xl px-4 py-5 text-xs text-muted-foreground sm:px-6">
-          &copy; {new Date().getFullYear()} Easy Marketing. All rights reserved.
-        </p>
+        <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <p>&copy; {new Date().getFullYear()} Easy Marketing · 학교 프로젝트 데모 서비스(결제는 테스트 모드, 실제 청구 없음)</p>
+          <nav aria-label="정책" className="flex gap-4">
+            <Link href="/terms" className="hover:text-foreground hover:underline">이용약관</Link>
+            <Link href="/privacy" className="font-semibold hover:text-foreground hover:underline">개인정보처리방침</Link>
+          </nav>
+        </div>
       </div>
     </footer>
   );

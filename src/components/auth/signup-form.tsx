@@ -35,6 +35,13 @@ export function SignupForm({ redirectTo = "/onboarding" }: { redirectTo?: string
           <Input id="password" name="password" type="password" autoComplete="new-password" minLength={8} maxLength={128} required aria-describedby="signup-password-help" />
           <p id="signup-password-help" className="text-[13px] text-muted-foreground">8자 이상으로 입력해주세요.</p>
         </div>
+        <label className="flex cursor-pointer items-start gap-2.5 text-sm leading-6 text-muted-foreground">
+          <input type="checkbox" name="agreeTerms" required className="mt-1 size-4 shrink-0 accent-primary" />
+          <span>
+            <Link href="/terms" target="_blank" className="font-semibold text-foreground underline underline-offset-4">이용약관</Link>과{" "}
+            <Link href="/privacy" target="_blank" className="font-semibold text-foreground underline underline-offset-4">개인정보처리방침</Link>을 읽었고 동의해요. (필수)
+          </span>
+        </label>
         {state.error ? <FormMessage id="signup-error">{state.error}</FormMessage> : null}
         <Button type="submit" size="lg" className="w-full" disabled={isPending} aria-disabled={isPending}>
           {isPending ? "가입하는 중…" : "무료로 가입하기"}

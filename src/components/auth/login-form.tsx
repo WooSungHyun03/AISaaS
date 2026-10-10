@@ -15,6 +15,7 @@ export function LoginForm() {
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirectTo") ?? "/dashboard";
   const checkEmail = searchParams.get("checkEmail") === "1";
+  const linkError = searchParams.get("linkError") === "1";
   const [state, formAction, isPending] = useActionState(signIn, initialState);
 
   return (
@@ -27,6 +28,11 @@ export function LoginForm() {
           가입하신 이메일로 인증 링크를 보냈어요. 인증을 마친 뒤 로그인하면 사업 정보 입력으로 이어집니다.
         </FormMessage>
       ) : null}
+      {linkError ? (
+        <FormMessage className="mt-6">
+          인증 링크가 만료됐거나 이미 사용됐어요. 이미 인증을 마쳤다면 그대로 로그인해주세요.
+        </FormMessage>
+      ) : null}
 
       <form action={formAction} className="mt-8 space-y-5" aria-describedby={state.error ? "login-error" : undefined}>
         <input type="hidden" name="redirectTo" value={redirectTo} />
@@ -35,7 +41,12 @@ export function LoginForm() {
           <Input id="email" name="email" type="email" autoComplete="email" required maxLength={320} autoFocus placeholder="name@example.com" />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="password">비밀번호</Label>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="password">비밀번호</Label>
+            <Link href="/forgot-password" className="text-[13px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              비밀번호를 잊으셨나요?
+            </Link>
+          </div>
           <Input id="password" name="password" type="password" autoComplete="current-password" required minLength={8} maxLength={128} />
         </div>
         {state.error ? <FormMessage id="login-error">{state.error}</FormMessage> : null}

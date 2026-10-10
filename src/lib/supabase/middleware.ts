@@ -1,12 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { clientEnv } from "@/lib/env/client";
-
-const PROTECTED_PREFIXES = [
-  "/dashboard", "/diagnosis", "/calendar", "/marketing", "/blog", "/shorts", "/growth-report",
-  "/usage", "/support", "/admin", "/automations", "/business", "/onboarding", "/billing", "/settings", "/setup-request",
-];
-const AUTH_PREFIXES = ["/login", "/signup"];
+import { AUTH_PREFIXES, PROTECTED_PREFIXES, matchesPrefix } from "./route-access";
 
 /** Refreshes the Supabase session cookie and gates protected routes. */
 export async function updateSession(request: NextRequest) {
@@ -34,8 +29,8 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isProtected = PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-  const isAuthPage = AUTH_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  const isProtected = matchesPrefix(pathname, PROTECTED_PREFIXES);
+  const isAuthPage = matchesPrefix(pathname, AUTH_PREFIXES);
 
   if (!user && isProtected) {
     const redirectUrl = request.nextUrl.clone();
