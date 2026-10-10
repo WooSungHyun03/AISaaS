@@ -10,6 +10,7 @@ export * from "./youtube-scoring";
 export * from "./tistory-scoring";
 export * from "./naver-blog-scoring";
 export * from "./raw-metrics";
+export * from "./growth-series";
 export * from "./diagnosis-rate-limit";
 export * from "./diagnose";
 export * from "./register";

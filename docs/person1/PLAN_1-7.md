@@ -58,7 +58,12 @@
 - [x] **1단계** — `scripts/seed-growth-demo.sql` 190일 확장(youtube/naver_blog/tistory 채널 각 1개,
   네이버·티스토리엔 조회수류 없음). 로컬에서 두 번 실행해 확인: DEMO_SEED 950행(190일×5지표) 그대로,
   채널 중복 생성 없음(멱등성 확인됨). 데모 business_id는 로컬 DB에 남겨둠(6단계 브라우저 확인용).
-- [ ] **2단계** — `growth-series.ts`(허용 지표 목록, 시계열, DEMO_SEED, 수집 중, absoluteDelta, 구독자 숨김 null 처리) + 테스트, `summary.ts`의 `latestBefore` export
+- [x] **2단계** — `growth-series.ts`(`getChannelGrowthSeries`): `ALLOWED_GROWTH_METRICS`로 플랫폼별
+  지표를 고정 순회(네이버/티스토리에 조회수류 섞여도 구조적으로 걸러짐 — 테스트로 확인),
+  `latestBefore`/`deltaPercent`를 summary.ts에서 export해 재사용(새로 안 만듦), 선택 기간만큼의
+  일별 시계열, `absoluteDelta`(둘 다 있을 때만), `hasDemoSeedData`, 스냅샷 2개 미만이면
+  `status: "COLLECTING"`. 유튜브 구독자 숨김 채널은 `subscriberCount` 항목이 null로 계속
+  나오는 것 확인(10개 테스트). 채널 167개 테스트 + typecheck + lint 통과.
 - [ ] **3단계** — migration 0042 + `growth-narrative.ts`(캐시 + AI + ai-number-guard 재사용) + 테스트
 - [ ] **4단계** — `growth-line-chart.tsx`(의존성 없음, 반응형, sr-only, 0/1개 처리) + 좌표 변환 테스트
 - [ ] **5단계** — `/growth-report` 페이지 개편 + `index.ts` export

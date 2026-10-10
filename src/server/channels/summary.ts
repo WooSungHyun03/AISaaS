@@ -93,8 +93,16 @@ export async function getLatestChannelDiagnosisSummary(businessId: string): Prom
   return { businessId, channels: items, hasAnyData: items.length > 0 };
 }
 
-/** Most recent snapshot at or before `beforeMs`, or null if none of `rows` qualifies. */
-function latestBefore(rows: Array<{ value: number; recorded_at: string }>, beforeMs: number): number | null {
+/**
+ * Most recent snapshot at or before `beforeMs`, or null if none of `rows`
+ * qualifies — the "gap day" rule: a period boundary never pulls in a value
+ * from after it (which would mean using data the period couldn't have
+ * known about yet), it just carries forward the last known value. Exported
+ * for reuse by growth-series.ts's per-day chart points (ticket 1-7), which
+ * applies the exact same rule at every day boundary, not just the two
+ * current/previous ones below.
+ */
+export function latestBefore(rows: Array<{ value: number; recorded_at: string }>, beforeMs: number): number | null {
   let best: { value: number; time: number } | null = null;
   for (const row of rows) {
     const time = Date.parse(row.recorded_at);
@@ -104,7 +112,8 @@ function latestBefore(rows: Array<{ value: number; recorded_at: string }>, befor
   return best?.value ?? null;
 }
 
-function deltaPercent(current: number | null, previous: number | null): number | null {
+/** Exported for reuse by growth-series.ts (ticket 1-7) — same "no previous value, no percent" rule, not reimplemented. */
+export function deltaPercent(current: number | null, previous: number | null): number | null {
   if (current === null || previous === null || previous === 0) return null;
   return Math.round(((current - previous) / previous) * 100);
 }
