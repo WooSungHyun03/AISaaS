@@ -27,15 +27,13 @@ interface Preview {
   caption: string | null;
   script: string | null;
   scenes: Array<{ text: string; durationSec: number }>;
-  format: "character" | "showcase" | null;
-  animationMode: "video" | "tween" | "photos" | null;
+  animationMode: "video" | "tween" | null;
   animationNote: string | null;
 }
 
 const FORMAT_BADGE = {
   video: "움직이는 캐릭터 영상",
   tween: "기본 움직임 효과",
-  photos: "사진 홍보 영상",
 } as const;
 
 interface Publication {
@@ -72,6 +70,7 @@ export function ShortsStudio({
   progress,
   nextRunAt,
   referencesSlot,
+  hasCharacter,
 }: {
   automationId: string;
   automationStatus: string;
@@ -86,6 +85,8 @@ export function ShortsStudio({
   nextRunAt: string | null;
   /** The reference-image card; rendered between the preview and the schedule. */
   referencesSlot?: ReactNode;
+  /** Shorts are character videos: without a character image there is nothing to make or schedule yet. */
+  hasCharacter: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -167,8 +168,8 @@ export function ShortsStudio({
         <div className="space-y-6">
           <div>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><h2 id="preview-heading" className="text-xl font-extrabold tracking-[-0.03em]">영상 만들기와 미리보기</h2><p className="mt-1 text-sm text-muted-foreground">게시 전에 영상과 문구를 직접 확인할 수 있어요.</p></div>
-              <Button variant="spark" disabled={busy} onClick={() => run("generate", () => generateShortsPreview(automationId), "새 미리보기를 만들었어요.", "영상 만들기를 시작했어요. 완성되면 여기에 나타나요.")}>
+              <div><h2 id="preview-heading" className="text-xl font-extrabold tracking-[-0.03em]">영상 만들기와 미리보기</h2><p className="mt-1 text-sm text-muted-foreground">{hasCharacter ? "게시 전에 영상과 문구를 직접 확인할 수 있어요." : "먼저 아래에서 캐릭터를 추가해주세요. 마스코트를 한 번에 불러올 수 있어요."}</p></div>
+              <Button variant="spark" disabled={busy || !hasCharacter} onClick={() => run("generate", () => generateShortsPreview(automationId), "새 미리보기를 만들었어요.", "영상 만들기를 시작했어요. 완성되면 여기에 나타나요.")}>
                 {busy && (busyAction === "generate" || hasInFlightRun) ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Film aria-hidden="true" />}
                 {busy && (busyAction === "generate" || hasInFlightRun) ? "만드는 중…" : latestPreview ? "새 영상 만들기" : "영상 만들기"}
               </Button>
@@ -220,7 +221,7 @@ export function ShortsStudio({
           <ScheduleFields idPrefix="shorts" label="예약" value={scheduleValue} onChange={setScheduleValue} disabled={busy} />
           <ScheduleHiddenInputs value={scheduleValue} />
           {platforms.map((platform) => <input key={platform} type="hidden" name="platforms" value={platform} />)}
-          <div className="flex flex-wrap items-center gap-3"><Button type="submit" variant="outline" disabled={busy}>{busyAction === "schedule" ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Check aria-hidden="true" />}{busyAction === "schedule" ? "저장 중…" : "예약 저장하고 켜기"}</Button></div>
+          <div className="flex flex-wrap items-center gap-3"><Button type="submit" variant="outline" disabled={busy || !hasCharacter}>{busyAction === "schedule" ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Check aria-hidden="true" />}{busyAction === "schedule" ? "저장 중…" : "예약 저장하고 켜기"}</Button></div>
         </form>
       </section>
 

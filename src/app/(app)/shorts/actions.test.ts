@@ -11,7 +11,8 @@ const { createClientMock, adminMock, uploadMock, deleteMock, revalidatePathMock 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => adminMock }));
-vi.mock("@/server/automations/runner", () => ({ runAutomationNow: vi.fn() }));
+const { runAutomationNowMock, advanceDeferredRunMock } = vi.hoisted(() => ({ runAutomationNowMock: vi.fn(), advanceDeferredRunMock: vi.fn() }));
+vi.mock("@/server/automations/runner", () => ({ runAutomationNow: runAutomationNowMock, advanceDeferredRun: advanceDeferredRunMock }));
 vi.mock("@/server/billing/entitlements", () => ({ canCreateAutomation: vi.fn() }));
 vi.mock("@/server/shorts/reference-images", () => ({
   detectImageType: (bytes: Uint8Array) => (bytes[0] === 0x89 ? "png" : bytes[0] === 0xff ? "jpeg" : null),
@@ -21,7 +22,7 @@ vi.mock("@/server/shorts/reference-images", () => ({
   deleteReferenceImage: deleteMock,
 }));
 
-const { uploadShortsReference, addMascotReferences, removeShortsReference, saveShortsCreativeSettings } = await import("./actions");
+const { uploadShortsReference, addMascotReferences, removeShortsReference, saveShortsCreativeSettings, generateShortsPreview, saveShortsSchedule, advanceShortsJob } = await import("./actions");
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 
@@ -31,6 +32,8 @@ function setup(config: Record<string, unknown> = {}) {
     const builder: Record<string, unknown> = {};
     builder.select = vi.fn(() => builder);
     builder.eq = vi.fn(() => builder);
+    builder.order = vi.fn(() => builder);
+    builder.limit = vi.fn(() => builder);
     builder.update = vi.fn((payload: unknown) => {
       updates.push(payload);
       return builder;
@@ -177,5 +180,32 @@ describe("mascot, removal and creative settings", () => {
     expect((await saveShortsCreativeSettings("auto-1", { style: "skit", brief: "가".repeat(301) })).error).toContain("300자");
     expect(await saveShortsCreativeSettings("auto-1", { style: "explainer", brief: "  신메뉴  " })).toEqual({ success: true });
     expect(savedConfig(updates)).toMatchObject({ shortsStyle: "explainer", shortsBrief: "신메뉴" });
+  });
+});
+
+describe("character requirement and background progress", () => {
+  it("will not start a video or save a schedule without a character image", async () => {
+    setup({ references: [] });
+    expect((await generateShortsPreview("auto-1")).error).toContain("캐릭터 이미지를 먼저");
+    expect((await saveShortsSchedule("auto-1", new FormData())).error).toContain("캐릭터 이미지를 먼저");
+    expect(runAutomationNowMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a started video as pending so the page keeps polling", async () => {
+    setup({ references: [{ id: "mascot-wave", kind: "mascot", source: "wave", label: "인사" }] });
+    runAutomationNowMock.mockResolvedValue({ runId: "run-1", status: "RUNNING", progress: "캐릭터를 움직이는 중이에요 (0/5)" });
+    expect(await generateShortsPreview("auto-1")).toEqual({ success: true, runId: "run-1", pending: true, progress: "캐릭터를 움직이는 중이에요 (0/5)" });
+  });
+
+  it("advances the in-flight run and tells the page whether to keep waiting", async () => {
+    setup();
+    advanceDeferredRunMock.mockResolvedValueOnce({ runId: "run-1", status: "RUNNING", progress: "영상을 합치는 중이에요" });
+    expect(await advanceShortsJob("auto-1")).toMatchObject({ success: true, pending: true, progress: "영상을 합치는 중이에요" });
+    advanceDeferredRunMock.mockResolvedValueOnce({ runId: "run-1", status: "SUCCESS" });
+    expect(await advanceShortsJob("auto-1")).toMatchObject({ success: true, pending: false });
+    advanceDeferredRunMock.mockResolvedValueOnce({ runId: "run-1", status: "FAILED", errorMessage: "boom" });
+    expect((await advanceShortsJob("auto-1")).error).toBeTruthy();
+    advanceDeferredRunMock.mockRejectedValueOnce(new Error("transient"));
+    expect(await advanceShortsJob("auto-1")).toMatchObject({ success: true, pending: true });
   });
 });

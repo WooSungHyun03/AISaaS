@@ -51,7 +51,6 @@ const serverSchema = z.object({
 
   VIDEO_RENDER_PROVIDER: z.enum(["mock", "json2video"]).default("mock"),
   VIDEO_RENDER_API_KEY: z.string().optional(),
-  VIDEO_RENDER_TEMPLATE_ID: z.string().optional(),
 
   // Image-to-video service that animates reference characters (src/server/connectors/animation).
   // "mock" never calls the network; "fal" needs FAL_KEY. ANIMATION_MODEL overrides the fal endpoint id.
@@ -64,8 +63,12 @@ const serverSchema = z.object({
   // fails the server at boot instead of silently serving fabricated
   // numbers (no diagnosis/snapshot code calls this provider yet in this
   // ticket, so a call-site guard like assertMockBillingAllowed's would
-  // never actually run).
-  CHANNEL_DATA_PROVIDER: z.enum(["live", "mock"]).default("mock"),
+  // never actually run). The default therefore follows the environment:
+  // a production deploy that simply forgot this variable runs the real
+  // collectors (which report "not configured" without keys, never invented
+  // numbers) instead of failing every request at boot; only an explicit
+  // CHANNEL_DATA_PROVIDER=mock in production is refused.
+  CHANNEL_DATA_PROVIDER: z.enum(["live", "mock"]).default(process.env.NODE_ENV === "production" ? "live" : "mock"),
   // YouTube Data API v3 key (API key only — this is public-data collection,
   // no OAuth/user connection involved, unlike YOUTUBE_CLIENT_ID/SECRET above
   // which belong to the Shorts-publishing connector).

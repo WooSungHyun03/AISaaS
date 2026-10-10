@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Business } from "@/types/domain";
-import { buildShortsPlanPrompt, buildShortsTopicPrompt, makeShortsPlanSchema, shortsContentSchema } from "./shorts";
+import { buildShortsPlanPrompt, buildShortsTopicPrompt, shortsContentSchema, shortsPlanSchema } from "./shorts";
 
 const validContent = {
   hook: "아침마다 빵을 기다리고 계신가요?",
@@ -44,7 +44,6 @@ describe("shortsContentSchema", () => {
 });
 
 const characterPlan = {
-  format: "character",
   hook: "사장님, 큰일 났어요!",
   scenes: [
     { text: "사장님, 큰일 났어요!", speaker: "partner", imageIndex: 2, action: "The character panics and shakes.", motion: "shake", durationSec: 2 },
@@ -57,59 +56,36 @@ const characterPlan = {
   privacy: "private",
 };
 
-const showcasePlan = {
-  format: "showcase",
-  hook: "여기 한번 보세요!",
-  scenes: [
-    { text: "여기 한번 보세요!", caption: "여기 한번 보세요!", imageIndex: 1, motion: "zoom-in", durationSec: 3 },
-    { text: "정성껏 준비한 매장이에요", caption: "정성껏 준비한 매장", imageIndex: 2, motion: "pan-left", durationSec: 5 },
-    { text: "직접 구운 빵을 만나보세요", caption: "직접 구운 빵", imageIndex: 3, motion: "zoom-out", durationSec: 5 },
-    { text: "오늘 바로 들러 보세요", caption: "오늘 들러 보세요", imageIndex: 1, motion: "pan-right", durationSec: 5 },
-  ],
-  caption: "동네 빵집 소개 #동네빵집 #소금빵 #숏폼",
-  privacy: "private",
-};
-
-describe("makeShortsPlanSchema", () => {
-  it("accepts a character plan and fills in defaults for a missing action and visual note", () => {
-    const plan = makeShortsPlanSchema(["character"]).parse(characterPlan);
-    expect(plan.format).toBe("character");
-    if (plan.format !== "character") return;
+describe("shortsPlanSchema", () => {
+  it("accepts a plan and fills in defaults for a missing action and visual note", () => {
+    const plan = shortsPlanSchema.parse(characterPlan);
     expect(plan.scenes[2].action).toBeTruthy();
     expect(plan.scenes[0].visualPrompt).toBeTruthy();
   });
 
-  it("accepts a showcase plan", () => {
-    expect(makeShortsPlanSchema(["showcase"]).parse(showcasePlan).format).toBe("showcase");
-  });
-
-  it("refuses a format the images or style do not allow", () => {
-    expect(makeShortsPlanSchema(["showcase"]).safeParse(characterPlan).success).toBe(false);
-    expect(makeShortsPlanSchema(["character"]).safeParse(showcasePlan).success).toBe(false);
-    expect(makeShortsPlanSchema(["character", "showcase"]).safeParse(showcasePlan).success).toBe(true);
-  });
-
-  it("keeps character lines short enough for one 5 second clip", () => {
+  it("keeps lines short enough for one 5 second clip", () => {
     const long = { ...characterPlan, scenes: characterPlan.scenes.map((scene, index) => (index === 3 ? { ...scene, text: "가".repeat(29) } : scene)) };
-    expect(makeShortsPlanSchema(["character"]).safeParse(long).success).toBe(false);
+    expect(shortsPlanSchema.safeParse(long).success).toBe(false);
     const wordy = { ...characterPlan, scenes: [...characterPlan.scenes, characterPlan.scenes[3]].map((scene) => ({ ...scene, text: "가".repeat(28) })) };
-    expect(makeShortsPlanSchema(["character"]).safeParse(wordy).success).toBe(false); // > 150 characters in total
+    expect(shortsPlanSchema.safeParse(wordy).success).toBe(false); // > 150 characters in total
   });
 
-  it("rejects a slow hook, no main speaker, more than 6 character scenes, and unknown motions", () => {
+  it("rejects a slow hook, no main speaker, more than 6 scenes, unknown motions and a hashtag-less caption", () => {
     const slowHook = { ...characterPlan, scenes: characterPlan.scenes.map((scene, index) => (index === 0 ? { ...scene, durationSec: 5 } : scene)) };
-    expect(makeShortsPlanSchema(["character"]).safeParse(slowHook).success).toBe(false);
+    expect(shortsPlanSchema.safeParse(slowHook).success).toBe(false);
     const noMain = { ...characterPlan, scenes: characterPlan.scenes.map((scene) => ({ ...scene, speaker: "partner" })) };
-    expect(makeShortsPlanSchema(["character"]).safeParse(noMain).success).toBe(false);
+    expect(shortsPlanSchema.safeParse(noMain).success).toBe(false);
     const tooMany = { ...characterPlan, scenes: [...characterPlan.scenes, ...characterPlan.scenes.slice(0, 2)] };
-    expect(makeShortsPlanSchema(["character"]).safeParse(tooMany).success).toBe(false);
-    const badMotion = { ...showcasePlan, scenes: showcasePlan.scenes.map((scene) => ({ ...scene, motion: "spin" })) };
-    expect(makeShortsPlanSchema(["showcase"]).safeParse(badMotion).success).toBe(false);
+    expect(shortsPlanSchema.safeParse(tooMany).success).toBe(false);
+    const badMotion = { ...characterPlan, scenes: characterPlan.scenes.map((scene) => ({ ...scene, motion: "spin" })) };
+    expect(shortsPlanSchema.safeParse(badMotion).success).toBe(false);
+    expect(shortsPlanSchema.safeParse({ ...characterPlan, caption: "해시태그 없음" }).success).toBe(false);
   });
 
-  it("requires a short caption on every showcase scene", () => {
-    const longCaption = { ...showcasePlan, scenes: showcasePlan.scenes.map((scene) => ({ ...scene, caption: "가".repeat(27) })) };
-    expect(makeShortsPlanSchema(["showcase"]).safeParse(longCaption).success).toBe(false);
+  it("is also a valid classic content shape once the script is added (publishing re-reads it)", () => {
+    const plan = shortsPlanSchema.parse(characterPlan);
+    const content = { hook: plan.hook, script: plan.scenes.map((scene) => scene.text).join(" "), scenes: plan.scenes, caption: plan.caption, privacy: plan.privacy };
+    expect(shortsContentSchema.safeParse(content).success).toBe(true);
   });
 });
 
@@ -119,40 +95,28 @@ const business = {
 } as unknown as Business;
 
 describe("buildShortsPlanPrompt", () => {
-  it("lists the tagged reference images, the request and both formats when both are allowed", () => {
+  it("lists the character images by number with the request, limits and fallback motions", () => {
     const { prompt, system } = buildShortsPlanPrompt(business, "인스타 글 대신 써주는 로봇", {
-      references: ["[character] 손을 흔드는 마스코트", "[place] 매장 전경"],
-      allowedFormats: ["character", "showcase"],
-      style: "auto",
+      references: ["손을 흔드는 마스코트", "놀란 마스코트"],
+      style: "skit",
       mascot: true,
       brief: "마스코트가 나와서 웃기게",
     });
-    expect(prompt).toContain("1. [character] 손을 흔드는 마스코트");
-    expect(prompt).toContain("2. [place] 매장 전경");
+    expect(prompt).toContain("1. 손을 흔드는 마스코트");
+    expect(prompt).toContain("2. 놀란 마스코트");
     expect(prompt).toContain("마스코트가 나와서 웃기게");
-    expect(prompt).toContain('format "character"');
-    expect(prompt).toContain('format "showcase"');
-    expect(prompt).toContain("Choose \"format\" yourself");
+    expect(prompt).toContain("at most 28 Korean characters");
+    expect(prompt).toMatch(/pop, bounce, wobble, shake, slide, zoom/);
+    expect(prompt).toContain('"action"');
+    expect(system).toContain("funny character skit");
     expect(system).toContain("이지 마케팅");
-    expect(system).toContain("decide the format");
   });
 
-  it("pins the format and drops the other format's rules when only one is allowed", () => {
-    const character = buildShortsPlanPrompt(business, "주제", { references: ["[character] 우리 고양이"], allowedFormats: ["character"], style: "skit", mascot: false });
-    expect(character.prompt).toContain('Use format "character".');
-    expect(character.prompt).not.toContain('format "showcase":');
-    expect(character.system).not.toContain("blue cape");
-    expect(character.prompt).toContain("funny");
-
-    const showcase = buildShortsPlanPrompt(business, "주제", { references: ["[product] 소금빵"], allowedFormats: ["showcase"], style: "showcase", mascot: false });
-    expect(showcase.prompt).toContain('Use format "showcase".');
-    expect(showcase.prompt).not.toContain('format "character":');
-    expect(showcase.prompt).toContain("never invent prices");
-  });
-
-  it("does not add comedy rules for the explainer style", () => {
-    const { prompt } = buildShortsPlanPrompt(business, "주제", { references: ["[character] 로봇"], allowedFormats: ["character"], style: "explainer", mascot: false });
-    expect(prompt).not.toContain("Comedy techniques");
+  it("only mentions the service mascot facts when the mascot is among the images", () => {
+    const user = buildShortsPlanPrompt(business, "주제", { references: ["우리 고양이"], style: "explainer", mascot: false });
+    expect(user.system).not.toContain("blue cape");
+    expect(user.system).toContain("friendly explainer");
+    expect(user.prompt).not.toContain("Comedy techniques");
   });
 
   it("passes the owner's direction into topic selection", () => {
