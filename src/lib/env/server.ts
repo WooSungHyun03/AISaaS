@@ -60,6 +60,10 @@ const serverSchema = z.object({
   // ticket, so a call-site guard like assertMockBillingAllowed's would
   // never actually run).
   CHANNEL_DATA_PROVIDER: z.enum(["live", "mock"]).default("mock"),
+  // YouTube Data API v3 key (API key only — this is public-data collection,
+  // no OAuth/user connection involved, unlike YOUTUBE_CLIENT_ID/SECRET above
+  // which belong to the Shorts-publishing connector).
+  YOUTUBE_API_KEY: z.string().optional(),
 
   GITHUB_TOKEN: z.string().optional(),
 
