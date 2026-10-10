@@ -49,7 +49,25 @@
   적용함 — null을 insert하려면 DB 제약이 먼저 nullable이어야 해서(0035가 `not null`이었음)
   분리할 수 없었음. `src/types/database.types.ts`의 `content_score` 타입도 함께 갱신.
   채널/스코어링 전체 테스트(135개) + 전체 테스트(879개) + typecheck + lint 통과.
-- [ ] **3단계** — `channel-narrative.ts`(+ `ai-number-guard` 연동) + register.ts 연동 + 테스트
+- [x] **3단계** — `channel-narrative.ts`(+ `ai-number-guard` 연동) + `register.ts` + 테스트.
+
+  **register.ts 정의** (이전 세션 계획에서 가져옴, 사람1 확인):
+  `src/server/channels/register.ts`의 `registerAndDiagnoseChannel(businessId, url, platformHint?)`:
+  1. URL 파싱(1-1의 `url-parser`, 티스토리 커스텀 도메인은 `platformHint` 사용)
+  2. `tracked_channels`에 없으면 생성(같은 business+platform+external_id면 중복 생성 안 함 —
+     update RLS 정책이 없어서 select-then-insert로 구현, unique violation(23505)이면 재조회)
+  3. `diagnoseChannel()` 호출
+  4. 첫 스냅샷 저장은 `diagnoseChannel()` 자신의 기존 동작(2단계에서 3플랫폼으로 일반화한
+     ticket 1-6 "진단 시 자동 저장")이 그대로 수행 — `register.ts`에서 별도로 호출하지 않음.
+
+  Server Action(`runChannelDiagnosis`, 5단계에서 작성)이 소유권 확인 + 시간당 한도 확인 후
+  이 함수를 호출하는 구조. `channel-narrative.ts`의 `buildChannelNarrative(diagnosis, business)`는
+  AI가 설명을 쓰고 `ai-number-guard`로 숫자를 검증, 실패/전부 제거 시 규칙 기반 요약으로 대체
+  (narrative는 DB에 저장하지 않고 화면 렌더링 시점에 생성 — 이미 저장된 채널 진단 자체는
+  AI 단계 성공 여부와 무관하게 그대로 표시됨).
+
+  테스트: `register.test.ts`(8개), `channel-narrative.test.ts`(6개). 전체 테스트 893개 +
+  typecheck + lint 통과.
 - [ ] **4단계** — migration 0041(channel_diagnosis_attempts, RLS) — 0040은 2단계에서 이미 적용함
 - [ ] **5단계** — 화면단: `/diagnosis` 새 진단 화면, `/marketing/diagnosis` 308 리다이렉트(쿼리스트링
   보존)로 교체, `readiness.ts` + `ReadinessScoreCard` 분리 후 `/diagnosis` 상단 배치,

@@ -11,6 +11,8 @@ export * from "./tistory-scoring";
 export * from "./naver-blog-scoring";
 export * from "./raw-metrics";
 export * from "./diagnose";
+export * from "./register";
+export * from "./channel-narrative";
 export * from "./providers";
 export * from "./snapshot";
 export * from "./collect-pipeline";
