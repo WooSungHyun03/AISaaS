@@ -76,7 +76,12 @@
   `buildLinePath`)로 분리해서 테스트(9개) — 이 저장소엔 .tsx 컴포넌트 테스트가 전혀 없고
   vitest도 node 환경이라(jsdom 없음) 순수 로직만 테스트하는 기존 관례를 그대로 따름.
   전체 테스트 935개 + typecheck + lint 통과.
-- [ ] **5단계** — `/growth-report` 페이지 개편 + `index.ts` export
+- [x] **5단계** — `/growth-report` 페이지 개편: 채널 선택(추적 채널 목록, 없으면 /diagnosis로
+  안내) + 기간 탭(기존 유지) + 채널별 `ChannelGrowthCard`(현재값/비교/차트/AI 해석) + "콘텐츠
+  활동량"은 `report.contentCount` 재사용. 기존 내부 리포트는 "서비스 내부 기록(보조)" 섹션으로
+  그대로 아래에 유지(로직 변경 없음). `PLATFORM_LABEL`을 `platform.ts`로 옮겨 3곳에서 재사용
+  (channel-diagnosis-card, channel-narrative, channel-growth-card)으로 중복 제거.
+  `next build` 포함 전체 테스트 935개 + typecheck + lint 통과.
 - [ ] **6단계** — `supabase db reset` + 시드 적용 → 7/30/90일 증감이 시드 데이터와 맞는지 직접 확인 → lint/typecheck/test/build → git status → 브라우저 체크리스트 전달 (push는 사람1이 직접)
 
 ## 기본 규칙 (AGENT_RULES.md 상속)

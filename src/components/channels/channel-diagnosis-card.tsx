@@ -1,13 +1,8 @@
 import { CircleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { RediagnoseChannelButton } from "@/components/channels/rediagnose-channel-button";
+import { PLATFORM_LABEL } from "@/server/channels/platform";
 import type { ChannelDiagnosisSummaryItem } from "@/server/channels";
-
-const PLATFORM_LABEL: Record<ChannelDiagnosisSummaryItem["channel"], string> = {
-  youtube: "유튜브",
-  naver_blog: "네이버 블로그",
-  tistory: "티스토리",
-};
 
 function ScoreStat({ label, value }: { label: string; value: number | null }) {
   return (

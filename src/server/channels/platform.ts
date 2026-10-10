@@ -24,3 +24,10 @@ export const CHANNEL_PLATFORMS = ["youtube", "naver_blog", "tistory"] as const;
 export type ChannelPlatform = (typeof CHANNEL_PLATFORMS)[number];
 
 export const channelPlatformSchema = z.enum(CHANNEL_PLATFORMS);
+
+/** Shared by channel-diagnosis-card.tsx and channel-growth-card.tsx — single place for the Korean display label per platform. */
+export const PLATFORM_LABEL: Record<ChannelPlatform, string> = {
+  youtube: "유튜브",
+  naver_blog: "네이버 블로그",
+  tistory: "티스토리",
+};

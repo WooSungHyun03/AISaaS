@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { buildGrowthReport, SOURCE_LABEL, type Comparison, type MetricSource, type Rate, type RunRow } from "@/server/marketing/growth-report";
+import { getChannelGrowthSeries, getOrCreateGrowthNarrative } from "@/server/channels";
+import { ChannelGrowthCard } from "@/components/channels/channel-growth-card";
 import { cn } from "@/lib/utils";
 
 const PERIODS = [7, 30, 90] as const;
@@ -57,14 +59,14 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: businesses, error: businessError } = await supabase.from("businesses").select("id,name").eq("owner_id", user.id).order("created_at");
+  const { data: businesses, error: businessError } = await supabase.from("businesses").select("id,name,industry").eq("owner_id", user.id).order("created_at");
   if (businessError) throw new Error("사업체 정보를 불러오지 못했습니다.", { cause: businessError });
   const business = businesses?.find((item) => item.id === query.business) ?? businesses?.[0];
 
   const heading = (
     <PageHeader
       title="성장 리포트"
-      description="우리 서비스에 남은 기록으로 콘텐츠 제작과 캘린더 실행이 어떻게 변하고 있는지 보여드려요. 조회수 같은 외부 성과는 확인할 수 있을 때만 보여드려요."
+      description="채널별 구독자·게시 활동이 어떻게 변하고 있는지 먼저 보여드리고, 아래에 서비스 내부 제작·캘린더 기록도 함께 보여드려요. 조회수 같은 외부 성과는 확인할 수 있을 때만 보여드려요."
     />
   );
   if (!business) {
@@ -79,6 +81,13 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
   const now = new Date();
   const since = new Date(now.getTime() - days * 2 * DAY_MS);
   const sinceDate = new Date(since.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
+
+  const growthSeries = await getChannelGrowthSeries(business.id, { days, now });
+  const channelNarratives = await Promise.all(
+    growthSeries.channels.map((channel) =>
+      getOrCreateGrowthNarrative({ id: channel.channelId, business_id: business.id }, channel, business, days, now),
+    ),
+  );
 
   const { data: automations, error: automationError } = await supabase.from("automations").select("id").eq("user_id", user.id).eq("business_id", business.id);
   if (automationError) throw new Error("만들기 설정을 불러오지 못했습니다.", { cause: automationError });
@@ -125,15 +134,42 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
         </nav>
       </div>
 
-      {!report.hasAnyData ? (
-        <EmptyState
-          mascot="guide"
-          title="아직 비교할 기록이 없어요"
-          description="콘텐츠를 만들고 캘린더를 실행하면 여기에 변화가 쌓여요. 캘린더에서 첫 콘텐츠를 만들어 보세요."
-          action={<Button asChild><Link href="/calendar">마케팅 캘린더로 가기 <ArrowRight aria-hidden="true" /></Link></Button>}
-        />
-      ) : (
-        <>
+      <section aria-labelledby="channel-growth-title" className="space-y-5">
+        <div>
+          <h2 id="channel-growth-title" className="text-lg font-extrabold tracking-[-0.03em]">채널 성장 <span className="text-sm font-medium text-muted-foreground">· 최근 {days}일</span></h2>
+          <p className="mt-1 text-[15px] text-muted-foreground">
+            이 기간 동안 콘텐츠 <strong className="tabular">{report.contentCount.current}건</strong>을 만들었어요 (<Delta comparison={report.contentCount} days={days} />).
+          </p>
+        </div>
+
+        {growthSeries.channels.length === 0 ? (
+          <EmptyState
+            mascot="guide"
+            title="아직 추적 중인 채널이 없어요"
+            description="유튜브·네이버 블로그·티스토리 채널을 추가하면 구독자·게시 활동 변화를 여기서 볼 수 있어요."
+            action={<Button asChild><Link href="/diagnosis">채널 진단으로 가기 <ArrowRight aria-hidden="true" /></Link></Button>}
+          />
+        ) : (
+          <div className="space-y-4">
+            {growthSeries.channels.map((channel, index) => (
+              <ChannelGrowthCard key={channel.channelId} channel={channel} narrative={channelNarratives[index].narrative} days={days} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="internal-report-title" className="space-y-8 border-t border-border pt-8">
+        <h2 id="internal-report-title" className="text-lg font-extrabold tracking-[-0.03em]">서비스 내부 기록 <span className="text-sm font-medium text-muted-foreground">(보조 — 콘텐츠 제작·캘린더 실행 통계)</span></h2>
+
+        {!report.hasAnyData ? (
+          <EmptyState
+            mascot="guide"
+            title="아직 비교할 기록이 없어요"
+            description="콘텐츠를 만들고 캘린더를 실행하면 여기에 변화가 쌓여요. 캘린더에서 첫 콘텐츠를 만들어 보세요."
+            action={<Button asChild><Link href="/calendar">마케팅 캘린더로 가기 <ArrowRight aria-hidden="true" /></Link></Button>}
+          />
+        ) : (
+          <>
           <section aria-labelledby="summary-title" className="space-y-3">
             <h2 id="summary-title" className="text-lg font-extrabold tracking-[-0.03em]">한눈에 보기 <span className="text-sm font-medium text-muted-foreground">· 최근 {days}일</span></h2>
             <StatGroup>
@@ -228,6 +264,7 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
             </li>
           ))}
         </ul>
+      </section>
       </section>
     </div>
   );

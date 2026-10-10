@@ -1,6 +1,7 @@
 import "server-only";
 import { generateText } from "@/server/ai/generate";
 import { stripUnverifiedNumbers } from "@/server/shared/ai-number-guard";
+import { PLATFORM_LABEL } from "./platform";
 import type { ChannelDiagnosis } from "./types";
 import type { Business } from "@/types/domain";
 
@@ -9,12 +10,6 @@ export interface ChannelNarrativeResult {
   /** False when the AI step failed, or every sentence it wrote mentioned a number not in `diagnosis` (ai-number-guard stripped all of it) — `narrative` falls back to the rule-based summary either way, so the screen is never left without an explanation. */
   aiUsed: boolean;
 }
-
-const PLATFORM_LABEL: Record<ChannelDiagnosis["channel"], string> = {
-  youtube: "유튜브",
-  naver_blog: "네이버 블로그",
-  tistory: "티스토리",
-};
 
 function tierLabel(score: number): string {
   if (score >= 80) return "아주 잘하고 있어요";
