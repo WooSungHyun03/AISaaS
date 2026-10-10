@@ -53,6 +53,14 @@ const serverSchema = z.object({
   VIDEO_RENDER_API_KEY: z.string().optional(),
   VIDEO_RENDER_TEMPLATE_ID: z.string().optional(),
 
+  // Which backend collects channel diagnosis/growth metrics (src/server/channels).
+  // "mock" must never run in production — see instrumentation.ts, which
+  // fails the server at boot instead of silently serving fabricated
+  // numbers (no diagnosis/snapshot code calls this provider yet in this
+  // ticket, so a call-site guard like assertMockBillingAllowed's would
+  // never actually run).
+  CHANNEL_DATA_PROVIDER: z.enum(["live", "mock"]).default("mock"),
+
   GITHUB_TOKEN: z.string().optional(),
 
   // Keys the CS widget's requester IP before it's stored for rate limiting

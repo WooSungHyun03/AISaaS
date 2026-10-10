@@ -24,6 +24,9 @@ export type SupportConversation = Database["public"]["Tables"]["support_conversa
 export type IntegrationConnection = Database["public"]["Tables"]["integration_connections"]["Row"];
 export type Subscriber = Database["public"]["Tables"]["subscribers"]["Row"];
 export type MarketingDiagnosis = Database["public"]["Tables"]["marketing_diagnoses"]["Row"];
+export type TrackedChannel = Database["public"]["Tables"]["tracked_channels"]["Row"];
+export type ChannelDiagnosisRow = Database["public"]["Tables"]["channel_diagnoses"]["Row"];
+export type MarketingMetricSnapshot = Database["public"]["Tables"]["marketing_metric_snapshots"]["Row"];
 
 /** Shape stored in `businesses.sns_links` (jsonb). All keys optional — a business may have none, some, or all. */
 export interface BusinessSnsLinks {

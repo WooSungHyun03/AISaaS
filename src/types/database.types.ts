@@ -569,6 +569,93 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["marketing_diagnoses"]["Insert"]>;
         Relationships: [];
       };
+      // platform/status/completeness/source values: single source of truth is
+      // src/server/channels/ (platform.ts, status.ts, completeness.ts,
+      // snapshot-source.ts), same split as directory_tools' status/
+      // classification_source columns above — kept as plain `string` here
+      // rather than duplicating the union.
+      tracked_channels: {
+        Row: {
+          id: string;
+          business_id: string;
+          platform: string;
+          external_id: string;
+          url: string;
+          status: string;
+          next_snapshot_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          platform: string;
+          external_id: string;
+          url: string;
+          status?: string;
+          next_snapshot_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["tracked_channels"]["Insert"]>;
+        Relationships: [];
+      };
+      channel_diagnoses: {
+        Row: {
+          id: string;
+          business_id: string;
+          channel_id: string;
+          overall_score: number;
+          activity_score: number;
+          consistency_score: number;
+          content_score: number;
+          metrics: Json;
+          findings: string[];
+          recommendations: string[];
+          completeness: string;
+          data_source: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          business_id: string;
+          channel_id: string;
+          overall_score: number;
+          activity_score: number;
+          consistency_score: number;
+          content_score: number;
+          metrics?: Json;
+          findings?: string[];
+          recommendations?: string[];
+          completeness: string;
+          data_source: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["channel_diagnoses"]["Insert"]>;
+        Relationships: [];
+      };
+      marketing_metric_snapshots: {
+        Row: {
+          id: string;
+          channel_id: string;
+          metric: string;
+          value: number;
+          recorded_at: string;
+          source: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          channel_id: string;
+          metric: string;
+          value: number;
+          recorded_at: string;
+          source: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["marketing_metric_snapshots"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
