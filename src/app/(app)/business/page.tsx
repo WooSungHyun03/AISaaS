@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { BusinessFormDialog } from "@/components/business/business-form-dialog";
 import { DeleteBusinessButton } from "@/components/business/delete-business-button";
+import { AutoFillFromWebsiteButton } from "@/components/business/auto-fill-from-website-button";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/page-state";
 import type { Business } from "@/types/domain";
@@ -95,9 +96,12 @@ export default async function BusinessPage() {
                     </div>
                   ))}
                 </dl>
-                <div className="flex justify-end gap-2 border-t border-border bg-muted/40 px-6 py-3">
-                  <DeleteBusinessButton businessId={business.id} />
-                  <BusinessFormDialog business={business} trigger={<Button variant="outline" size="sm">정보 수정</Button>} />
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/40 px-6 py-3">
+                  <AutoFillFromWebsiteButton business={business} />
+                  <div className="flex gap-2">
+                    <DeleteBusinessButton businessId={business.id} />
+                    <BusinessFormDialog business={business} trigger={<Button variant="outline" size="sm">정보 수정</Button>} />
+                  </div>
                 </div>
               </section>
             );

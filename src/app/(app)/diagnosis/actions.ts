@@ -4,7 +4,108 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { diagnoseWebsite, DiagnosisError } from "@/server/marketing/diagnosis";
 import type { ScoreItem } from "@/server/marketing/scoring";
+import { ChannelsError, DiagnosisRateLimitError, channelPlatformSchema, diagnoseChannel, registerAndDiagnoseChannel } from "@/server/channels";
+import type { ChannelPlatform } from "@/server/channels";
 import type { BusinessSnsLinks, Json } from "@/types/domain";
+
+export interface ChannelActionState {
+  error?: string;
+  channelId?: string;
+}
+
+/** Shared by addChannel/rediagnoseChannel below — maps every error diagnoseChannel/registerAndDiagnoseChannel can throw to a Korean message. */
+function describeChannelError(error: unknown): string {
+  if (error instanceof DiagnosisRateLimitError) return error.message;
+  if (error instanceof ChannelsError) return "채널 정보를 처리하는 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.";
+  if (error instanceof Error && "code" in error) {
+    switch ((error as Error & { code?: string }).code) {
+      case "QUOTA_EXCEEDED":
+        return "유튜브 API 할당량을 초과했어요. 잠시 후 다시 시도해주세요.";
+      case "CHANNEL_NOT_FOUND":
+        return "채널을 찾을 수 없어요. 주소를 확인해주세요.";
+      case "TIMEOUT":
+        return "응답이 지연됐어요. 잠시 후 다시 시도해주세요.";
+      case "RATE_LIMITED":
+        return "요청이 많아 잠시 제한됐어요. 잠시 후 다시 시도해주세요.";
+      case "INVALID_API_KEY":
+      case "INVALID_CREDENTIALS":
+        return "채널 데이터 연동 설정에 문제가 있어요. 관리자에게 문의해주세요.";
+      case "INVALID_RESPONSE":
+        return "채널 정보를 해석하지 못했어요.";
+      default:
+        return "채널 진단 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.";
+    }
+  }
+  return "채널 진단 중 알 수 없는 오류가 발생했어요.";
+}
+
+/**
+ * "채널 추가" — URL을 파싱해 tracked_channels에 등록(이미 등록돼 있으면 그대로
+ * 재사용)하고 바로 진단한다. 같은 URL을 다시 제출하면 "다시 진단하기"와
+ * 동일하게 동작한다(registerAndDiagnoseChannel이 등록 여부를 알아서 처리).
+ */
+export async function addChannel(_prevState: ChannelActionState, formData: FormData): Promise<ChannelActionState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+
+  const businessId = String(formData.get("businessId") ?? "");
+  const url = String(formData.get("url") ?? "").trim();
+  const platformHintRaw = String(formData.get("platformHint") ?? "");
+  if (!businessId || !url) return { error: "채널 주소를 입력해주세요." };
+
+  const { data: business, error: businessError } = await supabase.from("businesses").select("id").eq("id", businessId).eq("owner_id", user.id).maybeSingle();
+  if (businessError) return { error: "사업체 정보를 확인하는 중 오류가 발생했습니다." };
+  if (!business) return { error: "본인의 사업체를 선택해주세요." };
+
+  const platformHintParsed = channelPlatformSchema.safeParse(platformHintRaw);
+  const platformHint: ChannelPlatform | undefined = platformHintParsed.success ? platformHintParsed.data : undefined;
+
+  let result;
+  try {
+    result = await registerAndDiagnoseChannel(businessId, url, platformHint);
+  } catch (error) {
+    return { error: describeChannelError(error) };
+  }
+  if (!result.ok) return { error: result.message };
+
+  revalidatePath("/diagnosis");
+  return { channelId: result.channelId };
+}
+
+/** "다시 진단하기" — 이미 등록된 채널 하나를 다시 진단한다(1시간 캐시/시간당 한도는 diagnoseChannel 내부에서 그대로 적용됨). */
+export async function rediagnoseChannel(channelId: string): Promise<ChannelActionState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+
+  // RLS already scopes this select to the caller's own businesses, same as collectChannelNow.
+  const { data: channel, error: channelError } = await supabase
+    .from("tracked_channels")
+    .select("id, business_id, external_id, url, platform")
+    .eq("id", channelId)
+    .maybeSingle();
+  if (channelError) return { error: "채널 정보를 불러오지 못했습니다." };
+  if (!channel) return { error: "채널을 찾을 수 없습니다." };
+
+  const { data: business } = await supabase.from("businesses").select("name").eq("id", channel.business_id).maybeSingle();
+
+  try {
+    await diagnoseChannel(
+      { id: channel.id, business_id: channel.business_id, external_id: channel.external_id, url: channel.url, platform: channelPlatformSchema.parse(channel.platform) },
+      business?.name,
+    );
+  } catch (error) {
+    return { error: describeChannelError(error) };
+  }
+
+  revalidatePath("/diagnosis");
+  return { channelId: channel.id };
+}
 
 export interface DiagnosisProfileSuggestions {
   mainOffering: string | null;
@@ -152,7 +253,10 @@ export async function runDiagnosis(_prevState: DiagnosisActionState, formData: F
   }
   if (insertError || !inserted) return { error: "진단 결과를 저장하지 못했습니다." };
 
-  revalidatePath("/marketing/diagnosis");
+  // 사람1(ticket 1-5): the website-diagnosis UI moved to /business (see
+  // AutoFillFromWebsiteButton) — /marketing/diagnosis is now just a
+  // redirect to /diagnosis and never renders this data.
+  revalidatePath("/business");
   revalidatePath("/calendar");
   revalidatePath("/marketing/calendar");
   return {

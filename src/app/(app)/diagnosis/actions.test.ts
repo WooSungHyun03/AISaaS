@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, diagnoseWebsiteMock, revalidatePathMock } = vi.hoisted(() => ({
+const { createClientMock, diagnoseWebsiteMock, revalidatePathMock, registerAndDiagnoseChannelMock, diagnoseChannelMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   diagnoseWebsiteMock: vi.fn(),
   revalidatePathMock: vi.fn(),
+  registerAndDiagnoseChannelMock: vi.fn(),
+  diagnoseChannelMock: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
@@ -12,9 +14,14 @@ vi.mock("@/server/marketing/diagnosis", async () => {
   const actual = await vi.importActual<typeof import("@/server/marketing/diagnosis")>("@/server/marketing/diagnosis");
   return { ...actual, diagnoseWebsite: diagnoseWebsiteMock };
 });
+vi.mock("@/server/channels", async () => {
+  const actual = await vi.importActual<typeof import("@/server/channels")>("@/server/channels");
+  return { ...actual, registerAndDiagnoseChannel: registerAndDiagnoseChannelMock, diagnoseChannel: diagnoseChannelMock };
+});
 
-const { runDiagnosis } = await import("./actions");
+const { runDiagnosis, addChannel, rediagnoseChannel } = await import("./actions");
 const { DiagnosisError } = await import("@/server/marketing/diagnosis");
+const { ChannelsError, DiagnosisRateLimitError } = await import("@/server/channels");
 
 type QueryResult = { data: unknown; error: unknown };
 
@@ -116,7 +123,7 @@ describe("runDiagnosis", () => {
     });
     expect(result.result?.scoreBreakdown).toHaveLength(1);
     expect(inserted[0]).not.toHaveProperty("main_offering");
-    expect(revalidatePathMock).toHaveBeenCalledWith("/marketing/diagnosis");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/business");
     expect(revalidatePathMock).toHaveBeenCalledWith("/calendar");
   });
 
@@ -238,5 +245,130 @@ describe("runDiagnosis", () => {
 
     expect(result.error).toBe("사업체와 홈페이지 주소를 확인해주세요.");
     expect(diagnoseWebsiteMock).not.toHaveBeenCalled();
+  });
+});
+
+function makeOwnershipClient(options: { businessOwned?: boolean; trackedChannel?: { data: unknown; error: unknown }; businessName?: { data: unknown; error: unknown } } = {}) {
+  const businessSelect = { eq: vi.fn(() => businessSelect), maybeSingle: vi.fn().mockResolvedValue(options.businessOwned === false ? { data: null, error: null } : { data: { id: "business-1", name: "우리가게" }, error: null }) };
+  const trackedChannelsSelect = { eq: vi.fn(() => trackedChannelsSelect), maybeSingle: vi.fn().mockResolvedValue(options.trackedChannel ?? { data: null, error: null }) };
+  const businessNameSelect = { eq: vi.fn(() => businessNameSelect), maybeSingle: vi.fn().mockResolvedValue(options.businessName ?? { data: { name: "우리가게" }, error: null }) };
+
+  const from = vi.fn((table: string) => {
+    if (table === "businesses") return { select: vi.fn(() => (options.businessName !== undefined ? businessNameSelect : businessSelect)) };
+    if (table === "tracked_channels") return { select: vi.fn(() => trackedChannelsSelect) };
+    throw new Error(`Unexpected table: ${table}`);
+  });
+
+  return { auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) }, from };
+}
+
+function withFormData(fields: Record<string, string>) {
+  const data = new FormData();
+  for (const [key, value] of Object.entries(fields)) data.set(key, value);
+  return data;
+}
+
+describe("addChannel", () => {
+  it("registers and diagnoses the channel, then revalidates /diagnosis", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    registerAndDiagnoseChannelMock.mockResolvedValue({ ok: true, channelId: "channel-1", diagnosis: { channel: "youtube" } });
+
+    const result = await addChannel({}, withFormData({ businessId: "business-1", url: "https://youtube.com/@mychannel" }));
+
+    expect(result).toEqual({ channelId: "channel-1" });
+    expect(registerAndDiagnoseChannelMock).toHaveBeenCalledWith("business-1", "https://youtube.com/@mychannel", undefined);
+    expect(revalidatePathMock).toHaveBeenCalledWith("/diagnosis");
+  });
+
+  it("passes an explicit platform hint through when one was chosen", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    registerAndDiagnoseChannelMock.mockResolvedValue({ ok: true, channelId: "channel-1", diagnosis: { channel: "tistory" } });
+
+    await addChannel({}, withFormData({ businessId: "business-1", url: "https://blog.mycustomdomain.com", platformHint: "tistory" }));
+
+    expect(registerAndDiagnoseChannelMock).toHaveBeenCalledWith("business-1", "https://blog.mycustomdomain.com", "tistory");
+  });
+
+  it("surfaces the URL parser's message when registerAndDiagnoseChannel reports ok: false", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    registerAndDiagnoseChannelMock.mockResolvedValue({ ok: false, message: "지원하지 않는 채널 URL 형식이에요." });
+
+    const result = await addChannel({}, withFormData({ businessId: "business-1", url: "not a channel url" }));
+
+    expect(result.error).toBe("지원하지 않는 채널 URL 형식이에요.");
+  });
+
+  it("refuses to run when the business doesn't belong to the caller", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient({ businessOwned: false }));
+
+    const result = await addChannel({}, withFormData({ businessId: "someone-elses-business", url: "https://youtube.com/@mychannel" }));
+
+    expect(result.error).toBe("본인의 사업체를 선택해주세요.");
+    expect(registerAndDiagnoseChannelMock).not.toHaveBeenCalled();
+  });
+
+  it("maps a DiagnosisRateLimitError to its own message", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    registerAndDiagnoseChannelMock.mockRejectedValue(new DiagnosisRateLimitError());
+
+    const result = await addChannel({}, withFormData({ businessId: "business-1", url: "https://youtube.com/@mychannel" }));
+
+    expect(result.error).toContain("한도");
+  });
+
+  it("maps a provider error code (e.g. quota exceeded) to a Korean message", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    registerAndDiagnoseChannelMock.mockRejectedValue(Object.assign(new Error("quota"), { code: "QUOTA_EXCEEDED" }));
+
+    const result = await addChannel({}, withFormData({ businessId: "business-1", url: "https://youtube.com/@mychannel" }));
+
+    expect(result.error).toContain("할당량");
+  });
+
+  it("maps a ChannelsError to a generic Korean message", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    registerAndDiagnoseChannelMock.mockRejectedValue(new ChannelsError("DATABASE_ERROR", "boom"));
+
+    const result = await addChannel({}, withFormData({ businessId: "business-1", url: "https://youtube.com/@mychannel" }));
+
+    expect(result.error).toBeTruthy();
+  });
+});
+
+describe("rediagnoseChannel", () => {
+  it("re-diagnoses the channel (RLS already scopes it to the caller) and revalidates /diagnosis", async () => {
+    createClientMock.mockResolvedValue(
+      makeOwnershipClient({ trackedChannel: { data: { id: "channel-1", business_id: "business-1", external_id: "@mychannel", url: "https://youtube.com/@mychannel", platform: "youtube" }, error: null }, businessName: { data: { name: "우리가게" }, error: null } }),
+    );
+    diagnoseChannelMock.mockResolvedValue({ channel: "youtube" });
+
+    const result = await rediagnoseChannel("channel-1");
+
+    expect(result).toEqual({ channelId: "channel-1" });
+    expect(diagnoseChannelMock).toHaveBeenCalledWith(
+      { id: "channel-1", business_id: "business-1", external_id: "@mychannel", url: "https://youtube.com/@mychannel", platform: "youtube" },
+      "우리가게",
+    );
+    expect(revalidatePathMock).toHaveBeenCalledWith("/diagnosis");
+  });
+
+  it("returns an error when the channel doesn't exist (or isn't the caller's own, per RLS)", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient({ trackedChannel: { data: null, error: null } }));
+
+    const result = await rediagnoseChannel("someone-elses-channel");
+
+    expect(result.error).toBe("채널을 찾을 수 없습니다.");
+    expect(diagnoseChannelMock).not.toHaveBeenCalled();
+  });
+
+  it("maps the hourly rate limit error to its own message", async () => {
+    createClientMock.mockResolvedValue(
+      makeOwnershipClient({ trackedChannel: { data: { id: "channel-1", business_id: "business-1", external_id: "@mychannel", url: "https://youtube.com/@mychannel", platform: "youtube" }, error: null } }),
+    );
+    diagnoseChannelMock.mockRejectedValue(new DiagnosisRateLimitError());
+
+    const result = await rediagnoseChannel("channel-1");
+
+    expect(result.error).toContain("한도");
   });
 });

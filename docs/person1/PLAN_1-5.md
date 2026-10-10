@@ -78,10 +78,30 @@
   "가끔"(10% 확률) 수행, 실패해도 호출자의 진단 요청은 막지 않음(로그만 남김).
   0040은 2단계에서 이미 적용함. 테스트: `diagnosis-rate-limit.test.ts`(7개) +
   `diagnose.test.ts`에 레이트리밋 연동 테스트 2개 추가. 전체 테스트 901개 + typecheck + lint 통과.
-- [ ] **5단계** — 화면단: `/diagnosis` 새 진단 화면, `/marketing/diagnosis` 308 리다이렉트(쿼리스트링
-  보존)로 교체, `readiness.ts` + `ReadinessScoreCard` 분리 후 `/diagnosis` 상단 배치,
-  `docs/person1/READINESS_SCORE_FOR_DASHBOARD.md` 메모, 홈페이지 진단 버튼화(prefill.ts 재사용),
-  플랫폼별 한계 안내 문구, `docs/person1/CHANNEL_DASHBOARD_API.md` 갱신
+- [x] **5단계** — 화면단.
+  - `src/server/marketing/readiness.ts`(`getReadinessScore`) + 테스트: 옛 `/marketing/diagnosis`의
+    점수 계산을 그대로 추출(산식 안 바꿈). `docs/person1/READINESS_SCORE_FOR_DASHBOARD.md`에
+    사람2용 메모 작성(강제 통합은 안 함, `/dashboard/page.tsx` 미수정).
+  - `ReadinessScoreCard`(`src/components/marketing/readiness-score-card.tsx`) — 점수 링/체크리스트
+    UI, DB 조회 없음, `/diagnosis` 상단에 배치.
+  - `/diagnosis/page.tsx`를 새 채널 진단 화면으로 교체: 준비 점수 카드 + `AddChannelForm`(채널
+    추가, `addChannel` 액션) + 채널별 `ChannelDiagnosisCard`(점수/완전성·샘플데이터 배지/
+    `buildChannelNarrative` AI 설명/`findings` 전부 표시 — 네이버 검색 한계·티스토리 관측 한계·
+    콘텐츠 점수 측정 불가 사유가 findings에 이미 들어있어서 따로 하드코딩 안 함/추천 +
+    `RediagnoseChannelButton`, `rediagnoseChannel` 액션).
+  - `/marketing/diagnosis/page.tsx`를 `permanentRedirect`(308, 쿼리스트링 보존)로 교체 — 기존엔
+    반대 방향(`/diagnosis` → `/marketing/diagnosis`)이었던 것을 뒤집음. 리다이렉트 테스트 작성.
+  - 홈페이지 진단은 `/business`의 `AutoFillFromWebsiteButton`으로 축소 — `runDiagnosis`(= 기존
+    `diagnoseWebsite`) 그대로 재사용, `BusinessFormDialog`의 기존 prefill 로직
+    (`mergeBusinessDefault`/`mergeSnsLinks`, prefill.ts) 그대로 재사용. `marketing_diagnoses`에는
+    계속 저장되므로 캘린더(`calendar.ts`의 `getLatestDiagnosis`)는 안 깨짐(코드 수정 없음, 확인만).
+  - 이제 쓰이는 곳이 없어진 `diagnosis-form.tsx`/`diagnosis-result.tsx` 삭제(죽은 코드).
+  - `addChannel`/`rediagnoseChannel` 액션 + 에러 메시지 매핑(`DiagnosisRateLimitError`,
+    `ChannelsError`, 플랫폼별 수집기 에러 코드) + 테스트. `runDiagnosis`의 `revalidatePath`를
+    더 이상 존재하지 않는 역할의 `/marketing/diagnosis` 대신 `/business`로 변경.
+  - 전체 테스트 917개 + typecheck + lint + `next build` 통과.
+  - **DB 적용 미확인**: 이 환경에 Docker가 떠 있지 않아 0040/0041이 실제 로컬 DB에 적용되는지는
+    6단계에서 Docker 뜨면 `scripts/dev-db.sh reset`으로 확인 필요.
 - [ ] **6단계** — `supabase db reset`(0040/0041 적용 확인) → lint/typecheck/test/build →
   `git status` 재확인 → main에 커밋 (push는 사람1이 직접)
 
