@@ -102,9 +102,34 @@ async function resolvePublicAddress(rawHostname: string): Promise<{ address: str
 }
 
 export interface FetchedPage {
+  /** Raw response body text — HTML for fetchPublicHtml, XML for fetchPublicXml (see FetchContentOptions). */
   html: string;
   finalUrl: string;
 }
+
+/**
+ * What kind of response fetchHop accepts. Parameterized so the same
+ * SSRF/redirect/size-cap machinery backs both fetchPublicHtml (website
+ * diagnosis) and fetchPublicXml (ticket 1-3's Tistory RSS collector)
+ * instead of duplicating it.
+ */
+interface FetchContentOptions {
+  acceptHeader: string;
+  isAcceptableContentType: (contentType: string) => boolean;
+  unsupportedContentMessage: string;
+}
+
+const HTML_FETCH_OPTIONS: FetchContentOptions = {
+  acceptHeader: "text/html",
+  isAcceptableContentType: (contentType) => contentType.includes("text/html"),
+  unsupportedContentMessage: "HTML 페이지만 진단할 수 있습니다.",
+};
+
+const XML_FETCH_OPTIONS: FetchContentOptions = {
+  acceptHeader: "application/rss+xml, application/xml, text/xml",
+  isAcceptableContentType: (contentType) => contentType.includes("xml"),
+  unsupportedContentMessage: "XML/RSS 응답만 처리할 수 있습니다.",
+};
 
 /**
  * Fetches one hop. Redirects are never auto-followed by the HTTP client —
@@ -113,7 +138,7 @@ export interface FetchedPage {
  * MAX_REDIRECTS times, so a public URL can't bounce through a redirect to
  * reach a private address the initial validation would have blocked.
  */
-async function fetchHop(urlString: string, redirectsLeft: number, deadlineAt: number): Promise<FetchedPage> {
+async function fetchHop(urlString: string, redirectsLeft: number, deadlineAt: number, options: FetchContentOptions): Promise<FetchedPage> {
   const url = assertPublicHttpUrl(urlString);
   const { address, family } = await resolvePublicAddress(url.hostname);
   const requestFn = url.protocol === "https:" ? httpsRequest : httpRequest;
@@ -128,7 +153,7 @@ async function fetchHop(urlString: string, redirectsLeft: number, deadlineAt: nu
       url.toString(),
       {
         method: "GET",
-        headers: { "User-Agent": "EasyMarketingDiagnosisBot/1.0", Accept: "text/html" },
+        headers: { "User-Agent": "EasyMarketingDiagnosisBot/1.0", Accept: options.acceptHeader },
         signal: AbortSignal.timeout(remainingMs),
         // Pins the validated address for the actual request — a second DNS
         // lookup between validation and connection could otherwise reach a
@@ -156,7 +181,7 @@ async function fetchHop(urlString: string, redirectsLeft: number, deadlineAt: nu
             reject(new DiagnosisError("FETCH_FAILED", "리다이렉트 주소가 올바르지 않습니다."));
             return;
           }
-          resolve(fetchHop(nextUrl.toString(), redirectsLeft - 1, deadlineAt));
+          resolve(fetchHop(nextUrl.toString(), redirectsLeft - 1, deadlineAt, options));
           return;
         }
 
@@ -167,9 +192,9 @@ async function fetchHop(urlString: string, redirectsLeft: number, deadlineAt: nu
         }
 
         const contentType = (response.headers["content-type"] ?? "").toLowerCase();
-        if (!contentType.includes("text/html")) {
+        if (!options.isAcceptableContentType(contentType)) {
           response.destroy();
-          reject(new DiagnosisError("UNSUPPORTED_CONTENT", "HTML 페이지만 진단할 수 있습니다."));
+          reject(new DiagnosisError("UNSUPPORTED_CONTENT", options.unsupportedContentMessage));
           return;
         }
 
@@ -215,10 +240,20 @@ async function fetchHop(urlString: string, redirectsLeft: number, deadlineAt: nu
 
 /** Fetches a public HTML page, following at most MAX_REDIRECTS redirects, each re-validated against SSRF. */
 export async function fetchPublicHtml(urlString: string): Promise<FetchedPage> {
-  return fetchHop(urlString, MAX_REDIRECTS, Date.now() + TOTAL_FETCH_DEADLINE_MS);
+  return fetchHop(urlString, MAX_REDIRECTS, Date.now() + TOTAL_FETCH_DEADLINE_MS, HTML_FETCH_OPTIONS);
 }
 
-function decodeHtmlEntities(value: string): string {
+/**
+ * Same SSRF protections, redirect re-validation, and response-size cap as
+ * fetchPublicHtml, but accepts an XML/RSS content-type instead of HTML —
+ * used by ticket 1-3's Tistory RSS collector. `.html` on the result holds
+ * the raw XML text (see FetchedPage).
+ */
+export async function fetchPublicXml(urlString: string): Promise<FetchedPage> {
+  return fetchHop(urlString, MAX_REDIRECTS, Date.now() + TOTAL_FETCH_DEADLINE_MS, XML_FETCH_OPTIONS);
+}
+
+export function decodeHtmlEntities(value: string): string {
   return value
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")

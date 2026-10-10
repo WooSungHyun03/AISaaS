@@ -31,3 +31,18 @@ describe("getYouTubeDataProvider", () => {
     expect(getYouTubeDataProvider()).toBe(getYouTubeDataProvider());
   });
 });
+
+describe("getTistoryCollector", () => {
+  it("returns the mock collector when CHANNEL_DATA_PROVIDER=mock", async () => {
+    const { getTistoryCollector } = await import("./index");
+    const { collectMockTistoryRssMetrics } = await import("./tistory-mock");
+    expect(getTistoryCollector()).toBe(collectMockTistoryRssMetrics);
+  });
+
+  it("returns the live collector when CHANNEL_DATA_PROVIDER=live", async () => {
+    serverEnvMock.CHANNEL_DATA_PROVIDER = "live";
+    const { getTistoryCollector } = await import("./index");
+    const { collectTistoryRssMetrics } = await import("./tistory");
+    expect(getTistoryCollector()).toBe(collectTistoryRssMetrics);
+  });
+});
