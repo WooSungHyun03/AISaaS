@@ -102,8 +102,31 @@
   - 전체 테스트 917개 + typecheck + lint + `next build` 통과.
   - **DB 적용 미확인**: 이 환경에 Docker가 떠 있지 않아 0040/0041이 실제 로컬 DB에 적용되는지는
     6단계에서 Docker 뜨면 `scripts/dev-db.sh reset`으로 확인 필요.
-- [ ] **6단계** — `supabase db reset`(0040/0041 적용 확인) → lint/typecheck/test/build →
-  `git status` 재확인 → main에 커밋 (push는 사람1이 직접)
+- [x] **6단계** — Docker Desktop을 띄우고 `bash scripts/dev-db.sh reset` 실행: 0001~0041
+  **전체 마이그레이션 에러 없이 적용**(0040/0041 포함). DB에 직접 접속해 확인:
+  `content_score`가 실제로 nullable이고 체크 제약도 `content_score IS NULL OR (0~100)`으로
+  재생성됨, `channel_diagnosis_attempts`에 select/insert own 정책만 있고(삭제 정책 없음)
+  business_id FK·인덱스가 계획대로 생성됨.
+
+  실제 로그인 세션(seed 계정 `user@autobiz.local`)으로 `curl`을 통해 `/diagnosis`, `/business`,
+  `/marketing/diagnosis`를 직접 호출해 확인(브라우저 도구가 없는 환경이라 세션 쿠키를
+  직접 만들어 사용 — `playwright`/`chromium-cli` 둘 다 이 환경에 없고, 새 npm 패키지 설치는
+  금지라 설치하지 않음):
+  - `/diagnosis`: 사업체 없음/있음 두 경우 모두 200, 준비 점수 카드·채널 진단 섹션·
+    "채널 추가" 폼이 정상 렌더링됨.
+  - `/business`: 200, website가 있는 사업체에 "홈페이지로 자동 채우기" 버튼이 보임.
+  - **버그 발견 및 수정**: `/marketing/diagnosis`의 `permanentRedirect()`가 실제로는 308을
+    못 내고 있었음 — `(app)/marketing/loading.tsx`의 Suspense 경계 때문에 페이지 컴포넌트가
+    resolve되기 전에 Next가 이미 200을 커밋해버려서, 클라이언트 쪽 meta-refresh로만 동작하고
+    있었음(curl로 헤더 직접 확인함: Location 없이 200). `next.config.ts`의 `redirects()`
+    (라우팅보다 먼저 체크됨, 쿼리스트링 자동 보존)로 교체해서 실제 308이 나가는 것까지
+    curl로 재확인. 이제 쓰이지 않게 된 `/marketing/diagnosis/page.tsx`(+테스트)는 삭제.
+  - 폼 제출(채널 추가/다시 진단)은 클라이언트 `useActionState`/Server Action이라 JS 없는
+    curl로는 재현 불가 — 이 부분은 register.test.ts/actions.test.ts의 목 기반 테스트로
+    커버됨(실제 DB 대상 e2e는 브라우저 도구 없어 한계).
+  - 검증에 쓴 테스트 business row·`.env.local`(로컬 Supabase로 바꿨던 것)·임시 스크립트는
+    전부 원상 복구/삭제함.
+  - `.next` 캐시 삭제 후 재빌드 → lint/typecheck/test(914개)/`next build` 전부 통과 재확인.
 
 ## 커밋 규칙
 

@@ -30,6 +30,19 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  /**
+   * Ticket 1-5: /marketing/diagnosis moved to /diagnosis. A page-level
+   * `permanentRedirect()` call doesn't work here — this route sits under
+   * `(app)/marketing/loading.tsx`'s Suspense boundary, so by the time the
+   * page component resolves, Next has already committed a 200 response
+   * and can only emit a client-side (JS) redirect, not a real 308 (verified
+   * by curling it directly: headers came back 200, no Location). A
+   * config-level redirect runs before any page/Suspense rendering, so it's
+   * a real 308 — and the querystring passes through automatically.
+   */
+  async redirects() {
+    return [{ source: "/marketing/diagnosis", destination: "/diagnosis", permanent: true }];
+  },
 };
 
 export default nextConfig;
