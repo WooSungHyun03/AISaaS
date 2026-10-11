@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, CheckCircle2, CircleAlert } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getMarketingCalendarPageData } from "@/server/marketing/calendar";
 import { CalendarItemDialog } from "@/components/marketing/calendar-item-dialog";
+import { CalendarDayItemsDialog } from "@/components/marketing/calendar-day-items-dialog";
 import { CalendarPlanGenerator } from "@/components/marketing/calendar-plan-generator";
 import { StatCard, StatGroup } from "@/components/dashboard/stat-card";
 import { PageHeader } from "@/components/layout/page-header";
@@ -230,7 +231,7 @@ function CalendarDay({ day, dateKey, items, today }: { day: number; dateKey: str
         {items.slice(0, 3).map((item) => (
           <CalendarItemDialog key={item.id} item={item} />
         ))}
-        {items.length > 3 ? <p className="px-1 text-[11px] font-medium text-muted-foreground">+{items.length - 3}개 더 있어요</p> : null}
+        {items.length > 3 ? <CalendarDayItemsDialog dateKey={dateKey} items={items} /> : null}
       </div>
     </div>
   );
