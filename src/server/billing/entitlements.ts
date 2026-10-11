@@ -5,19 +5,9 @@ import type { SubscriptionPlan } from "@/types/domain";
 import { logger } from "@/lib/logger";
 import { getPeriodKey, getPeriodRange } from "@/lib/utils/date";
 import { getPlanConfig, PLAN_LABEL } from "./plans";
+import { checkRunCredits, creditKindForTemplate } from "./run-credits";
 
 type DbClient = SupabaseClient<Database>;
-
-/** Template slugs that have their own sub-limit, and which PlanConfig field holds it. */
-const CONTENT_TYPE_LIMIT_FIELD = {
-  "blog-marketing": "monthlyBlogLimit",
-  shorts: "monthlyShortsLimit",
-} as const;
-
-const CONTENT_TYPE_LABEL: Record<keyof typeof CONTENT_TYPE_LIMIT_FIELD, string> = {
-  "blog-marketing": "블로그",
-  shorts: "숏폼",
-};
 
 export interface EntitlementCheck {
   allowed: boolean;
@@ -72,6 +62,10 @@ export async function canExecuteAutomation(
   userId: string,
   templateSlug: string,
 ): Promise<EntitlementCheck> {
+  // Blog and Shorts are pay-per-use: a valid credit decides, never the plan
+  // (a free account without credits cannot generate; one with credits can).
+  if (creditKindForTemplate(templateSlug)) return checkRunCredits(supabase, userId, templateSlug);
+
   const plan = await getEffectivePlan(supabase, userId);
   const config = getPlanConfig(plan);
 
@@ -95,23 +89,6 @@ export async function canExecuteAutomation(
       allowed: false,
       reason: `${PLAN_LABEL[plan]} 요금제의 이번 달 제작 한도(${config.monthlyRunLimit}회)를 모두 썼어요. 다음 달에 다시 쓰거나 요금제를 올려보세요.`,
     };
-  }
-
-  const contentLimitKey = (CONTENT_TYPE_LIMIT_FIELD as Record<string, "monthlyBlogLimit" | "monthlyShortsLimit">)[templateSlug];
-  if (contentLimitKey) {
-    const contentLimit = config[contentLimitKey];
-    if (contentLimit !== null) {
-      const usedForType = await getContentTypeUsage(supabase, userId, templateSlug);
-      if (usedForType >= contentLimit) {
-        const label = CONTENT_TYPE_LABEL[templateSlug as keyof typeof CONTENT_TYPE_LABEL];
-        return {
-          allowed: false,
-          reason: contentLimit === 0
-            ? `${PLAN_LABEL[plan]} 요금제에서는 ${label}을(를) 만들 수 없어요. 요금제를 올리면 이용할 수 있어요.`
-            : `${PLAN_LABEL[plan]} 요금제의 이번 달 ${label} 한도(${contentLimit}건)를 모두 썼어요. 다음 달에 다시 쓰거나 요금제를 올려보세요.`,
-        };
-      }
-    }
   }
 
   return { allowed: true };
@@ -159,46 +136,11 @@ export async function getContentTypeUsage(supabase: DbClient, userId: string, te
 }
 
 /**
- * Whether one more "really animated" character Short fits in this month's plan
- * allowance. Counts this month's SUCCESS Shorts runs that were rendered with
- * animation clips (`output.animationMode = "video"`).
+ * Animated clips are part of the Shorts credit the run already reserved, so there is no separate
+ * monthly allowance any more. This only reports the clip quality to use.
  */
-export async function canUseAnimatedShorts(supabase: DbClient, userId: string): Promise<EntitlementCheck> {
-  const plan = await getEffectivePlan(supabase, userId);
-  const planConfig = getPlanConfig(plan);
-  const limit = planConfig.monthlyAnimatedShortsLimit;
-  const animationQuality = planConfig.animationQuality;
-  if (limit === null) return { allowed: true, animationQuality };
-  if (limit === 0) {
-    return { allowed: false, reason: `${PLAN_LABEL[plan]} 요금제에서는 움직이는 영상을 만들 수 없어요.`, animationQuality };
-  }
-
-  const { data: template } = await supabase.from("automation_templates").select("id").eq("slug", "shorts").maybeSingle();
-  if (!template) return { allowed: true, animationQuality };
-  const { data: automations, error: automationsError } = await supabase
-    .from("automations")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("template_id", template.id);
-  if (automationsError) throw automationsError;
-  const ids = (automations ?? []).map((item) => item.id);
-  if (ids.length === 0) return { allowed: true, animationQuality };
-
-  const { start, end } = getPeriodRange();
-  const { count, error } = await supabase
-    .from("automation_runs")
-    .select("id", { count: "exact", head: true })
-    .in("automation_id", ids)
-    .eq("status", "SUCCESS")
-    .eq("output->>animationMode", "video")
-    .gte("completed_at", start.toISOString())
-    .lt("completed_at", end.toISOString());
-  if (error) throw error;
-
-  if ((count ?? 0) >= limit) {
-    return { allowed: false, reason: `${PLAN_LABEL[plan]} 요금제의 이번 달 움직이는 영상 한도(${limit}건)를 모두 썼어요.`, animationQuality };
-  }
-  return { allowed: true, animationQuality };
+export async function canUseAnimatedShorts(_supabase: DbClient, _userId: string): Promise<EntitlementCheck> {
+  return { allowed: true, animationQuality: "standard" };
 }
 
 export async function getAutomationLimit(plan: SubscriptionPlan): Promise<number | null> {

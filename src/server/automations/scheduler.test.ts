@@ -141,4 +141,24 @@ describe("reapStaleRuns", () => {
     expect(filters).toEqual([["is", "output", null], ["not", "output->job", "is", null]]);
     expect(STALE_DEFERRED_RUN_MINUTES).toBeGreaterThan(STALE_RUN_MINUTES);
   });
+
+  it("gives back the credit of every run it reaps", async () => {
+    const builder: Record<string, unknown> = {};
+    for (const name of ["update", "in", "lt", "is", "not"]) builder[name] = () => builder;
+    builder.select = () => Promise.resolve({ data: [{ id: "r1", input: { creditReservationId: "resv-1" } }, { id: "r2", input: {} }], error: null });
+    const release = vi.fn().mockResolvedValue(undefined);
+    vi.doMock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: () => builder }) }));
+    vi.doMock("@/server/billing/run-credits", () => ({
+      readCreditReservationId: (input: Record<string, unknown>) => (input.creditReservationId as string | undefined) ?? null,
+      releaseRunCredit: release,
+    }));
+    vi.resetModules();
+    const { reapStaleRuns } = await import("./scheduler");
+
+    await reapStaleRuns(new Date("2026-10-01T12:00:00.000Z"));
+
+    expect(release).toHaveBeenCalledWith("resv-1", "r1", "run_reaped");
+    expect(release).toHaveBeenCalledWith(null, "r2", "run_reaped");
+    vi.doUnmock("@/server/billing/run-credits");
+  });
 });

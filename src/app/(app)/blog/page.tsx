@@ -6,6 +6,8 @@ import { AutomationSettingsDialog } from "@/components/automations/automation-se
 import { RunNowButton } from "@/components/automations/run-now-button";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
+import { CreditNotice } from "@/components/billing/credit-notice";
+import { getUsableCredits } from "@/server/billing/run-credits";
 import { readDeferredJob } from "@/server/automations/runner";
 import { describeSchedule } from "@/server/automations/schedule-input";
 import type { AutomationSchedule } from "@/types/automation";
@@ -51,6 +53,9 @@ export default async function BlogPage({
     );
   }
 
+  const credits = await getUsableCredits(supabase, user.id, "BLOG");
+  const creditNotice = <CreditNotice kind="BLOG" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />;
+
   const { data: template, error: templateError } = await supabase
     .from("automation_templates")
     .select("id")
@@ -83,6 +88,7 @@ export default async function BlogPage({
     return (
       <div className="mx-auto max-w-4xl space-y-8">
         <PageHeading />
+        {creditNotice}
         {businessPickers}
         <EmptyState
           mascot="point"
@@ -126,6 +132,7 @@ export default async function BlogPage({
   return (
     <div className="mx-auto max-w-4xl space-y-10">
       <PageHeading />
+      {creditNotice}
       {businessPickers}
 
       {automations.map((automation) => {

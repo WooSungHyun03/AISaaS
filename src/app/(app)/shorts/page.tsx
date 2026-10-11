@@ -11,8 +11,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { toSafeAutomationRunOutput } from "@/server/automations/run-output";
 import { readDeferredJob } from "@/server/automations/runner";
-import { getEffectivePlan } from "@/server/billing/entitlements";
-import { getPlanConfig, PLAN_LABEL } from "@/server/billing/plans";
+import { CreditNotice } from "@/components/billing/credit-notice";
+import { getUsableCredits } from "@/server/billing/run-credits";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
 
 /** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
@@ -31,20 +31,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
 
   if (!selectedBusiness) return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><EmptyState mascot="point" title="먼저 사업체를 등록해주세요" description="사업 정보가 있어야 업종과 고객에 맞는 숏폼 대본과 장면을 만들 수 있어요." action={<Button asChild><Link href="/business">사업체 등록</Link></Button>} /></div>;
 
-  const plan = await getEffectivePlan(supabase as never, user.id);
-  if (getPlanConfig(plan).monthlyShortsLimit === 0) {
-    return (
-      <div className="mx-auto max-w-6xl space-y-8">
-        <PageHeading />
-        <EmptyState
-          mascot="present"
-          title="숏폼 영상은 스타터 요금제부터 만들 수 있어요"
-          description={`지금은 ${PLAN_LABEL[plan]} 요금제예요. 요금제를 올리면 대본, 장면, 자막, 목소리까지 갖춘 세로 영상을 만들고 미리 볼 수 있어요.`}
-          action={<Button asChild><Link href="/pricing">요금제 보기</Link></Button>}
-        />
-      </div>
-    );
-  }
+  const credits = await getUsableCredits(supabase, user.id, "SHORTS");
 
   const { data: template, error: templateError } = await supabase.from("automation_templates").select("id").eq("slug", "shorts").maybeSingle();
   if (templateError) throw new Error("숏폼 템플릿을 확인하지 못했습니다.", { cause: templateError });
@@ -54,7 +41,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   if (automationError) throw new Error("숏폼 설정을 불러오지 못했습니다.", { cause: automationError });
 
   const businessPicker = businesses && businesses.length > 1 ? <nav className="flex flex-wrap gap-2" aria-label="사업체 선택">{businesses.map((business) => <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness.id ? "default" : "outline"}><Link href={`/shorts?business=${business.id}`} aria-current={business.id === selectedBusiness.id ? "page" : undefined}>{business.name}</Link></Button>)}</nav> : null;
-  if (!automation) return <div className="mx-auto max-w-6xl space-y-8"><PageHeading />{businessPicker}<EmptyState mascot="point" title={`${selectedBusiness.name}의 숏폼을 시작해보세요`} description="기본 예약 설정을 만든 뒤 바로 AI 영상 미리보기를 생성할 수 있어요." action={<ShortsCreateButton businessId={selectedBusiness.id} />} /></div>;
+  if (!automation) return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<EmptyState mascot="point" title={`${selectedBusiness.name}의 숏폼을 시작해보세요`} description="기본 예약 설정을 만든 뒤 바로 AI 영상 미리보기를 생성할 수 있어요." action={<ShortsCreateButton businessId={selectedBusiness.id} />} /></div>;
 
   const [runsResult, connectionsResult, inFlightResult] = await Promise.all([
     supabase.from("automation_runs").select("id,status,output,created_at").eq("automation_id", automation.id).order("created_at", { ascending: false }).limit(30),
@@ -91,7 +78,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const referenceSettings = parseShortsReferenceSettings(automation.config);
   const referenceViews = await referenceViewsFor(referenceSettings.references, user.id, automation.id);
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} hasImages={referenceViews.length > 0} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} hasImages={referenceViews.length > 0} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
 }
 
 function PageHeading() {

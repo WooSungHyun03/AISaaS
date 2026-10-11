@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { readCreditReservationId, releaseRunCredit } from "@/server/billing/run-credits";
 import { SERVICE_TIMEZONE, getZonedParts, zonedTimeToUtc } from "@/lib/utils/date";
 import type { AutomationSchedule } from "@/types/automation";
 import type { Automation } from "@/types/domain";
@@ -96,7 +97,7 @@ export async function reapStaleRuns(now: Date = new Date()): Promise<number> {
     .in("status", ["QUEUED", "RUNNING"])
     .lt("created_at", cutoff(STALE_RUN_MINUTES))
     .is("output", null)
-    .select("id");
+    .select("id,input");
   if (plain.error) throw plain.error;
 
   const deferred = await admin
@@ -105,8 +106,13 @@ export async function reapStaleRuns(now: Date = new Date()): Promise<number> {
     .in("status", ["QUEUED", "RUNNING"])
     .lt("created_at", cutoff(STALE_DEFERRED_RUN_MINUTES))
     .not("output->job", "is", null)
-    .select("id");
+    .select("id,input");
   if (deferred.error) throw deferred.error;
+
+  // A reaped run never reached the runner's own failure path, so give its credit back here.
+  for (const run of [...(plain.data ?? []), ...(deferred.data ?? [])]) {
+    await releaseRunCredit(readCreditReservationId(run.input), run.id, "run_reaped");
+  }
 
   return (plain.data?.length ?? 0) + (deferred.data?.length ?? 0);
 }

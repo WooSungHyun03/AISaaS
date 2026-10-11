@@ -3,6 +3,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
 import { canExecuteAutomation, incrementUsage } from "@/server/billing/entitlements";
+import {
+  InsufficientCreditsError,
+  readCreditReservationId,
+  releaseRunCredit,
+  reserveRunCredit,
+  settleRunCredit,
+} from "@/server/billing/run-credits";
 import { isAppError } from "@/server/shared/errors";
 import { isDeferredOutcome, type AutomationHandlerResult, type AutomationRunContext, type AutomationSchedule } from "@/types/automation";
 import type { Automation, AutomationRunSource, Json } from "@/types/domain";
@@ -81,6 +88,8 @@ interface RunFinishContext {
   runId: string;
   source: AutomationRunSource;
   startedAtMs: number;
+  /** The credit this run reserved, settled on success and released on failure. */
+  creditReservationId?: string | null;
 }
 
 /** Marks a finished run SUCCESS and does the bookkeeping that follows (history row, last_run_at, usage). */
@@ -136,6 +145,7 @@ async function persistSuccess(admin: AdminClient, ctx: RunFinishContext, result:
   if (lastRunAtError) throw lastRunAtError;
 
   await incrementUsage(admin, automation.user_id, { automationRuns: 1, aiGenerations: result.aiGenerationCount ?? 1 });
+  await settleRunCredit(ctx.creditReservationId, run.id);
 
   logger.info("automation_run_success", {
     automationId,
@@ -167,6 +177,9 @@ async function persistFailure(admin: AdminClient, ctx: RunFinishContext, err: un
     // Make that loud instead of silent.
     logger.error("automation_run_terminal_write_failed", { automationId, runId: run.id, dbError: markFailedError });
   }
+
+  // The content was never delivered, so the credit goes back.
+  await releaseRunCredit(ctx.creditReservationId, run.id, "run_failed");
 
   // Stop scheduling this automation until a human looks at it — no
   // infinite retries (Rule 29). This is a stronger guarantee than merely
@@ -255,7 +268,11 @@ async function executeAutomation(
     return recordRefusedRun(admin, automation, source, reason, { advanceSchedule: false });
   }
 
-  const entitlement = await canExecuteAutomation(admin, automation.user_id, template.slug);
+  // Posting a preview that was already made generates nothing, so it never needs (or spends) a credit.
+  const publishesExistingVideo = Boolean(options.shorts?.publish);
+  const entitlement = publishesExistingVideo
+    ? { allowed: true as const, reason: undefined }
+    : await canExecuteAutomation(admin, automation.user_id, template.slug);
   if (!entitlement.allowed) {
     return recordRefusedRun(admin, automation, source, entitlement.reason ?? "이 플랜에서는 지금 이 자동화를 실행할 수 없습니다.", {
       advanceSchedule,
@@ -274,21 +291,38 @@ async function executeAutomation(
     throw new Error("This automation already has a run in progress.");
   }
 
+  // Pay-per-use: the credit is reserved before the run exists, so two
+  // simultaneous requests can never both spend the last one. The reservation
+  // is tied to the run id chosen here and released if the run cannot start.
+  const runId = crypto.randomUUID();
+  let creditReservationId: string | null = null;
+  try {
+    creditReservationId = publishesExistingVideo ? null : await reserveRunCredit(automation.user_id, template.slug, runId);
+  } catch (error) {
+    if (error instanceof InsufficientCreditsError) {
+      return recordRefusedRun(admin, automation, source, error.message, { advanceSchedule });
+    }
+    throw error;
+  }
+
   const { data: run, error: insertError } = await admin
     .from("automation_runs")
     .insert({
+      id: runId,
       automation_id: automationId,
       status: "RUNNING",
       source,
       input: {
         ...(options.calendarItem ? { calendarItem: options.calendarItem } : {}),
         ...(options.shorts ? { shorts: options.shorts } : {}),
+        ...(creditReservationId ? { creditReservationId } : {}),
       } as unknown as Json,
       started_at: new Date().toISOString(),
     })
     .select()
     .single();
   if (insertError || !run) {
+    await releaseRunCredit(creditReservationId, runId, "run_not_started");
     throw insertError ?? new Error("Failed to create automation run");
   }
 
@@ -332,9 +366,9 @@ async function executeAutomation(
       return { runId: run.id, status: "RUNNING", progress: outcome.deferred.progress };
     }
 
-    return await persistSuccess(admin, { automation, templateSlug: template.slug, runId: run.id, source, startedAtMs }, outcome);
+    return await persistSuccess(admin, { automation, templateSlug: template.slug, runId: run.id, source, startedAtMs, creditReservationId }, outcome);
   } catch (err) {
-    return persistFailure(admin, { automation, templateSlug: template.slug, runId: run.id, source, startedAtMs }, err);
+    return persistFailure(admin, { automation, templateSlug: template.slug, runId: run.id, source, startedAtMs, creditReservationId }, err);
   }
 }
 
@@ -452,6 +486,7 @@ export async function advanceDeferredRun(runId: string): Promise<AdvanceDeferred
     runId,
     source: run.source,
     startedAtMs: Date.parse(run.created_at),
+    creditReservationId: readCreditReservationId(run.input),
   };
   try {
     if (!business || !template) throw new Error("Business or template not found for a deferred run.");

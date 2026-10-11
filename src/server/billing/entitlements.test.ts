@@ -21,6 +21,8 @@ function makeSupabase(tableQueues: Record<string, Result[]>) {
       in: vi.fn(() => builder),
       gte: vi.fn(() => builder),
       lt: vi.fn(() => builder),
+      gt: vi.fn(() => builder),
+      order: vi.fn(() => builder),
       maybeSingle: vi.fn(() => Promise.resolve(result)),
       single: vi.fn(() => Promise.resolve(result)),
       then: (resolve: (value: Result) => unknown) => resolve(result),
@@ -31,104 +33,46 @@ function makeSupabase(tableQueues: Record<string, Result[]>) {
 }
 
 const STARTER_SUBSCRIPTION = { plan: "STARTER" as const, status: "ACTIVE" as const };
-const FREE_TEMPLATE_ID = { id: "tmpl-blog" };
-const SHORTS_TEMPLATE_ID = { id: "tmpl-shorts" };
 
 afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("canExecuteAutomation — per-content-type limits (STARTER: blog 8 / shorts 4 / total 30)", () => {
-  it("blocks Shorts with LIMIT_EXCEEDED once its own sub-limit is hit, while Blog still has room under the combined limit", async () => {
-    const supabase = makeSupabase({
-      subscriptions: [{ data: STARTER_SUBSCRIPTION }],
-      usage: [{ data: { automation_runs: 10 } }],
-      automation_templates: [{ data: SHORTS_TEMPLATE_ID }],
-      automations: [{ data: [{ id: "auto-1" }] }],
-      automation_runs: [{ data: null, count: 4 }],
-    });
+/** credit_grants rows are read straight (`select ... order`) and awaited, so each queued result is the whole list. */
+function withGrants(grants: Array<{ remaining: number; expires_at: string }>, extra: Record<string, Result[]> = {}) {
+  return makeSupabase({ credit_grants: [{ data: grants }], ...extra });
+}
 
-    const result = await canExecuteAutomation(supabase as never, "user-1", "shorts");
+const FUTURE = "2999-01-01T00:00:00.000Z";
 
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("숏폼");
-    expect(result.reason).toContain("4건");
-  });
-
-  it("still allows Blog to run when only Shorts' sub-limit is exhausted", async () => {
-    const supabase = makeSupabase({
-      subscriptions: [{ data: STARTER_SUBSCRIPTION }],
-      usage: [{ data: { automation_runs: 10 } }],
-      automation_templates: [{ data: FREE_TEMPLATE_ID }],
-      automations: [{ data: [{ id: "auto-1" }] }],
-      automation_runs: [{ data: null, count: 2 }],
-    });
+describe("canExecuteAutomation — Blog and Shorts are metered by credits, never by plan", () => {
+  it("blocks Blog for an account with no credit at all and points to buying one", async () => {
+    const supabase = withGrants([]);
 
     const result = await canExecuteAutomation(supabase as never, "user-1", "blog-marketing");
 
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("블로그 이용권");
+    expect(result.reason).toContain("구매");
+    // Plan data is irrelevant for metered templates.
+    expect(supabase.from).not.toHaveBeenCalledWith("subscriptions");
+  });
+
+  it("allows Blog when a usable credit exists, regardless of plan", async () => {
+    const result = await canExecuteAutomation(withGrants([{ remaining: 2, expires_at: FUTURE }]) as never, "user-1", "blog-marketing");
     expect(result).toEqual({ allowed: true });
   });
 
-  it("blocks Blog with LIMIT_EXCEEDED once its own sub-limit is hit, while Shorts still has room", async () => {
-    const supabase = makeSupabase({
-      subscriptions: [{ data: STARTER_SUBSCRIPTION }],
-      usage: [{ data: { automation_runs: 10 } }],
-      automation_templates: [{ data: FREE_TEMPLATE_ID }],
-      automations: [{ data: [{ id: "auto-1" }] }],
-      automation_runs: [{ data: null, count: 8 }],
-    });
-
-    const result = await canExecuteAutomation(supabase as never, "user-1", "blog-marketing");
-
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("블로그");
-    expect(result.reason).toContain("8건");
-  });
-
-  it("still allows Shorts to run when only Blog's sub-limit is exhausted", async () => {
-    const supabase = makeSupabase({
-      subscriptions: [{ data: STARTER_SUBSCRIPTION }],
-      usage: [{ data: { automation_runs: 10 } }],
-      automation_templates: [{ data: SHORTS_TEMPLATE_ID }],
-      automations: [{ data: [{ id: "auto-2" }] }],
-      automation_runs: [{ data: null, count: 1 }],
-    });
-
-    const result = await canExecuteAutomation(supabase as never, "user-1", "shorts");
-
-    expect(result).toEqual({ allowed: true });
-  });
-
-  it("blocks on the combined monthly limit even when the content-specific sub-limit still has room, without querying per-type usage", async () => {
-    const supabase = makeSupabase({
-      subscriptions: [{ data: STARTER_SUBSCRIPTION }],
-      usage: [{ data: { automation_runs: 30 } }],
-    });
-
-    const result = await canExecuteAutomation(supabase as never, "user-1", "blog-marketing");
-
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("제작 한도");
-    expect(result.reason).not.toContain("블로그");
-    // The combined-limit check short-circuits before resolving template -> automations -> runs.
-    expect(supabase.from).not.toHaveBeenCalledWith("automation_templates");
+  it("keeps Blog and Shorts credits independent", async () => {
+    const supabase = withGrants([]);
+    const shorts = await canExecuteAutomation(supabase as never, "user-1", "shorts");
+    expect(shorts.allowed).toBe(false);
+    expect(shorts.reason).toContain("숏폼 이용권");
   });
 });
 
-describe("canExecuteAutomation — FREE plan", () => {
-  it("blocks Shorts from the very first run, since FREE isn't even allowed to use non-blog templates", async () => {
-    const supabase = makeSupabase({
-      subscriptions: [{ data: { plan: "FREE", status: "ACTIVE" } }],
-    });
-
-    const result = await canExecuteAutomation(supabase as never, "user-1", "shorts");
-
-    expect(result.allowed).toBe(false);
-  });
-});
-
-describe("canExecuteAutomation — regression (existing behavior unaffected)", () => {
-  it("still allows a run for a template with no content-specific sub-limit (e.g. newsletter) once under the combined limit", async () => {
+describe("canExecuteAutomation — templates without credits keep their plan rules", () => {
+  it("still allows a run for a template with no credit meter (e.g. newsletter) once under the combined limit", async () => {
     const supabase = makeSupabase({
       subscriptions: [{ data: STARTER_SUBSCRIPTION }],
       usage: [{ data: { automation_runs: 5 } }],
@@ -149,6 +93,14 @@ describe("canExecuteAutomation — regression (existing behavior unaffected)", (
 
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain("스타터");
+  });
+
+  it("treats a canceled or past-due paid subscription as FREE immediately", async () => {
+    for (const status of ["CANCELED", "PAST_DUE", "INCOMPLETE"] as const) {
+      const supabase = makeSupabase({ subscriptions: [{ data: { plan: "PRO", status } }] });
+      const result = await canExecuteAutomation(supabase as never, "user-1", "newsletter");
+      expect(result.allowed).toBe(false);
+    }
   });
 });
 
@@ -180,60 +132,8 @@ describe("incrementUsage", () => {
   });
 });
 
-describe("canExecuteAutomation — free plan enforcement lives on the server", () => {
-  it("blocks Shorts for a FREE user and points to an upgrade (a direct API call cannot bypass the UI)", async () => {
-    const supabase = makeSupabase({ subscriptions: [{ data: { plan: "FREE", status: "ACTIVE" } }] });
-
-    const result = await canExecuteAutomation(supabase as never, "user-1", "shorts");
-
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("무료 요금제");
-    expect(result.reason).toContain("올리면");
-  });
-
-  it("treats a canceled or past-due paid subscription as FREE immediately", async () => {
-    for (const status of ["CANCELED", "PAST_DUE", "INCOMPLETE"] as const) {
-      const supabase = makeSupabase({ subscriptions: [{ data: { plan: "PRO", status } }] });
-      const result = await canExecuteAutomation(supabase as never, "user-1", "shorts");
-      expect(result.allowed).toBe(false);
-    }
-  });
-});
-
 describe("canUseAnimatedShorts", () => {
-  const supabase = (plan: "FREE" | "STARTER" | "PRO", used: number) =>
-    makeSupabase({
-      subscriptions: [{ data: { plan, status: "ACTIVE" } }],
-      automation_templates: [{ data: SHORTS_TEMPLATE_ID }],
-      automations: [{ data: [{ id: "auto-1" }] }],
-      automation_runs: [{ data: null, count: used }],
-    });
-
-  it("reports the plan's model quality: standard for Starter, premium for Pro", async () => {
-    expect(await canUseAnimatedShorts(supabase("STARTER", 0) as never, "user-1")).toEqual({ allowed: true, animationQuality: "standard" });
-    expect(await canUseAnimatedShorts(supabase("PRO", 0) as never, "user-1")).toEqual({ allowed: true, animationQuality: "premium" });
-  });
-
-  it("refuses once this month's animated videos reach the allowance, but still names the quality", async () => {
-    const result = await canUseAnimatedShorts(supabase("STARTER", 2) as never, "user-1");
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("한도(2건)");
-    expect(result.animationQuality).toBe("standard");
-    expect((await canUseAnimatedShorts(supabase("STARTER", 1) as never, "user-1")).allowed).toBe(true);
-  });
-
-  it("refuses the Free plan without querying usage", async () => {
-    const client = makeSupabase({ subscriptions: [{ data: { plan: "FREE", status: "ACTIVE" } }] });
-    const result = await canUseAnimatedShorts(client as never, "user-1");
-    expect(result.allowed).toBe(false);
-    expect(client.from).toHaveBeenCalledTimes(1);
-  });
-
-  it("counts only finished runs that were really animated", async () => {
-    const client = supabase("PRO", 0);
-    await canUseAnimatedShorts(client as never, "user-1");
-    const runsBuilder = client.from.mock.results[3].value as { eq: ReturnType<typeof vi.fn> };
-    expect(runsBuilder.eq).toHaveBeenCalledWith("status", "SUCCESS");
-    expect(runsBuilder.eq).toHaveBeenCalledWith("output->>animationMode", "video");
+  it("is part of the Shorts credit: always allowed, at standard quality", async () => {
+    expect(await canUseAnimatedShorts(makeSupabase({}) as never, "user-1")).toEqual({ allowed: true, animationQuality: "standard" });
   });
 });
