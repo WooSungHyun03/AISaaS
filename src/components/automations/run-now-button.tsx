@@ -6,6 +6,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { advanceAutomationRun, triggerRunNow } from "@/app/(app)/automations/actions";
 
+const NO_CREDIT_PATTERN = /이용권이 없거나/;
+
 export function RunNowButton({ automationId, hasInFlightRun = false, progress = null }: { automationId: string; hasInFlightRun?: boolean; progress?: string | null }) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
@@ -38,8 +40,10 @@ export function RunNowButton({ automationId, hasInFlightRun = false, progress = 
     startTransition(async () => {
       try {
         const result = await triggerRunNow(automationId);
-        if (result.error) toast.error(result.error);
-        else if (result.pending) toast.success("만들기를 시작했어요. 몇 분 안에 완성돼요.");
+        if (result.error) {
+          if (NO_CREDIT_PATTERN.test(result.error)) toast.error(result.error, { action: { label: "이용권 구매", onClick: () => router.push("/billing") } });
+          else toast.error(result.error);
+        } else if (result.pending) toast.success("만들기를 시작했어요. 몇 분 안에 완성돼요.");
         else toast.success("콘텐츠를 만들었어요. 아래에서 결과를 확인하세요.");
       } catch {
         toast.error("만들기 상태를 확인하지 못했어요. 잠시 후 다시 시도해주세요.");

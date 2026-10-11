@@ -13,7 +13,7 @@ vi.mock("node:http", () => ({ request: httpRequestMock }));
 vi.mock("node:https", () => ({ request: httpsRequestMock }));
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
 
-const { diagnoseWebsite, fetchPublicHtml, DiagnosisError, extractPageSignals, findLatestDate } = await import("./diagnosis");
+const { diagnoseWebsite, fetchPublicHtml, DiagnosisError, extractPageSignals, findLatestDate, looksClientRendered } = await import("./diagnosis");
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -366,5 +366,14 @@ describe("extractPageSignals / findLatestDate", () => {
     expect(findLatestDate("<p>2031-01-01 행사</p><p>2024.03.05 소식</p>", NOW)).toBe(Date.UTC(2024, 2, 5));
     expect(findLatestDate("<p>2026년 9월 30일 공지</p>", NOW)).toBe(Date.UTC(2026, 8, 30));
     expect(findLatestDate("<p>날짜 없음</p>", NOW)).toBeNull();
+  });
+});
+
+describe("looksClientRendered", () => {
+  it("flags an empty app shell but not a real page", () => {
+    const shell = '<html><body><div id="root"></div><script src="/app.js"></script></body></html>';
+    expect(looksClientRendered(shell, 0)).toBe(true);
+    expect(looksClientRendered(shell, 500)).toBe(false);
+    expect(looksClientRendered("<html><body><p>안녕</p></body></html>", 2)).toBe(false);
   });
 });

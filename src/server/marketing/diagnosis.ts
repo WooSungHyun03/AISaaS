@@ -387,6 +387,18 @@ function extractSnsLinks(html: string): BusinessSnsLinks {
   return links;
 }
 
+/**
+ * True when the fetched HTML looks like an empty client-rendered shell (React/Vue/Next root plus scripts but
+ * almost no text). The score is then understated because we do not run JavaScript, and the user must be told.
+ */
+export function looksClientRendered(html: string, textLength: number): boolean {
+  if (textLength >= 200) return false;
+  const hasAppRoot = /<div\b[^>]*\bid\s*=\s*["'](?:root|app|__next|__nuxt)["']/i.test(html);
+  return hasAppRoot && /<script\b/i.test(html);
+}
+
+const CLIENT_RENDERED_NOTE = "이 홈페이지는 화면을 자바스크립트로 그리는 방식이라 글·연락처 같은 일부 항목을 읽지 못했을 수 있어요. 점수가 실제보다 낮게 나올 수 있어요.";
+
 /** Measures everything the score rubric needs from the page itself. Pure — no network, no AI. */
 export function extractPageSignals(html: string, finalUrl: string, now: Date = new Date()): PageSignals {
   const text = visibleText(html);
@@ -558,13 +570,14 @@ export async function diagnoseWebsite(
   }
 
   const freshness = describeFreshness(signals, now);
+  const renderNote = looksClientRendered(html, signals.textLength) ? ` ${CLIENT_RENDERED_NOTE}` : "";
   const rawSummary = [data.title, data.description].filter(Boolean).join(" — ").slice(0, 1000) || null;
 
   return {
     score: scored.score,
     scoreBreakdown: scored.items,
     missingChannels: scored.missingChannels.map((channel) => CHANNEL_LABEL[channel]),
-    contentStatus: narrative ? `${narrative.contentStatus} ${freshness}` : freshness,
+    contentStatus: `${narrative ? `${narrative.contentStatus} ${freshness}` : freshness}${renderNote}`,
     snsActivity: describeSnsActivity(scored.presentChannels, context.connectedProviders),
     recommendations,
     mainOffering: mainOffering?.value ?? null,
