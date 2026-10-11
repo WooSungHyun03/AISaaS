@@ -135,11 +135,25 @@
 **DB에서 확인함**: `automation_templates`에 `blog-marketing`/`shorts` 둘 다 있고,
 `AUTOMATION_AVAILABILITY`도 둘 다 `AVAILABLE` — 두 경로 모두 실제로 도달 가능.
 
-**한계**: Next.js Server Action은 내부 프로토콜(해시된 액션 id)을 써서 curl로 직접 호출하기
-어렵습니다. 코드 추적상 blog/숏폼 둘 다 정상적으로 이어지는 것처럼 보이지만, **실제 클릭으로
-끝까지 돌려서 상태가 PLANNED → GENERATED로 바뀌고 "만든 결과 보기" 버튼이 나오는지는 사람1
-브라우저 확인이 필요합니다**(아래 2번). 블로그 쪽이 가볍고 빠르니(AI만, 영상 렌더링 없음)
-먼저 추천, 숏폼은 이미지/영상 파이프라인까지 거쳐서(미리보기 모드라도) 더 오래 걸립니다.
+**한계(당시)**: Next.js Server Action은 내부 프로토콜(해시된 액션 id)을 써서 curl로 직접
+호출하기 어려워, 실제 클릭 확인이 필요하다고 적었던 부분입니다.
+
+**업데이트 — 실제로 문제가 있었음, 수정 완료**: 1-9 정리 중 데모 사업체의
+`automation_runs`에서 19분째 `RUNNING`으로 멈춘 블로그 실행 1건을 발견했습니다. 원인은
+`blog.ts`의 outline→섹션→품질검사 파이프라인이 **항상** 1번째 호출에서 `deferred`로
+끝나는 설계(mock 여부와 무관)인데, 이어서 진행시키는 두 경로(cron 틱, 또는
+`/automations/{id}` 결과 페이지에 있는 `<RunProgress>` 폴링) 중 어느 쪽에도 캘린더
+트리거가 연결돼 있지 않았던 것 — `CalendarItemDialog.handleGenerate()`가 성공 토스트만
+띄우고 다이얼로그를 닫을 뿐, 결과 페이지로 보내지 않았습니다. 상세 원인은
+`docs/person1/NOTE_FOR_DEV1_stuck_blog_run.md` 참고.
+
+이건 1-9 항목 5(생성→완료 상태 반영)에 정확히 해당해서 **캘린더 쪽(사람1 영역)에서
+고쳤습니다**: `triggerCalendarItemNow`(calendar/actions.ts)가 `automationId`를 결과에
+포함하고, `CalendarItemDialog`가 `pending`이면 "진행 상황 보기" 액션 토스트로
+`/automations/{automationId}`에 보내 기존 `<RunProgress>`가 즉시 이어서 진행하게 함
+(`5273a21`). `triggerRunNow`/`runner.ts`/`blog.ts`/cron 라우트는 전부 미수정. "로컬에
+cron 체인이 없어서 아무도 결과 페이지를 안 열면 영원히 멈추는" 부분만 Dev1 전달 사항으로
+남김(cron/자동화 코드 영역).
 
 ---
 
@@ -209,10 +223,13 @@
 | 3-b | 하루 4개+ 항목이 데스크톱에서 일부 안 보임 | **재현됨**(curl로 직접 확인: 5개 심었을 때 그리드는 3개+텍스트만, 리스트 뷰는 5개 전부) | **완료** — `CalendarDayItemsDialog` 추가: "+N개 더 있어요"를 그날 전체 항목을 보여주는 다이얼로그로 전환(`5de137b`) | 이 컴포넌트는 순수 UI 트리거라 서버 로직 테스트 대상이 없음(이 저장소 관례상 `.tsx` 렌더 테스트 없음) — typecheck/lint로 커버 |
 | 4-a | 로딩/오류 화면 | 코드상 이상 없음(다른 라우트와 같은 공용 컴포넌트) | **수정 안 함** — 사람1 지시로 이번엔 보류. **코드상 정상, 브라우저 미확인** | — |
 | 4-b | 반응형 분기(`xl:` 기준이 태블릿엔 너무 높음) | 의심됨(1280px 기준이 아이패드 가로 1024px보다 큼) | **수정 안 함** — 사람1 지시로 이번엔 보류. **코드상 정상(의도적 설계일 수 있음), 브라우저 미확인** | — |
-| 5 | 생성 → 완료 상태 반영 | 코드 추적상 정상(`triggerCalendarItemNow` → `resolveAutomationId` → `triggerRunNow`(미수정) → `runner.ts`의 `linkCalendarItem`), **로컬 DB에서 실제로 확인됨**: 캘린더 항목 다이얼로그에서 "이 콘텐츠 만들기"로 생성한 1건은 `status: GENERATED` + `automation_id`/`content_history_id`까지 정상 연결(`/blog`에서 직접 생성한 별개 실행은 캘린더와 무관하게 분리된 흐름이라 연결 안 되는 게 정상 동작임을 확인) | **수정 안 함** — 버그 없음 확인됨 | DB 조회로 확인(로그 참고), 별도 자동 테스트는 추가 안 함(버그가 없어서) |
+| 5 | 생성 → 완료 상태 반영 | **추가로 재현됨**: 즉시 끝나는 실행은 DB로 정상 확인됐지만, 블로그 생성은 `blog.ts`의 outline→섹션→품질검사 파이프라인 설계상 **항상 1번째 호출에서 deferred로 끝남**(mock 여부와 무관) — 이어서 진행시키는 cron 틱/`<RunProgress>` 중 어느 쪽에도 캘린더 트리거 경로가 연결돼 있지 않아, 실제로 19분째 `RUNNING`으로 멈춘 실행 1건을 발견함(`docs/person1/NOTE_FOR_DEV1_stuck_blog_run.md`에 상세 기록) | **완료** — `triggerCalendarItemNow`(calendar/actions.ts)가 `automationId`를 결과에 포함하도록 수정, `CalendarItemDialog`가 `pending`일 때 "진행 상황 보기" 토스트 액션으로 `/automations/{automationId}`에 보내 기존 `<RunProgress>`가 즉시 이어서 진행하게 함(`5273a21`). `triggerRunNow`/`runner.ts`/`blog.ts`/cron 라우트는 전부 미수정. 로컬에 cron 체인이 없어서 "아무도 결과 페이지를 안 열면 로컬에서 영원히 멈춤" 자체는 Dev1 전달 사항으로 남김 | `actions.test.ts`에 `automationId`가 pending/완료 결과 양쪽에 포함되는지 테스트 2개 추가, 기존 포함 총 18개 통과. 토스트 분기 자체는 `.tsx` 렌더 테스트 관례가 없어 typecheck/lint로 커버 |
 
 ## 변경 요약 (PR 본문용)
 - `fix(calendar): make "+N개 더 있어요" open a dialog with all of that day's items` (`5de137b`)
 - `feat(calendar): add skip/unskip/delete for calendar items (no migration)` (`b4ba715`)
 - `test(calendar): make the KST midnight boundary testable with an injectable now` (`76d9fff`)
-- 4-a, 4-b, 5번은 이번 범위에서 코드 변경 없음 — 표에 이유 기록함.
+- `docs(person1): note for Dev1 — stuck blog automation run investigation` (`3aae210`)
+- `fix(calendar): link deferred generation to its result page (ticket 1-9)` (`5273a21`)
+- 4-a, 4-b번은 이번 범위에서 코드 변경 없음 — 표에 이유 기록함. 5번은 캘린더 쪽 추가 버그를
+  발견해서 수정함(위 참고), 로컬 cron 안전망 부재는 Dev1 전달 사항(`NOTE_FOR_DEV1_stuck_blog_run.md`).
