@@ -6,6 +6,7 @@ import { getMarketingCalendarPageData } from "@/server/marketing/calendar";
 import { CalendarItemDialog } from "@/components/marketing/calendar-item-dialog";
 import { CalendarDayItemsDialog } from "@/components/marketing/calendar-day-items-dialog";
 import { CalendarPlanGenerator } from "@/components/marketing/calendar-plan-generator";
+import { currentKstDate } from "./kst-date";
 import { StatCard, StatGroup } from "@/components/dashboard/stat-card";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -41,17 +42,6 @@ function calendarHref(month: string, businessId?: string) {
   const params = new URLSearchParams({ month });
   if (businessId) params.set("business", businessId);
   return `/calendar?${params.toString()}`;
-}
-
-function currentKstDate(): string {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
-  return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
 /** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
