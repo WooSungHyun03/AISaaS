@@ -85,7 +85,7 @@ export default async function CalendarPage({
         <EmptyState
           mascot="guide"
           title="계획을 세울 가게가 아직 없어요"
-          description="가게 정보를 등록하고 마케팅 진단을 받으면 2~4주치 콘텐츠 계획을 만들어드려요."
+          description="가게 정보를 등록하면 2~4주치 콘텐츠 계획을 만들어드려요."
           action={<Button asChild><Link href="/onboarding">가게 정보 입력하기</Link></Button>}
         />
       </div>
@@ -128,18 +128,18 @@ export default async function CalendarPage({
           <div className="max-w-2xl">
             <h2 id="plan-generator-title" className="text-xl font-extrabold tracking-[-0.03em]">{selectedBusiness.name}의 다음 콘텐츠 계획 만들기</h2>
             <p className="mt-2 text-[15px] leading-7 text-muted-foreground">
-              사업 정보와 최근 마케팅 진단을 바탕으로 블로그, 릴스, 쇼츠 주제와 행동 유도 문구(CTA)를 한 번에 짜드려요.
+              사업 정보를 바탕으로 블로그, 유튜브 쇼츠 주제와 행동 유도 문구(CTA)를 한 번에 짜드려요.
             </p>
             {!data.hasDiagnosis ? (
-              <p className="mt-3 flex items-start gap-2 text-sm font-semibold text-warning" role="status">
+              <p className="mt-3 flex items-start gap-2 text-sm font-semibold text-muted-foreground" role="status">
                 <CircleAlert className="mt-1 size-4 shrink-0" aria-hidden="true" />
-                <span>먼저 마케팅 진단이 필요해요. <Link className="underline underline-offset-4" href={`/marketing/diagnosis?business=${selectedBusiness.id}`}>진단하러 가기</Link></span>
+                <span>지금도 계획을 만들 수 있어요. <Link className="underline underline-offset-4" href={`/diagnosis?business=${selectedBusiness.id}`}>채널 진단</Link>을 받으면 더 정확한 주제를 짜드려요.</span>
               </p>
             ) : (
-              <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-success"><CheckCircle2 className="size-4" aria-hidden="true" /> 진단 결과를 바탕으로 계획을 만들 수 있어요.</p>
+              <p className="mt-3 flex items-center gap-2 text-sm font-semibold text-success"><CheckCircle2 className="size-4" aria-hidden="true" /> 채널 진단 결과를 바탕으로 계획을 만들 수 있어요.</p>
             )}
           </div>
-          <CalendarPlanGenerator businessId={selectedBusiness.id} disabled={!data.hasDiagnosis} />
+          <CalendarPlanGenerator businessId={selectedBusiness.id} />
         </div>
       </section>
 
@@ -173,7 +173,7 @@ export default async function CalendarPage({
             className="m-5"
             mascot="present"
             title={`${monthTitle}에는 계획이 없어요`}
-            description={data.hasDiagnosis ? "위에서 기간을 고르고 ‘계획 만들기’를 누르면 날짜별 콘텐츠 계획이 만들어져요." : "마케팅 진단을 먼저 받으면 계획을 만들 수 있어요."}
+            description="위에서 기간을 고르고 ‘계획 만들기’를 누르면 날짜별 콘텐츠 계획이 만들어져요."
           />
         ) : (
           <>

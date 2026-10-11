@@ -35,9 +35,14 @@ export async function generateMarketingCalendar(
     const result = await generateCalendarPlan(parsed.data.businessId, parsed.data.weeks);
     revalidatePath("/calendar");
     revalidatePath("/marketing/calendar");
+    const notes = [
+      result.replaced > 0 ? `아직 쓰지 않은 이전 계획 ${result.replaced}건은 새 계획으로 바꿨어요.` : null,
+      result.excludedOutOfRange > 0 ? `계획 기간을 벗어난 항목 ${result.excludedOutOfRange}건은 빼고 저장했어요.` : null,
+      result.mergedDuplicates > 0 ? `같은 날짜·채널로 겹친 항목 ${result.mergedDuplicates}건은 하나로 합쳤어요.` : null,
+    ].filter((note): note is string => note !== null);
     return {
       status: "success",
-      message: `${parsed.data.weeks}주 마케팅 계획 ${result.items.length}건을 저장했습니다.${result.replaced > 0 ? ` 아직 쓰지 않은 이전 계획 ${result.replaced}건은 새 계획으로 바꿨어요.` : ""}`,
+      message: `${parsed.data.weeks}주 마케팅 계획 ${result.items.length}건을 저장했습니다.${notes.length ? ` ${notes.join(" ")}` : ""}`,
       count: result.items.length,
       completedAt: Date.now(),
     };

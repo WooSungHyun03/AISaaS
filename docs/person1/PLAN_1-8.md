@@ -191,8 +191,17 @@
   "채널 진단 findings/점수가 프롬프트에 들어가고 raw metrics는 안 들어감" 테스트로 교체,
   `getMarketingCalendarPageData`의 `hasDiagnosis` 테스트 2개도 channel summary 기준으로 갱신.
   전체 테스트 1013개 + typecheck + lint 통과.
-- [ ] **4단계** — `/calendar/page.tsx` 안내 문구/버튼 활성화 변경, `marketing/calendar/actions.ts`
-  성공 메시지에 제외/병합 개수 반영
+- [x] **4단계** — `/calendar/page.tsx`: 계획 설명 문구에서 "릴스" 삭제(블로그·유튜브 쇼츠만),
+  진단 없을 때의 경고 톤 안내("먼저 진단이 필요해요" + 버튼 비활성화)를 권장 톤("지금도 만들
+  수 있어요 + 채널 진단을 받으면 더 정확해져요", 링크는 `/diagnosis`로 — 1-5에서 바뀐 경로)로
+  변경, `CalendarPlanGenerator`에서 `disabled={!data.hasDiagnosis}` 제거(컴포넌트 자체는
+  안 건드림, 기본값 `false`라 항상 활성화됨), 월별 빈 캘린더 안내 문구와 사업체 없음 안내
+  문구에서도 진단 전제 조건 삭제. `marketing/calendar/actions.ts`의 `generateMarketingCalendar`
+  성공 메시지에 `excludedOutOfRange`/`mergedDuplicates`가 0보다 크면 각각 "계획 기간을 벗어난
+  항목 N건은 빼고 저장했어요"/"같은 날짜·채널로 겹친 항목 M건은 하나로 합쳤어요" 안내 추가(기존
+  "이전 계획을 바꿨어요" 안내와 같은 조건부 패턴). 이 Server Action은 테스트 파일이 없었고
+  새로 만들지 않음(해당 파일에 기존 테스트 관례 없음). 전체 테스트 1013개 + typecheck + lint
+  통과.
 - [ ] **5단계** — 로컬에서 기존 릴스 `calendar_items` 행을 하나 만들어 `/calendar` 화면에서
   깨지지 않고 보이는지 직접 확인 + lint/typecheck/test/build + git status
 
