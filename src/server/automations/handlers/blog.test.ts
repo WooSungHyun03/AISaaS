@@ -5,41 +5,12 @@ import type { AutomationHandlerResult, AutomationRunContext } from "@/types/auto
 const { generateStructuredMock } = vi.hoisted(() => ({ generateStructuredMock: vi.fn() }));
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
 
-const { publishMock, isConfiguredMock, WordPressConnectorMock } = vi.hoisted(() => {
-  const publishMock = vi.fn();
-  const isConfiguredMock = vi.fn();
-  // A regular function (not an arrow function) so `new WordPressConnector()` works.
-  const WordPressConnectorMock = vi.fn().mockImplementation(function () {
-    return { publish: publishMock, isConfigured: isConfiguredMock };
-  });
-  return { publishMock, isConfiguredMock, WordPressConnectorMock };
-});
-vi.mock("@/server/connectors/wordpress", () => ({ WordPressConnector: WordPressConnectorMock }));
-vi.mock("@/server/connectors/wordpress/credentials", () => ({
-  decryptWordPressPassword: vi.fn().mockReturnValue("decrypted-app-password"),
-}));
-const { getConnectionMock, loadWordPressConnectorMock, updateConnectionStatusMock } = vi.hoisted(() => ({
-  getConnectionMock: vi.fn(),
-  loadWordPressConnectorMock: vi.fn(),
-  updateConnectionStatusMock: vi.fn(),
-}));
-vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn(() => ({ kind: "admin" })) }));
-vi.mock("@/server/connectors/integrations", () => ({ getConnection: getConnectionMock, updateConnectionStatus: updateConnectionStatusMock }));
-vi.mock("@/server/connectors/wordpress/connect", () => ({ loadWordPressConnector: loadWordPressConnectorMock }));
-
 const { blogAutomationHandler } = await import("./blog");
 import { mockBlogOutline, mockBlogSection } from "@/server/ai/providers/mock-blog";
 
 afterEach(() => {
   vi.resetAllMocks();
-  getConnectionMock.mockResolvedValue(null);
-  loadWordPressConnectorMock.mockResolvedValue(null);
-  WordPressConnectorMock.mockImplementation(function () {
-    return { publish: publishMock, isConfigured: isConfiguredMock };
-  });
 });
-
-getConnectionMock.mockResolvedValue(null);
 
 const business: Business = {
   id: "biz-1",
@@ -132,7 +103,6 @@ describe("blogAutomationHandler", () => {
       stats: { chars: expect.any(Number), sections: 9, photos: expect.any(Number) },
       bodyHtml: expect.stringContaining("<h2"),
       callToAction: expect.any(String),
-      published: false,
     });
     const stats = (result.output as { stats: { chars: number; photos: number } }).stats;
     expect(stats.chars).toBeGreaterThanOrEqual(1_500);
@@ -314,79 +284,13 @@ describe("blogAutomationHandler", () => {
     }
   });
 
-  describe("delivery", () => {
-    const wordpress = { ...config, deliveryMode: "wordpress_publish" as const, wordpress: { siteUrl: "https://blog.example.com", username: "admin", encryptedAppPassword: "enc" } };
-
-    it("publishes to WordPress with the generated HTML and excerpt once the post is finished", async () => {
-      useMockWriter();
-      publishMock.mockResolvedValueOnce({ externalUrl: "https://blog.example.com/post-1", externalId: "1" });
-
-      const result = await runToEnd(baseContext({ config: wordpress as never }));
-
-      expect(publishMock).toHaveBeenCalledTimes(1);
-      const [post, status] = publishMock.mock.calls[0] as [{ title: string; content: string; excerpt: string }, string];
-      expect(status).toBe("publish");
-      expect(post.title).toBe(result.title);
-      expect(post.content).toContain("<h2");
-      expect(post.content).not.toMatch(/<script|<iframe/i);
-      expect(post.excerpt.length).toBeGreaterThan(10);
-      expect(result.externalUrl).toBe("https://blog.example.com/post-1");
-      expect(result.output).toMatchObject({ published: true, wordpressStatus: "publish" });
-    });
-
-    it("prefers the business-level Settings connection when one exists", async () => {
-      useMockWriter();
-      getConnectionMock.mockResolvedValue({ id: "shared", status: "CONNECTED" });
-      loadWordPressConnectorMock.mockResolvedValueOnce({ publish: publishMock });
-      publishMock.mockResolvedValueOnce({ externalUrl: "https://shared.example.com/post-1" });
-
-      const result = await runToEnd(baseContext({ config: { ...config, deliveryMode: "wordpress_publish" } as never }));
-
-      expect(loadWordPressConnectorMock).toHaveBeenCalled();
-      expect(WordPressConnectorMock).not.toHaveBeenCalled();
-      expect(result.externalUrl).toBe("https://shared.example.com/post-1");
-    });
-
-    it("marks a shared connection EXPIRED when WordPress rejects its credentials", async () => {
-      const { ConnectorError } = await import("@/server/shared/errors");
-      useMockWriter();
-      getConnectionMock.mockResolvedValue({ id: "shared", status: "CONNECTED" });
-      loadWordPressConnectorMock.mockResolvedValueOnce({ publish: publishMock });
-      publishMock.mockRejectedValueOnce(new ConnectorError("wordpress", "AUTH_FAILED", "authentication rejected"));
-
-      await expect(runToEnd(baseContext({ config: { ...config, deliveryMode: "wordpress_publish" } as never }))).rejects.toThrow("authentication rejected");
-      expect(updateConnectionStatusMock).toHaveBeenCalledWith(expect.anything(), "shared", "EXPIRED");
-    });
-
-    it("falls back to the legacy env-configured WordPress connector when there is no setup-wizard config", async () => {
-      useMockWriter();
-      isConfiguredMock.mockReturnValue(true);
-      publishMock.mockResolvedValueOnce({ externalUrl: "https://legacy.example.com/post-1", externalId: "1" });
-
-      const result = await runToEnd(baseContext({ config: {} as never }));
-
-      expect(publishMock).toHaveBeenCalledTimes(1);
-      expect(result.externalUrl).toBe("https://legacy.example.com/post-1");
-      expect(result.output).toMatchObject({ published: true, wordpressStatus: "publish" });
-    });
-
-    it("skips WordPress entirely when there is no config and the legacy connector isn't configured", async () => {
-      useMockWriter();
-      isConfiguredMock.mockReturnValue(false);
-
-      const result = await runToEnd(baseContext({ config: {} as never }));
-
-      expect(publishMock).not.toHaveBeenCalled();
-      expect(result.output).toMatchObject({ published: false, wordpressStatus: null, externalUrl: null });
-    });
-
-    it("never calls WordPress for an explicit app_draft config — generation-only going forward", async () => {
-      useMockWriter();
-      const result = await runToEnd(baseContext());
-      expect(publishMock).not.toHaveBeenCalled();
-      expect(isConfiguredMock).not.toHaveBeenCalled();
-      expect(result.output).toMatchObject({ published: false, wordpressStatus: null, externalUrl: null });
-    });
+  it("only ever writes the post for the owner to review: no delivery, whatever an old setup said", async () => {
+    useMockWriter();
+    const legacy = { ...config, deliveryMode: "wordpress_publish", wordpress: { siteUrl: "https://blog.example.com", username: "admin", encryptedAppPassword: "enc" } };
+    const result = await runToEnd(baseContext({ config: legacy as never }));
+    expect(result.externalUrl).toBeUndefined();
+    expect(result.output).not.toHaveProperty("wordpressStatus");
+    expect(result.output).not.toHaveProperty("externalUrl");
   });
 
   it("throws instead of returning a partial result when a stage fails", async () => {

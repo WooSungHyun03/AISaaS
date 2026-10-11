@@ -150,12 +150,8 @@ export default async function BlogPage({
           objective: blogConfig?.objective ?? "",
           keywords: blogConfig?.keywords ?? selectedBusiness.keywords ?? [],
           tone: blogConfig?.tone ?? selectedBusiness.brand_tone ?? "친근하고 전문적인",
-          deliveryMode: blogConfig?.deliveryMode ?? ("app_draft" as const),
           platform: blogConfig?.platform,
           notes: blogConfig?.notes,
-          wordpressSiteUrl: blogConfig?.wordpress?.siteUrl,
-          wordpressUsername: blogConfig?.wordpress?.username,
-          hasStoredWordPress: Boolean(blogConfig?.wordpress),
           legacy: !blogConfig,
         };
         const hasInFlightRun = inFlightAutomationIds.has(automation.id);
@@ -203,7 +199,7 @@ export default async function BlogPage({
                         <p className="font-bold leading-6">{item.title ?? "제목 없음"}</p>
                         <p className="mt-0.5 text-[13px] text-muted-foreground">{item.topic ? `주제 ${item.topic} · ` : ""}{fmt(item.created_at)} · <span className="italic">이전 버전에서 만든 글이라 자세히 보기를 열 수 없어요</span></p>
                         {item.content ? <p className="mt-2 whitespace-pre-line text-[15px] leading-7 text-muted-foreground">{item.content}</p> : null}
-                        {item.external_url ? <a href={item.external_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-primary underline underline-offset-2">WordPress 글 보기</a> : null}
+                        {item.external_url ? <a href={item.external_url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-sm font-semibold text-primary underline underline-offset-2">이전에 게시된 글 보기</a> : null}
                       </div>
                     )}
                   </li>

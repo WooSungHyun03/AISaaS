@@ -87,7 +87,7 @@ export async function completeInstagramOAuth(
 /**
  * Builds an `InstagramConnector` from a business's stored
  * `integration_connections` row, decrypting the access token through Vault
- * — mirrors `wordpress/connect.ts#loadWordPressConnector()` exactly. Returns
+ * Returns
  * null for any business without a usable CONNECTED Instagram connection;
  * automation handlers decide whether that's a hard failure or a fallback
  * to the legacy env-configured connector.

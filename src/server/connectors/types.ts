@@ -1,7 +1,7 @@
 export interface PublishContentParams {
   title?: string;
   content: string;
-  /** Short summary, when the platform supports one (e.g. WordPress post excerpt). */
+  /** Short summary, when the platform supports one (e.g. a caption or excerpt). */
   excerpt?: string;
   /** Publicly fetchable image URL, when the platform requires one (e.g. Instagram's media container). */
   imageUrl?: string;

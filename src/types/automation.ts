@@ -38,10 +38,8 @@ export interface AutomationRunContext {
   recentTopics: string[];
   /**
    * The `automation_runs.id` row the runner already inserted before calling
-   * `handler.run()`. Handlers that call an external API once per recipient
-   * (e.g. newsletter sends) derive a per-recipient idempotency key from
-   * this so a request retried at the HTTP layer for the same run can't
-   * double-send — see src/server/automations/handlers/newsletter.ts.
+   * `handler.run()`. Handlers that call an external API once per target derive
+   * an idempotency key from this so a retried request cannot act twice.
    */
   runId: string;
   /**
@@ -131,6 +129,5 @@ export const AUTOMATION_AVAILABILITY: Record<AutomationTemplateSlug, AutomationA
   "blog-marketing": "AVAILABLE",
   shorts: "AVAILABLE",
   "instagram-marketing": "COMING_SOON",
-  newsletter: "COMING_SOON",
   "customer-support": "COMING_SOON",
 };

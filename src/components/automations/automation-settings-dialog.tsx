@@ -12,14 +12,11 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { ScheduleFields, ScheduleHiddenInputs, scheduleToValue } from "@/components/automations/schedule-fields";
 import { FormMessage } from "@/components/ui/form-message";
 import { Textarea } from "@/components/ui/textarea";
-import { BLOG_DELIVERY_LABEL, BLOG_NOTES_MAX_LENGTH, blogPlatforms, type BlogAutomationConfig } from "@/types/blog-automation";
+import { BLOG_NOTES_MAX_LENGTH, blogPlatforms, type BlogAutomationConfig } from "@/types/blog-automation";
 import { BLOG_PLATFORM_LABEL } from "@/server/blog/post";
 import type { AutomationSchedule } from "@/types/automation";
 
-type BlogSettings = Pick<BlogAutomationConfig, "objective" | "keywords" | "tone" | "deliveryMode" | "platform" | "notes"> & {
-  wordpressSiteUrl?: string;
-  wordpressUsername?: string;
-  hasStoredWordPress: boolean;
+type BlogSettings = Pick<BlogAutomationConfig, "objective" | "keywords" | "tone" | "platform" | "notes"> & {
   legacy: boolean;
 };
 
@@ -39,9 +36,6 @@ export function AutomationSettingsDialog({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
   const [scheduleValue, setScheduleValue] = useState(() => scheduleToValue(schedule));
-  const [deliveryMode, setDeliveryMode] = useState<BlogAutomationConfig["deliveryMode"]>(blogSettings?.deliveryMode ?? "app_draft");
-  const [siteUrl, setSiteUrl] = useState(blogSettings?.wordpressSiteUrl ?? "");
-  const [username, setUsername] = useState(blogSettings?.wordpressUsername ?? "");
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,7 +81,7 @@ export function AutomationSettingsDialog({
 
           {blogSettings && <section className="space-y-4 border-t pt-5">
             <h3 className="text-[15px] font-bold">블로그 글 설정</h3>
-            {blogSettings.legacy && <p className="rounded-lg bg-muted p-3 text-sm leading-6 text-muted-foreground">이 설정은 이전 형식이에요. 저장하면 아래 내용이 적용돼요. WordPress로 계속 보내려면 연결 정보를 입력해주세요.</p>}
+            {blogSettings.legacy && <p className="rounded-lg bg-muted p-3 text-sm leading-6 text-muted-foreground">이 설정은 이전 형식이에요. 저장하면 아래 내용이 적용돼요.</p>}
             <div className="space-y-2"><Label htmlFor="edit-objective">글의 목적</Label><Textarea id="edit-objective" name="objective" defaultValue={blogSettings.objective} maxLength={300} rows={3} required /></div>
             <div className="space-y-2"><Label htmlFor="edit-keywords">키워드 (쉼표 또는 줄바꿈으로 구분)</Label><Textarea id="edit-keywords" name="keywords" defaultValue={blogSettings.keywords.join(", ")} rows={2} required /></div>
             <div className="space-y-2"><Label htmlFor="edit-tone">글의 말투</Label><Input id="edit-tone" name="tone" defaultValue={blogSettings.tone} maxLength={100} required /></div>
@@ -97,20 +91,6 @@ export function AutomationSettingsDialog({
               </NativeSelect>
             </div>
             <div className="space-y-2"><Label htmlFor="edit-notes">꼭 넣고 싶은 내용 (선택)</Label><Textarea id="edit-notes" name="notes" defaultValue={blogSettings.notes ?? ""} maxLength={BLOG_NOTES_MAX_LENGTH} rows={3} placeholder="메뉴, 가격, 영업시간, 이벤트처럼 글에 그대로 써도 되는 사실만 적어주세요." /></div>
-            <div className="space-y-2"><Label htmlFor="edit-delivery">글 저장 위치</Label>
-              <NativeSelect id="edit-delivery" name="deliveryMode" value={deliveryMode} onChange={(event) => setDeliveryMode(event.target.value as BlogAutomationConfig["deliveryMode"])}>
-                {(Object.keys(BLOG_DELIVERY_LABEL) as BlogAutomationConfig["deliveryMode"][]).map((mode) => <option key={mode} value={mode}>{BLOG_DELIVERY_LABEL[mode]}</option>)}
-              </NativeSelect>
-              {deliveryMode === "wordpress_publish" && <p className="text-xs text-muted-foreground">만들어진 글이 바로 공개돼요. 신중히 골라주세요.</p>}
-            </div>
-            {deliveryMode !== "app_draft" && <div className="space-y-4 rounded-xl bg-muted p-4">
-              <p className="text-sm font-medium">WordPress 연결</p>
-              <div className="space-y-2"><Label htmlFor="edit-wp-site">사이트 주소</Label><Input id="edit-wp-site" name="wordpressSiteUrl" type="url" autoComplete="url" spellCheck={false} value={siteUrl} onChange={(event) => setSiteUrl(event.target.value)} placeholder="https://example.com" required /></div>
-              <div className="space-y-2"><Label htmlFor="edit-wp-username">사용자명</Label><Input id="edit-wp-username" name="wordpressUsername" autoComplete="username" spellCheck={false} value={username} onChange={(event) => setUsername(event.target.value)} required /></div>
-              <div className="space-y-2"><Label htmlFor="edit-wp-password">새 Application Password</Label><Input id="edit-wp-password" name="wordpressAppPassword" type="password" autoComplete="new-password" placeholder={blogSettings.hasStoredWordPress ? "그대로 쓰려면 비워두세요" : "Application Password 입력"} />
-                <p className="text-xs text-muted-foreground">{blogSettings.hasStoredWordPress ? "사이트 주소와 사용자명이 같으면 비워둬도 됩니다. 연결 변경 시 새 비밀번호를 입력하세요." : "WordPress 연결을 처음 설정할 때 필요합니다."}</p>
-              </div>
-            </div>}
           </section>}
 
           {error && <FormMessage>{error}</FormMessage>}

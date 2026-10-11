@@ -90,11 +90,6 @@ bash scripts/dev-db.sh
 
    이 설정 없이는 cron 작업이 계속 401로 실패합니다(이전과 동일하게 안전하게 실패 — 자동으로 보안이 느슨해지지 않습니다). 실제 트리거 보호는 여전히 `CRON_SECRET`(2단계)이 담당합니다: 이 헤더는 Supabase 게이트웨이가 Edge Function 호출 자체를 허용하도록 하는 것일 뿐, `POST /api/cron/run-automations`는 별도로 `CRON_SECRET`을 확인합니다.
 
-### Resend (뉴스레터 자동화)
-
-1. Resend에서 발신 도메인을 추가하고(루트 도메인에 이미 다른 이메일 라우팅이 있다면 `mail.<domain>` 같은 서브도메인 사용), DKIM/SPF/DMARC 레코드를 DNS에 등록합니다.
-2. Sending 권한만 있는 API 키를 발급해 `RESEND_API_KEY`/`RESEND_FROM_EMAIL`에 등록합니다.
-
 ### Instagram (게시물 자동 발행)
 
 1. 마이그레이션 적용만으로 충분합니다 — `0027_instagram_marketing_assets_bucket.sql`이 공개 Storage 버킷(`marketing-assets`)을 자동으로 생성하므로 별도 수동 설정이 없습니다.

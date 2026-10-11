@@ -8,8 +8,6 @@ import { canCreateAutomation, canExecuteAutomation } from "@/server/billing/enti
 import { advanceDeferredRun, runAutomationNow } from "@/server/automations/runner";
 import { computeNextRunAt } from "@/server/automations/scheduler";
 import { parseScheduleFromForm } from "@/server/automations/schedule-input";
-import { WordPressConnector, normalizeWordPressSiteUrl } from "@/server/connectors/wordpress";
-import { encryptWordPressPassword } from "@/server/connectors/wordpress/credentials";
 import { AUTOMATION_AVAILABILITY, type AutomationSchedule } from "@/types/automation";
 import { blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
 import type { Json } from "@/types/domain";
@@ -71,16 +69,7 @@ export async function createAutomation(
     });
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "블로그 설정을 확인해주세요." };
 
-    // Blog automations are generation-only going forward (ticket: "Blog 자동
-    // 발행 제거") — new automations may only save drafts in-app. WordPress
-    // delivery still exists for automations created before this change
-    // (see updateAutomation below and the handler's publish path in
-    // src/server/automations/handlers/blog.ts), just not for new ones, and
-    // hiding the option in blog-setup-wizard.tsx isn't enough on its own
-    // since a request can bypass the UI entirely.
-    if (parsed.data.deliveryMode !== "app_draft") {
-      return { error: "새로 만드는 블로그 자동화는 앱에 초안 저장만 선택할 수 있어요." };
-    }
+    // Blog automations only write posts for the owner to review and post by hand.
     const blogConfig: BlogAutomationConfig = parsed.data;
     config = blogConfig as unknown as Json;
   }
@@ -213,28 +202,6 @@ export async function updateAutomation(automationId: string, formData: FormData)
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "블로그 설정을 확인해주세요." };
     const blogConfig: BlogAutomationConfig = parsed.data;
 
-    if (parsed.data.deliveryMode !== "app_draft") {
-      const siteUrlInput = String(formData.get("wordpressSiteUrl") ?? "");
-      const username = String(formData.get("wordpressUsername") ?? "").trim();
-      const appPassword = String(formData.get("wordpressAppPassword") ?? "").trim();
-      if (!siteUrlInput || !username) return { error: "WordPress 사이트 주소와 사용자명을 입력해주세요." };
-
-      try {
-        const siteUrl = normalizeWordPressSiteUrl(siteUrlInput);
-        const existing = automation.config && typeof automation.config === "object" && !Array.isArray(automation.config)
-          ? automation.config as unknown as Partial<BlogAutomationConfig> : {};
-        let encryptedAppPassword = existing.wordpress?.encryptedAppPassword;
-        if (appPassword) {
-          await new WordPressConnector({ siteUrl, username, appPassword }).testConnection();
-          encryptedAppPassword = encryptWordPressPassword(appPassword);
-        } else if (!encryptedAppPassword || existing.wordpress?.siteUrl !== siteUrl || existing.wordpress?.username !== username) {
-          return { error: "WordPress 연결을 변경하려면 새 Application Password를 입력해주세요." };
-        }
-        blogConfig.wordpress = { siteUrl, username, encryptedAppPassword };
-      } catch (error) {
-        return { error: error instanceof Error ? error.message : "WordPress 연결을 확인하지 못했습니다." };
-      }
-    }
     config = blogConfig as unknown as Json;
   }
 

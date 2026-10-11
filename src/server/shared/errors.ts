@@ -24,7 +24,7 @@ export function isAppError(error: unknown): error is AppError {
   return error instanceof AppError;
 }
 
-/** Error codes shared by every platform connector (WordPress, Instagram, Email, YouTube, ...). */
+/** Error codes shared by every platform connector (Instagram, YouTube, ...). */
 export type ConnectorErrorCode =
   | "NOT_CONFIGURED"
   | "INVALID_TARGET"
@@ -43,7 +43,7 @@ const RETRYABLE_CONNECTOR_CODES: ReadonlySet<ConnectorErrorCode> = new Set([
 
 /**
  * Thrown by any `PlatformConnector` implementation. `connector` is the
- * connector's `name` (e.g. "wordpress") so a single log line/error report
+ * connector's `name` (e.g. "youtube") so a single log line/error report
  * identifies both which platform failed and why.
  */
 export class ConnectorError extends AppError {
@@ -60,8 +60,7 @@ export function isConnectorError(error: unknown): error is ConnectorError {
 /**
  * Classifies an HTTP response status into the shared connector error
  * taxonomy. Shared by every connector that talks to a REST API over HTTP
- * (WordPress, Resend/email — see src/server/connectors/wordpress/index.ts
- * and src/server/connectors/email/resend.ts) so the 401/403/4xx/5xx →
+ * (Instagram, YouTube — see src/server/connectors) so the 401/403/4xx/5xx →
  * error-code mapping stays consistent instead of each connector guessing
  * its own.
  */
@@ -76,7 +75,7 @@ export function classifyHttpStatus(status: number): "AUTH_FAILED" | "PERMISSION_
  * Client-safe explanation for an automation run failure. `automation_runs`
  * only ever persists `error.message` (a string — see runner.ts), so this
  * necessarily classifies by matching text rather than a `.code`, but it is
- * the one place that mapping happens for every domain (AI, WordPress, ...)
+ * the one place that mapping happens for every domain (AI, video, ...)
  * instead of each page re-implementing its own guesswork.
  */
 export function describeAutomationRunError(message: string | null | undefined): string {
@@ -93,18 +92,6 @@ export function describeAutomationRunError(message: string | null | undefined): 
   const error = message.toLowerCase();
   if (error.includes("already has a run") || error.includes("one_active_run")) {
     return "이미 실행 중입니다. 완료된 뒤 다시 시도해주세요.";
-  }
-  if (error.includes("wordpress")) {
-    if (/http 40[13]|authentication|application password|credential|권한|연결 정보/.test(error)) {
-      return "WordPress 인증 또는 글 작성 권한을 확인해주세요. 설정에서 연결 정보를 다시 입력할 수 있습니다.";
-    }
-    if (/http 404|rest api/.test(error)) {
-      return "WordPress 주소 또는 REST API 경로를 확인해주세요.";
-    }
-    if (/시간이 초과|timeout|timed out/.test(error)) {
-      return "WordPress 응답이 늦어 실행이 중단되었습니다. 사이트 상태를 확인한 뒤 다시 시도해주세요.";
-    }
-    return "WordPress에 글을 저장하지 못했습니다. 사이트 연결과 발행 설정을 확인해주세요.";
   }
   if (error.includes("json2video") || /렌더링|render/.test(error)) {
     if (/시간이 초과|timeout|timed out/.test(error)) {

@@ -440,6 +440,10 @@ instead of throwing a bare `Error`:
 logging entry point across the codebase — no domain calls `console.*`
 directly.
 
+> **2026-10-11 제거됨.** WordPress 커넥터(`connectors/wordpress`), 이메일/Resend 커넥터와 뉴스레터 핸들러는 코드에서 삭제했습니다
+> (migration `0063_remove_wordpress_email.sql`이 저장된 자격 증명·연결 행·옛 설정을 정리). 블로그 글은 앱에서 만들어 확인한 뒤
+> 직접 올리고, 외부 연결은 YouTube·Instagram만 남았습니다. 아래 내용은 이력으로만 남겨둔 설명입니다.
+
 ## WordPress Connector
 
 `src/server/connectors/wordpress/index.ts`'s `WordPressConnector` talks to a

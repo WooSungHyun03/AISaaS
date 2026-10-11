@@ -8,7 +8,7 @@ import { stripInlineMarkup, type BlogBlock, type BlogPlatform, type BlogPost } f
  * - naver: styled paragraphs with inline CSS only (the SmartEditor keeps bold,
  *   colour, size and background on paste but ignores most structural tags).
  * - tistory / generic: semantic h2 / blockquote / hr / table with a font stack,
- *   for the HTML editor (Tistory) or a CMS (WordPress).
+ *   for the HTML editor (Tistory).
  */
 const COLOR = { text: "#374151", heading: "#111827", accent: "#F59E0B", quoteBg: "#FFFBEB", quoteText: "#92400E", calloutBg: "#EFF6FF", calloutBorder: "#BFDBFE", muted: "#6B7280", tag: "#2563EB", highlight: "#FEF08A" } as const;
 const FONT = "'Noto Sans KR','Nanum Gothic','Malgun Gothic',sans-serif";

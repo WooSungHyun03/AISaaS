@@ -20,7 +20,7 @@ function delay(ms: number): Promise<void> {
 /**
  * Instagram Content Publishing (Meta Graph API) connector for a single
  * static image or Reel. Carousels remain out of scope.
- * Mirrors `WordPressConnector`'s constructor shape: an explicit
+ * An explicit
  * `InstagramConnection` (from a business's Vault-backed
  * `integration_connections` row, see `./connect.ts#loadInstagramConnector`)
  * takes priority, falling back to the legacy env-configured single-account

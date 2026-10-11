@@ -3,15 +3,15 @@ import { AppError, ConnectorError, describeAutomationRunError, isAppError, isCon
 
 describe("AppError / ConnectorError", () => {
   it("marks connector errors retryable only for transient codes", () => {
-    expect(new ConnectorError("wordpress", "TIMEOUT", "x").retryable).toBe(true);
-    expect(new ConnectorError("wordpress", "UPSTREAM_SERVER_ERROR", "x").retryable).toBe(true);
-    expect(new ConnectorError("wordpress", "NETWORK_FAILURE", "x").retryable).toBe(true);
-    expect(new ConnectorError("wordpress", "NOT_CONFIGURED", "x").retryable).toBe(false);
-    expect(new ConnectorError("wordpress", "AUTH_FAILED", "x").retryable).toBe(false);
+    expect(new ConnectorError("youtube", "TIMEOUT", "x").retryable).toBe(true);
+    expect(new ConnectorError("youtube", "UPSTREAM_SERVER_ERROR", "x").retryable).toBe(true);
+    expect(new ConnectorError("youtube", "NETWORK_FAILURE", "x").retryable).toBe(true);
+    expect(new ConnectorError("youtube", "NOT_CONFIGURED", "x").retryable).toBe(false);
+    expect(new ConnectorError("youtube", "AUTH_FAILED", "x").retryable).toBe(false);
   });
 
   it("is identifiable via isAppError/isConnectorError but not confused with a plain Error", () => {
-    const connectorError = new ConnectorError("wordpress", "NOT_CONFIGURED", "not set up");
+    const connectorError = new ConnectorError("youtube", "NOT_CONFIGURED", "not set up");
     expect(isAppError(connectorError)).toBe(true);
     expect(isConnectorError(connectorError)).toBe(true);
     expect(isConnectorError(new Error("plain"))).toBe(false);
@@ -19,21 +19,14 @@ describe("AppError / ConnectorError", () => {
   });
 
   it("carries domain/code for structured logging", () => {
-    const error = new ConnectorError("wordpress", "AUTH_FAILED", "bad credentials");
+    const error = new ConnectorError("youtube", "AUTH_FAILED", "bad credentials");
     expect(error).toBeInstanceOf(AppError);
-    expect(error.domain).toBe("wordpress");
+    expect(error.domain).toBe("youtube");
     expect(error.code).toBe("AUTH_FAILED");
   });
 });
 
 describe("describeAutomationRunError", () => {
-  it("explains WordPress authentication failures without exposing the raw error", () => {
-    const raw = "WordPress publish failed (HTTP 401): secret=abc";
-    const result = describeAutomationRunError(raw);
-    expect(result).toContain("WordPress 인증");
-    expect(result).not.toContain("secret=abc");
-  });
-
   it("gives actionable messages for AI rate limits and unknown failures", () => {
     expect(describeAutomationRunError("[openai] Rate limited (429)")).toContain("잠시 후");
     expect(describeAutomationRunError("sensitive stack trace")).not.toContain("stack trace");

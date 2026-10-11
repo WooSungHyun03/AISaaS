@@ -10,7 +10,6 @@ export interface SafeAutomationRunOutput {
   callToAction: string | null;
   keywords: string[];
   externalUrl: string | null;
-  destinationStatus: "draft" | "publish" | null;
   /** Blog-only (added alongside the generation-only switch) — null for every run from before that change or for non-blog handlers. */
   hook: string | null;
   seoKeywords: string[];
@@ -119,9 +118,6 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
   const seoKeywords = Array.isArray(output.seoKeywords)
     ? output.seoKeywords.filter((item): item is string => typeof item === "string").slice(0, 20).map((item) => item.slice(0, 100))
     : [];
-  const destinationStatus = output.wordpressStatus === "draft" || output.wordpressStatus === "publish"
-    ? output.wordpressStatus
-    : null;
   const safe: SafeAutomationRunOutput = {
     title: safeText(output.title, 500),
     topic: safeText(output.topic, 500),
@@ -130,7 +126,6 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
     callToAction: safeText(output.callToAction, 1_000),
     keywords,
     externalUrl: safeExternalUrl(output.externalUrl),
-    destinationStatus,
     hook: safeText(output.hook, 500),
     seoKeywords,
     imageSuggestion: safeText(output.imageSuggestion, 500),

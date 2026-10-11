@@ -12,12 +12,6 @@ import {
   type BlogOutline,
   type BlogTopic,
 } from "@/server/ai/prompts/blog";
-import { WordPressConnector } from "@/server/connectors/wordpress";
-import { decryptWordPressPassword } from "@/server/connectors/wordpress/credentials";
-import { loadWordPressConnector } from "@/server/connectors/wordpress/connect";
-import { getConnection, updateConnectionStatus } from "@/server/connectors/integrations";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { isConnectorError } from "@/server/shared/errors";
 import { assessBlogPost, assignIssues } from "@/server/ai/blog-quality";
 import { postToMarkup } from "@/server/blog/markup";
 import { blogSectionSchema, countCharsNoSpaces, postBodyText, stripInlineMarkup, type BlogBlock, type BlogPost, type BlogSection } from "@/server/blog/post";
@@ -202,49 +196,6 @@ function qualityKeywords(ctx: AutomationRunContext, config: BlogAutomationConfig
   return [...(config?.keywords ?? []), ...ctx.business.keywords];
 }
 
-async function deliver(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined, post: BlogPost, bodyHtml: string, excerpt: string) {
-  let externalUrl: string | undefined;
-  let wordpressStatus: "draft" | "publish" | undefined;
-
-  if (config?.deliveryMode === "wordpress_draft" || config?.deliveryMode === "wordpress_publish") {
-    const admin = createAdminClient();
-    const sharedConnection = await getConnection(admin, ctx.automation.user_id, ctx.business.id, "wordpress");
-    const connector = sharedConnection
-      ? await loadWordPressConnector(admin, ctx.automation.user_id, ctx.business.id)
-      : config.wordpress
-        ? new WordPressConnector({
-          siteUrl: config.wordpress.siteUrl,
-          username: config.wordpress.username,
-          appPassword: decryptWordPressPassword(config.wordpress.encryptedAppPassword),
-        })
-        : null;
-    if (!connector) {
-      if (sharedConnection?.status === "CONNECTED") await updateConnectionStatus(admin, sharedConnection.id, "ERROR");
-      throw new Error("WordPress 연결이 해제되었거나 만료되었습니다. 설정에서 다시 연결해주세요.");
-    }
-    wordpressStatus = config.deliveryMode === "wordpress_draft" ? "draft" : "publish";
-    try {
-      const saved = await connector.publish({ title: post.title, content: bodyHtml, excerpt }, wordpressStatus);
-      externalUrl = saved.externalUrl;
-    } catch (error) {
-      if (sharedConnection) {
-        const status = isConnectorError(error) && (error.code === "AUTH_FAILED" || error.code === "PERMISSION_DENIED") ? "EXPIRED" : "ERROR";
-        await updateConnectionStatus(admin, sharedConnection.id, status);
-      }
-      throw error;
-    }
-  } else if (!config) {
-    // Existing automations created before the setup wizard use the legacy server connection.
-    const connector = new WordPressConnector();
-    if (connector.isConfigured()) {
-      const saved = await connector.publish({ title: post.title, content: bodyHtml, excerpt });
-      externalUrl = saved.externalUrl;
-      wordpressStatus = "publish";
-    }
-  }
-  return { externalUrl, wordpressStatus };
-}
-
 async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined, state: JobState): Promise<AutomationHandlerResult> {
   const post = assemble(ctx, config, state, true);
   const bodyHtml = renderBlogHtml(post, "generic");
@@ -253,7 +204,6 @@ async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | 
   const excerpt = stripInlineMarkup(firstParagraph && "text" in firstParagraph ? firstParagraph.text : text).replace(/\s+/g, " ").slice(0, 140);
   const photoSlots = post.sections.flatMap((section) => section.blocks).filter((block) => block.type === "photo").map((block) => ("slot" in block ? block.slot : ""));
   const remaining = assessBlogPost({ post, keywords: qualityKeywords(ctx, config), facts: buildBlogFacts(ctx.business, config).text, promotionType: resolvePromotionType(ctx.business) }).map((issue) => issue.message);
-  const delivery = await deliver(ctx, config, post, bodyHtml, excerpt);
   const markup = postToMarkup(post);
 
   return {
@@ -272,15 +222,11 @@ async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | 
       imageSuggestion: photoSlots.join(" / "),
       stats: { chars: countCharsNoSpaces(text), sections: post.sections.length, photos: photoSlots.length },
       ...(remaining.length > 0 ? { qualityNotes: remaining.slice(0, 6) } : {}),
-      published: delivery.wordpressStatus === "publish",
-      wordpressStatus: delivery.wordpressStatus ?? null,
-      externalUrl: delivery.externalUrl ?? null,
     } as unknown as Json,
     title: post.title,
     topic: state.topic,
     content: markup,
     contentType: "blog-marketing",
-    externalUrl: delivery.externalUrl,
     aiGenerationCount: Math.max(1, state.aiCalls),
   };
 }

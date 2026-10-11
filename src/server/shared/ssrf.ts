@@ -1,6 +1,6 @@
 /**
  * Shared SSRF address classification, used by every outbound fetch to a
- * user-supplied host (WordPress sites, website marketing diagnosis —
+ * user-supplied host (website marketing diagnosis —
  * src/server/marketing/diagnosis.ts) so they all block the same
  * private/internal ranges instead of each re-deriving its own list.
  */

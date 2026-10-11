@@ -34,7 +34,7 @@ const CONNECTION_ROW = {
   id: "conn-1",
   user_id: "user-1",
   business_id: "biz-1",
-  provider: "wordpress" as const,
+  provider: "youtube" as const,
   account_identifier: "https://example.com",
   status: "CONNECTED" as const,
   secret_reference: "secret-1",
@@ -56,7 +56,7 @@ describe("createConnection", () => {
       {
         userId: "user-1",
         businessId: "biz-1",
-        provider: "wordpress",
+        provider: "youtube",
         accountIdentifier: "https://example.com",
         secret: "app-password-in-plaintext",
       },
@@ -66,7 +66,7 @@ describe("createConnection", () => {
 
     expect(admin.rpc).toHaveBeenCalledWith("integration_secret_create", {
       p_secret: "app-password-in-plaintext",
-      p_name: "wordpress:biz-1",
+      p_name: "youtube:biz-1",
     });
     const upsertedRow = (upserted.upsert as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(upsertedRow.secret_reference).toBe("new-secret-id");
@@ -82,7 +82,7 @@ describe("createConnection", () => {
     admin.rpc.mockResolvedValueOnce({ data: null, error: null });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await createConnection({ userId: "user-1", businessId: "biz-1", provider: "wordpress", secret: "rotated" }, admin as any);
+    await createConnection({ userId: "user-1", businessId: "biz-1", provider: "youtube", secret: "rotated" }, admin as any);
 
     expect(admin.rpc).toHaveBeenCalledWith("integration_secret_update", { p_id: "secret-1", p_secret: "rotated" });
     expect(admin.rpc).not.toHaveBeenCalledWith("integration_secret_create", expect.anything());
@@ -110,7 +110,7 @@ describe("createConnection", () => {
 
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createConnection({ userId: "user-1", businessId: "biz-1", provider: "wordpress", secret: "x" }, admin as any),
+      createConnection({ userId: "user-1", businessId: "biz-1", provider: "youtube", secret: "x" }, admin as any),
     ).rejects.toThrow(/vault unavailable/);
   });
 });
@@ -122,12 +122,12 @@ describe("getConnection", () => {
     admin.from.mockReturnValueOnce(builder);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await getConnection(admin as any, "user-1", "biz-1", "wordpress");
+    const result = await getConnection(admin as any, "user-1", "biz-1", "youtube");
 
     expect(admin.from).toHaveBeenCalledWith("integration_connections");
     expect(builder.eq).toHaveBeenCalledWith("user_id", "user-1");
     expect(builder.eq).toHaveBeenCalledWith("business_id", "biz-1");
-    expect(builder.eq).toHaveBeenCalledWith("provider", "wordpress");
+    expect(builder.eq).toHaveBeenCalledWith("provider", "youtube");
     expect(result).toEqual(CONNECTION_ROW);
   });
 
@@ -136,7 +136,7 @@ describe("getConnection", () => {
     admin.from.mockReturnValueOnce(makeBuilder({ data: null, error: null }));
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await getConnection(admin as any, "user-1", "biz-1", "wordpress");
+    const result = await getConnection(admin as any, "user-1", "biz-1", "youtube");
     expect(result).toBeNull();
   });
 });

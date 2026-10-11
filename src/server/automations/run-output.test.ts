@@ -18,7 +18,6 @@ describe("toSafeAutomationRunOutput", () => {
       body: "본문 내용",
       keywords: ["AI", "마케팅"],
       externalUrl: "https://blog.example.com/post-1",
-      destinationStatus: "publish",
     });
   });
 
@@ -39,7 +38,6 @@ describe("toSafeAutomationRunOutput", () => {
       callToAction: null,
       keywords: [],
       externalUrl: null,
-      destinationStatus: null,
       hook: null,
       seoKeywords: [],
       imageSuggestion: null,

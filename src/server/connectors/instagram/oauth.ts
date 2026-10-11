@@ -33,7 +33,7 @@ export function buildInstagramAuthorizationUrl(params: {
  * Runs a fetch and classifies any failure into the shared connector error
  * taxonomy (src/server/shared/errors.ts) — a non-2xx response, a timed-out
  * request, and a raw network failure are each distinguishable, matching how
- * WordPressConnector/ResendConnector report failures so the callback route
+ * The connectors report failures so the callback route
  * (and any future caller) doesn't need to special-case Instagram.
  */
 async function fetchJson<T>(input: string | URL, init: RequestInit, fallback: string): Promise<T> {

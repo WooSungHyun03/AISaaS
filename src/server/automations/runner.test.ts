@@ -145,7 +145,7 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
 
     expect(result).toEqual({ runId: "run-1", status: "SUCCESS", output: { ok: true }, contentHistoryId: "content-1" });
     // The handler gets the automation_runs row id the runner already
-    // inserted — newsletter.ts derives its per-recipient idempotency key
+    // inserted — handlers derive their idempotency key
     // from this (see types/automation.ts#AutomationRunContext.runId).
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ runId: "run-1" }));
     expect(admin.filters.content_history).toEqual(expect.arrayContaining([

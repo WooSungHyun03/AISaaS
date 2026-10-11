@@ -73,7 +73,7 @@ function assertPublicHttpUrl(value: string): URL {
 /**
  * Resolves `hostname` and rejects it if it (or any of its resolved
  * addresses) is private/internal — reusing the same classification the
- * WordPress connector uses (src/server/shared/ssrf.ts). Called fresh for
+ * blog diagnosis collectors use (src/server/shared/ssrf.ts). Called fresh for
  * every redirect hop (see fetchHop below) so a public URL that redirects to
  * a private address is caught before that hop is ever connected to, not
  * just on the first request.
@@ -157,7 +157,7 @@ async function fetchHop(urlString: string, redirectsLeft: number, deadlineAt: nu
         signal: AbortSignal.timeout(remainingMs),
         // Pins the validated address for the actual request — a second DNS
         // lookup between validation and connection could otherwise reach a
-        // private host (same technique as the WordPress connector).
+        // private host.
         lookup: pinnedLookup(address, family) as never,
       },
       (response) => {

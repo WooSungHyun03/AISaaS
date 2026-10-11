@@ -12,7 +12,7 @@ import type { AutomationHandler, AutomationHandlerResult, AutomationRunContext }
 
 /**
  * Regenerates the topic/caption exactly once on a near-duplicate — same
- * bounded-once pattern as blog.ts#generateTopic() / newsletter.ts's stage 1,
+ * bounded-once pattern as blog.ts#generateTopic(),
  * never a loop.
  */
 async function generateCaption(ctx: AutomationRunContext): Promise<InstagramCaption> {

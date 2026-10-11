@@ -74,12 +74,8 @@ export default async function AutomationDetailPage({ params }: { params: Promise
     objective: blogConfig?.objective ?? "",
     keywords: blogConfig?.keywords ?? business?.keywords ?? [],
     tone: blogConfig?.tone ?? business?.brand_tone ?? "친근하고 전문적인",
-    deliveryMode: blogConfig?.deliveryMode ?? "app_draft" as const,
     platform: blogConfig?.platform,
     notes: blogConfig?.notes,
-    wordpressSiteUrl: blogConfig?.wordpress?.siteUrl,
-    wordpressUsername: blogConfig?.wordpress?.username,
-    hasStoredWordPress: Boolean(blogConfig?.wordpress),
     legacy: !blogConfig,
   } : undefined;
 
@@ -119,7 +115,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
             <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">글의 목적</dt><dd className="mt-1 font-medium">{blogConfig.objective}</dd></div>
             <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">키워드</dt><dd className="mt-1 font-medium">{blogConfig.keywords.join(", ")}</dd></div>
             <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">말투</dt><dd className="mt-1 font-medium">{blogConfig.tone}</dd></div>
-            <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">저장 위치</dt><dd className="mt-1 font-medium">{BLOG_DELIVERY_LABEL[blogConfig.deliveryMode]}{blogConfig.wordpress ? ` · ${blogConfig.wordpress.siteUrl}` : ""}</dd></div>
+            <div className="bg-card px-5 py-4"><dt className="text-[13px] font-semibold text-muted-foreground">저장 위치</dt><dd className="mt-1 font-medium">{BLOG_DELIVERY_LABEL[blogConfig.deliveryMode]}</dd></div>
           </>}
         </dl>
       </section>
@@ -132,9 +128,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
             {typeof latestOutput.title === "string" && <p className="mt-2 text-lg font-bold leading-7">{latestOutput.title}</p>}
             {typeof latestOutput.topic === "string" && <p className="mt-1 text-sm text-muted-foreground">주제 · {latestOutput.topic}</p>}
             <p className="mt-3 text-sm">
-              {typeof latestOutput.externalUrl === "string" && latestOutput.externalUrl
-                ? <>WordPress {latestOutput.wordpressStatus === "draft" ? "초안" : "글"} · <a href={latestOutput.externalUrl} target="_blank" rel="noreferrer" className="break-all font-semibold text-primary underline underline-offset-2">{latestOutput.externalUrl}</a></>
-                : <span className="text-muted-foreground">이지 마케팅에 저장돼 있어요. 아래 ‘만든 콘텐츠’에서 복사해 쓰세요.</span>}
+              <span className="text-muted-foreground">이지 마케팅에 저장돼 있어요. 아래 ‘만든 콘텐츠’에서 복사해 쓰세요.</span>
             </p>
           </div>
         </section>
@@ -168,7 +162,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
                 <p className="font-bold leading-7">{item.title}</p>
                 <p className="mt-0.5 text-[13px] text-muted-foreground">{item.topic ? `주제 ${item.topic} · ` : ""}{fmt(item.created_at)}</p>
                 <p className="mt-3 whitespace-pre-line text-[15px] leading-7 text-muted-foreground">{item.content}</p>
-                {item.external_url ? <a href={item.external_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-semibold text-primary underline underline-offset-2">WordPress 글 보기</a> : null}
+                {item.external_url ? <a href={item.external_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-semibold text-primary underline underline-offset-2">이전에 게시된 글 보기</a> : null}
               </li>
             ))}
           </ul>

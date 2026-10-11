@@ -3,14 +3,12 @@ import type { AutomationHandler } from "@/types/automation";
 import type { AutomationTemplateSlug } from "@/types/domain";
 import { blogAutomationHandler } from "./blog";
 import { instagramAutomationHandler } from "./instagram";
-import { newsletterAutomationHandler } from "./newsletter";
 import { customerSupportAutomationHandler } from "./customer-support";
 import { shortsAutomationHandler } from "./shorts";
 
 const registry: Record<AutomationTemplateSlug, AutomationHandler> = {
   "blog-marketing": blogAutomationHandler,
   "instagram-marketing": instagramAutomationHandler,
-  newsletter: newsletterAutomationHandler,
   "customer-support": customerSupportAutomationHandler,
   shorts: shortsAutomationHandler,
 };

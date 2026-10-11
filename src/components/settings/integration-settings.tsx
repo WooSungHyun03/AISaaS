@@ -1,16 +1,12 @@
 "use client";
 
-import { useState, useTransition, type FormEvent, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Camera, CheckCircle2, CircleOff, Globe2, Mail, RefreshCw, Unplug, Video } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, CircleOff, RefreshCw, Unplug, Video } from "lucide-react";
 import { toast } from "sonner";
-import { connectWordPress, disconnectIntegration, type SettingsActionState } from "@/app/(app)/settings/actions";
+import { disconnectIntegration } from "@/app/(app)/settings/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FormMessage } from "@/components/ui/form-message";
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import type { ConnectionStatus, IntegrationProvider, Json } from "@/types/domain";
 import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/youtube-scopes";
@@ -77,49 +73,6 @@ function DisconnectButton({ businessId, provider }: { businessId: string; provid
   />;
 }
 
-function WordPressDialog({ businessId, connection }: { businessId: string; connection?: SafeConnection }) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState("");
-  const meta = connection ? metadata(connection.metadata) : {};
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    setError("");
-    startTransition(async () => {
-      try {
-        const result: SettingsActionState = await connectWordPress({}, formData);
-        if (result.error) { setError(result.error); return; }
-        toast.success("WordPress 연결을 확인하고 저장했어요.");
-        setOpen(false);
-        router.refresh();
-      } catch {
-        setError("WordPress 연결을 저장하지 못했어요. 잠시 후 다시 시도해주세요.");
-      }
-    });
-  }
-
-  return <Dialog open={open} onOpenChange={(value) => { if (!isPending) { setOpen(value); setError(""); } }}>
-    <DialogTrigger asChild><Button size="sm" variant={connection ? "outline" : "default"}>{connection ? <RefreshCw aria-hidden="true" /> : null}{connection ? "다시 연결" : "WordPress 연결"}</Button></DialogTrigger>
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>WordPress 연결</DialogTitle>
-        <DialogDescription>WordPress 사용자 프로필에서 Application Password를 만들어 입력하세요. 저장하기 전에 연결과 글 작성 권한을 확인해요.</DialogDescription>
-      </DialogHeader>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <input type="hidden" name="businessId" value={businessId} />
-        <div className="space-y-2"><Label htmlFor="wp-site-url">사이트 주소</Label><Input id="wp-site-url" name="siteUrl" type="url" autoComplete="url" spellCheck={false} defaultValue={connection?.account_identifier ?? ""} placeholder="https://example.com" required /></div>
-        <div className="space-y-2"><Label htmlFor="wp-username">사용자명</Label><Input id="wp-username" name="username" defaultValue={typeof meta.username === "string" ? meta.username : ""} autoComplete="username" required /></div>
-        <div className="space-y-2"><Label htmlFor="wp-app-password">Application Password</Label><Input id="wp-app-password" name="appPassword" type="password" autoComplete="new-password" required /><p className="text-xs text-muted-foreground">저장된 비밀번호는 보여주지 않아요. 다시 연결할 땐 새로 입력해주세요.</p></div>
-        {error && <FormMessage>{error}</FormMessage>}
-        <DialogFooter><DialogClose asChild><Button type="button" variant="outline" disabled={isPending}>취소</Button></DialogClose><Button type="submit" disabled={isPending}>{isPending ? "연결 확인하는 중…" : "확인하고 저장"}</Button></DialogFooter>
-      </form>
-    </DialogContent>
-  </Dialog>;
-}
-
 function IntegrationRow({ icon, title, description, connection, children }: { icon: ReactNode; title: string; description: string; connection?: SafeConnection; children: ReactNode }) {
   return <li className="grid gap-4 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-center lg:gap-6">
     <div className="flex items-start gap-4">
@@ -138,16 +91,11 @@ function IntegrationRow({ icon, title, description, connection, children }: { ic
 
 export function IntegrationSettings({ businessId, connections }: { businessId: string; connections: SafeConnection[] }) {
   const get = (provider: IntegrationProvider) => connections.find((connection) => connection.provider === provider && connection.status !== "DISCONNECTED");
-  const wordpress = get("wordpress");
   const instagram = get("instagram");
-  const email = get("email");
   const youtube = get("youtube");
   const youtubeNeedsAnalyticsConsent = youtube?.status === "CONNECTED" && !String(metadata(youtube.metadata).scope ?? "").split(/\s+/).includes(YOUTUBE_ANALYTICS_SCOPE);
 
-  // YouTube and Instagram are what the product uses today (Shorts posting, YouTube growth numbers). WordPress and
-  // the email service belong to features that are no longer offered (blogs are written for the owner to post,
-  // the newsletter is not available), so they only show up for an account that already has such a connection and
-  // needs to see or remove it.
+  // Only what the product uses today: YouTube (Shorts posting, growth numbers) and Instagram (Reels).
   return <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
     <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description={youtubeNeedsAnalyticsConsent ? "숏폼을 내 채널에 비공개로 올려요. 조회수·시청 시간·구독자 증감을 성장 리포트에 보려면 ‘다시 연결’에서 Analytics 권한도 허용해주세요." : "숏폼을 내 채널에 비공개로 올리고, 성장 리포트에 조회수·시청 시간·구독자 증감을 보여줘요."} connection={youtube}>
       <Button asChild size="sm" variant={youtube ? "outline" : "default"}><a href={`/api/integrations/youtube/connect?businessId=${encodeURIComponent(businessId)}`}>{youtube ? <RefreshCw aria-hidden="true" /> : null}{youtube ? "다시 연결" : "YouTube 연결"}</a></Button>
@@ -157,16 +105,5 @@ export function IntegrationSettings({ businessId, connections }: { businessId: s
       <Button asChild size="sm" variant={instagram ? "outline" : "default"}><a href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`}>{instagram ? <RefreshCw aria-hidden="true" /> : null}{instagram ? "다시 연결" : "인스타그램 연결"}</a></Button>
       {instagram && <DisconnectButton businessId={businessId} provider="instagram" />}
     </IntegrationRow>
-    {wordpress ? (
-      <IntegrationRow icon={<Globe2 className="size-5" aria-hidden="true" />} title="WordPress (이전 방식)" description="이전에 설정한 WordPress 자동 게시 연결이에요. 새 블로그 글은 앱에서 확인하고 직접 올리는 방식이라 새로 연결할 필요는 없어요." connection={wordpress}>
-        <WordPressDialog businessId={businessId} connection={wordpress} />
-        <DisconnectButton businessId={businessId} provider="wordpress" />
-      </IntegrationRow>
-    ) : null}
-    {email ? (
-      <IntegrationRow icon={<Mail className="size-5" aria-hidden="true" />} title="이메일 (이전 방식)" description="이전에 설정한 뉴스레터용 이메일 연결이에요. 뉴스레터는 지금 제공하지 않아요." connection={email}>
-        <DisconnectButton businessId={businessId} provider="email" />
-      </IntegrationRow>
-    ) : null}
   </ul>;
 }

@@ -77,6 +77,5 @@ export type {
 export type AutomationTemplateSlug =
   | "blog-marketing"
   | "instagram-marketing"
-  | "newsletter"
   | "customer-support"
   | "shorts";

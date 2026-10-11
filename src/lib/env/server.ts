@@ -37,18 +37,12 @@ const serverSchema = z.object({
   ALLOW_MOCK_BILLING: z.enum(["true", "false"]).optional(),
   TOSS_SECRET_KEY: z.string().optional(),
 
-  WORDPRESS_SITE_URL: z.string().optional(),
-  WORDPRESS_USERNAME: z.string().optional(),
-  WORDPRESS_APP_PASSWORD: z.string().optional(),
-  WORDPRESS_CREDENTIALS_KEY: z.string().optional(),
 
   META_ACCESS_TOKEN: z.string().optional(),
   META_IG_USER_ID: z.string().optional(),
   INSTAGRAM_APP_ID: z.string().optional(),
   INSTAGRAM_APP_SECRET: z.string().optional(),
 
-  RESEND_API_KEY: z.string().optional(),
-  RESEND_FROM_EMAIL: z.string().optional(),
 
   YOUTUBE_CLIENT_ID: z.string().optional(),
   YOUTUBE_CLIENT_SECRET: z.string().optional(),

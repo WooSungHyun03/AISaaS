@@ -221,14 +221,14 @@ describe("createAutomation — blog delivery mode (generation-only going forward
   }
 
   it.each(["wordpress_draft", "wordpress_publish"])(
-    "rejects a new blog automation requesting delivery mode %s, even bypassing the UI directly",
+    "treats an old delivery mode %s as plain draft saving (WordPress delivery no longer exists)",
     async (deliveryMode) => {
       createClientMock.mockResolvedValue(makeBlogCreationClient());
       canCreateAutomationMock.mockResolvedValue({ allowed: true });
 
       const result = await createAutomation({}, blogFormData(deliveryMode));
 
-      expect(result).toEqual({ error: "새로 만드는 블로그 자동화는 앱에 초안 저장만 선택할 수 있어요." });
+      expect(result).toBeUndefined();
     },
   );
 

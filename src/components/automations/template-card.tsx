@@ -1,4 +1,4 @@
-import { Boxes, Camera, Clapperboard, FileText, Headset, Mail, type LucideIcon } from "lucide-react";
+import { Boxes, Camera, Clapperboard, FileText, Headset, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { AutomationAvailability } from "@/types/automation";
 import type { AutomationTemplate, AutomationTemplateSlug } from "@/types/domain";
@@ -30,7 +30,6 @@ const COPY: Record<AutomationTemplateSlug, TemplateCopy> = {
     description: "브랜드 말투에 맞는 캡션과 마케팅 카드를 만들어 연결한 계정에 올려요.",
     note: "Professional 계정 연결이 필요한 베타 기능이에요.",
   },
-  newsletter: { icon: Mail, title: "뉴스레터", description: "단골 손님에게 보낼 소식을 써드려요." },
   "customer-support": { icon: Headset, title: "고객 문의 답변", description: "자주 오는 문의에 쓸 답변을 준비해드려요." },
 };
 

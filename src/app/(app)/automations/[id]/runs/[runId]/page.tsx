@@ -1,11 +1,10 @@
 import { notFound, redirect } from "next/navigation";
-import { ExternalLink, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getAutomationRunDetail } from "@/server/automations/history";
 import { describeAutomationRunError } from "@/server/shared/errors";
 import { RunSourceBadge, RunStatusBadge } from "@/components/automations/run-badges";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form-message";
 import { PageHeader } from "@/components/layout/page-header";
 import { Mascot } from "@/components/brand/mascot";
@@ -105,12 +104,7 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
               {Object.keys(output.publicationResults).length ? <div><p className={label}>플랫폼 게시 결과</p><ul className="mt-2 space-y-2">{Object.entries(output.publicationResults).map(([platform, result]) => result ? <li key={platform} className="flex flex-wrap items-center gap-2 rounded-xl bg-success-soft px-4 py-3 text-sm"><Badge variant="success">{platform === "youtube" ? "YouTube Shorts" : "Instagram Reels"}</Badge><span className="min-w-0 flex-1 break-all">ID {result.externalId ?? "확인 중"}{result.privacy === "private" ? " · 비공개" : ""}</span>{result.externalUrl ? <a href={result.externalUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-primary underline underline-offset-2">열기</a> : null}</li> : null)}</ul></div> : null}
             </div>
           )}
-          {output?.videoUrl ? null : output?.externalUrl ? (
-            <div className="flex flex-col gap-3 rounded-2xl bg-brand-soft px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0"><p className="font-bold">WordPress {output.destinationStatus === "draft" ? "초안으로 저장했어요" : "에 올라갔어요"}</p><p className="mt-0.5 break-all text-sm text-muted-foreground">{output.externalUrl}</p></div>
-              <Button asChild variant="outline" className="shrink-0"><a href={output.externalUrl} target="_blank" rel="noopener noreferrer">열기 <ExternalLink aria-hidden="true" /></a></Button>
-            </div>
-          ) : (
+          {output?.videoUrl ? null : (
             <p className="text-sm text-muted-foreground">이지 마케팅에 저장돼 있어요. 본문을 복사해서 직접 올려주세요.</p>
           )}
         </section>
