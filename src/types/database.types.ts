@@ -47,6 +47,44 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
       };
+      admin_users: {
+        Row: {
+          user_id: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          created_by?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["admin_users"]["Insert"]>;
+        Relationships: [];
+      };
+      admin_audit_log: {
+        Row: {
+          id: string;
+          actor_user_id: string | null;
+          actor_email: string | null;
+          action: string;
+          target_type: string | null;
+          target_id: string | null;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          actor_user_id?: string | null;
+          actor_email?: string | null;
+          action: string;
+          target_type?: string | null;
+          target_id?: string | null;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [];
+      };
       businesses: {
         Row: {
           id: string;
@@ -1049,6 +1087,16 @@ export interface Database {
       expire_credits: {
         Args: { p_now?: string };
         Returns: number;
+      };
+      get_admin_dashboard_counts: {
+        Args: { p_active_since: string };
+        Returns: Array<{
+          total_users: number;
+          active_users: number;
+          paid_users: number;
+          blog_generations: number;
+          shorts_generations: number;
+        }>;
       };
       refund_order_credits: {
         Args: { p_order_id: string; p_reason?: string | null };

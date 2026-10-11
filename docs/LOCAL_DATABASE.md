@@ -37,7 +37,7 @@ bash scripts/dev-db.sh
 | 로컬 관리자 | `admin@autobiz.local` | `Admin1234!` | `role: admin` |
 | 일반 사용자 | `user@autobiz.local` | `User1234!` | `role: user` |
 
-이 계정은 로컬 컨테이너에서만 사용합니다. `role: admin`은 개발 데이터 구분용 metadata이며 운영 관리자 권한을 추가하지 않습니다.
+이 계정은 로컬 컨테이너에서만 사용합니다. 관리자 계정은 `admin_users`에도 등록되므로 `/admin`에 접근할 수 있습니다. `role: admin` metadata 자체는 권한 판별에 사용하지 않습니다. 일반 사용자 계정은 시드를 반복 실행해도 `admin_users`에서 제거됩니다.
 
 값을 바꾸려면 실행 전에 환경변수를 설정합니다.
 
@@ -105,4 +105,17 @@ npm run test:credits-db
 ```
 
 이 테스트는 임시 사용자를 만든 뒤 5크레딧에 20개 예약 요청을 동시에 보내 정확히 5개만 성공하는지 확인합니다. 일반 사용자 RPC 거부, 예약 확정·반환, 만료, 미사용 주문 환불, 원장 UPDATE 차단과 함께 환불 요청의 중복 차단·본인 조회 RLS·직접 상태 변경 거부까지 실제 DB에서 검증하고 임시 사용자를 삭제합니다.
+
+## 관리자 보안 확인
+
+`0065_admin_security.sql`은 관리자 목록과 수정 불가능한 감사 로그를 만듭니다. 두 테이블은 일반 사용자에게 정책과 권한을 주지 않으며, 서버의 서비스 롤만 관리자 판별·대시보드 조회·감사 로그 추가에 사용합니다.
+
+로컬 DB 검증은 다음 명령으로 실행합니다.
+
+```bash
+$env:RUN_DB_TESTS="true"
+npx vitest run src/server/admin/admin-security.db.test.ts
+```
+
+운영 최초 관리자는 회원가입과 이메일 확인을 먼저 마친 뒤, 운영 담당자가 [ADMIN_BOOTSTRAP.sql](ADMIN_BOOTSTRAP.sql)의 이메일을 바꿔 Supabase SQL Editor에서 실행합니다. 애플리케이션 화면에서는 관리자 추가 기능을 제공하지 않습니다.
 

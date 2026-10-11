@@ -3,7 +3,7 @@
 import { useActionState, useEffect, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { answerInquiryAction, type AdminInquiryActionState } from "@/app/(app)/admin/inquiries/actions";
+import { answerInquiryAction, type AdminInquiryActionState } from "@/app/(admin)/admin/inquiries/actions";
 import { Button } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form-message";
 import { Label } from "@/components/ui/label";

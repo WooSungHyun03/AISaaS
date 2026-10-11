@@ -6,6 +6,8 @@ import type { Database } from "./database.types";
  * directly — this is the one place to update if a table gains a column.
  */
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+export type AdminUser = Database["public"]["Tables"]["admin_users"]["Row"];
+export type AdminAuditLog = Database["public"]["Tables"]["admin_audit_log"]["Row"];
 export type Business = Database["public"]["Tables"]["businesses"]["Row"];
 export type AutomationTemplate = Database["public"]["Tables"]["automation_templates"]["Row"];
 export type Automation = Database["public"]["Tables"]["automations"]["Row"];

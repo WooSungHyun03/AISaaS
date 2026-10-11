@@ -47,6 +47,47 @@ async function verifyPasswordLogin(url, publicKey, account) {
   await client.auth.signOut();
 }
 
+async function syncAdminMembership(admin, user, account) {
+  const { data: existing, error: readError } = await admin
+    .from("admin_users")
+    .select("user_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (readError) throw readError;
+
+  if (account.role !== "admin") {
+    if (!existing) return;
+    const { error } = await admin.from("admin_users").delete().eq("user_id", user.id);
+    if (error) throw error;
+    const { error: auditError } = await admin.from("admin_audit_log").insert({
+      action: "LOCAL_ADMIN_REVOKED",
+      target_type: "admin_user",
+      target_id: user.id,
+      metadata: { source: "scripts/seed-dev-users.mjs" },
+    });
+    if (auditError) throw auditError;
+    return;
+  }
+
+  const { error: membershipError } = await admin.from("admin_users").upsert({
+    user_id: user.id,
+    created_by: user.id,
+  });
+  if (membershipError) throw membershipError;
+
+  if (!existing) {
+    const { error: auditError } = await admin.from("admin_audit_log").insert({
+      actor_user_id: user.id,
+      actor_email: account.email,
+      action: "LOCAL_ADMIN_SEEDED",
+      target_type: "admin_user",
+      target_id: user.id,
+      metadata: { source: "scripts/seed-dev-users.mjs" },
+    });
+    if (auditError) throw auditError;
+  }
+}
+
 async function main() {
   const statusFile = process.argv[2];
   const repoRoot = process.argv[3];
@@ -74,7 +115,8 @@ async function main() {
 
   const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
   for (const account of accounts) {
-    await upsertAuthUser(admin, account);
+    const user = await upsertAuthUser(admin, account);
+    await syncAdminMembership(admin, user, account);
     await verifyPasswordLogin(url, publicKey, account);
     console.log(`[dev-db] ${account.role} 로그인 검증 완료: ${account.email}`);
   }

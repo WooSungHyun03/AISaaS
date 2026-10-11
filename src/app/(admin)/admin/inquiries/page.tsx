@@ -1,8 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { isAdminUser } from "@/server/admin/access";
+import { requireAdmin } from "@/server/admin/access";
 import { ADMIN_PAGE_SIZE, listInquiriesForAdmin } from "@/server/inquiries/inquiries";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -15,15 +12,12 @@ export const metadata = { title: "고객 문의 관리" };
 const dateFormat = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export default async function AdminInquiriesPage({ searchParams }: { searchParams: Promise<{ status?: string; page?: string }> }) {
+  const { admin } = await requireAdmin({ action: "ADMIN_INQUIRIES_VIEW", targetType: "route", targetId: "/admin/inquiries", onDenied: "navigate" });
   const query = await searchParams;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  // Not an admin: the page does not exist for you.
-  if (!user || !isAdminUser(user)) notFound();
 
   const status = (INQUIRY_STATUSES as readonly string[]).includes(query.status ?? "") ? (query.status as InquiryStatus) : undefined;
   const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1);
-  const { items, total } = await listInquiriesForAdmin(createAdminClient(), { status, page });
+  const { items, total } = await listInquiriesForAdmin(admin, { status, page });
   const pages = Math.max(1, Math.ceil(total / ADMIN_PAGE_SIZE));
   const href = (nextStatus?: string, nextPage = 1) => `/admin/inquiries?${new URLSearchParams({ ...(nextStatus ? { status: nextStatus } : {}), ...(nextPage > 1 ? { page: String(nextPage) } : {}) }).toString()}`;
 

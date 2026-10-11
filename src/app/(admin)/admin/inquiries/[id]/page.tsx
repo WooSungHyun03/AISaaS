@@ -2,9 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { isAdminUser } from "@/server/admin/access";
+import { requireAdmin } from "@/server/admin/access";
 import { getInquiryForAdmin } from "@/server/inquiries/inquiries";
 import { PageHeader } from "@/components/layout/page-header";
 import { InquiryAnswerForm } from "@/components/admin/inquiry-answer-form";
@@ -17,12 +15,11 @@ export const metadata = { title: "문의 답변" };
 const dateFormat = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 export default async function AdminInquiryPage({ params }: { params: Promise<{ id: string }> }) {
+  const { admin } = await requireAdmin({ action: "ADMIN_INQUIRY_VIEW", targetType: "inquiry", onDenied: "navigate" });
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user || !isAdminUser(user) || !z.string().uuid().safeParse(id).success) notFound();
+  if (!z.string().uuid().safeParse(id).success) notFound();
 
-  const inquiry = await getInquiryForAdmin(createAdminClient(), id);
+  const inquiry = await getInquiryForAdmin(admin, id);
   if (!inquiry) notFound();
 
   return (

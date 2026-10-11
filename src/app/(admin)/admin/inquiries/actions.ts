@@ -2,10 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
-import { isAdminUser } from "@/server/admin/access";
+import { requireAdmin } from "@/server/admin/access";
+import { recordAdminAudit } from "@/server/admin/audit";
 import { answerInquiry } from "@/server/inquiries/inquiries";
 
 export interface AdminInquiryActionState {
@@ -15,18 +14,17 @@ export interface AdminInquiryActionState {
 
 /** Answer and/or change the status of an inquiry. Admin only — the check runs here, on the server, every time. */
 export async function answerInquiryAction(id: string, _prev: AdminInquiryActionState, formData: FormData): Promise<AdminInquiryActionState> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user || !isAdminUser(user)) return { error: "권한이 없어요." };
+  const { user, admin } = await requireAdmin({ action: "ADMIN_INQUIRY_UPDATE_ACCESS", targetType: "inquiry", targetId: id });
   if (!z.string().uuid().safeParse(id).success) return { error: "잘못된 요청이에요." };
 
   const status = String(formData.get("status") ?? "").trim();
   try {
-    const result = await answerInquiry(createAdminClient(), user.id, id, {
+    const result = await answerInquiry(admin, user.id, id, {
       reply: String(formData.get("reply") ?? ""),
       status: status || undefined,
     });
     if (!result.ok) return { error: result.error };
+    await recordAdminAudit(admin, user, { action: "INQUIRY_UPDATED", targetType: "inquiry", targetId: id, metadata: { status: status || "AUTO", hasReply: Boolean(String(formData.get("reply") ?? "").trim()) } });
     revalidatePath("/admin/inquiries");
     revalidatePath(`/admin/inquiries/${id}`);
     revalidatePath("/support");

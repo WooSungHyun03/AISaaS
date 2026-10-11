@@ -92,7 +92,7 @@ export function AppHeader({ email, credits, isAdmin = false }: { email: string; 
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild><Link href="/settings">설정</Link></DropdownMenuItem>
             <DropdownMenuItem asChild><Link href="/billing">이용권·결제</Link></DropdownMenuItem>
-            {isAdmin ? <DropdownMenuItem asChild><Link href="/admin/inquiries">고객 문의 관리 (관리자)</Link></DropdownMenuItem> : null}
+            {isAdmin ? <DropdownMenuItem asChild><Link href="/admin">관리자 대시보드</Link></DropdownMenuItem> : null}
             <DropdownMenuSeparator />
             <form action={signOut}>
               <DropdownMenuItem asChild>

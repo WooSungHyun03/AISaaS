@@ -20,7 +20,9 @@ export default async function SupportPage() {
   const faqs = await listPublishedFaqs(supabase);
   let inquiries: Awaited<ReturnType<typeof listMyInquiries>> = [];
   let inquiriesUnavailable = false;
+  let isAdmin = false;
   if (user) {
+    isAdmin = await isAdminUser(user.id).catch(() => false);
     try {
       inquiries = await listMyInquiries(supabase, user.id);
     } catch (error) {
@@ -36,8 +38,8 @@ export default async function SupportPage() {
 
       <FormMessage variant="info"><strong>학교 프로젝트 데모 · 테스트 결제</strong> 환경이에요. 실제 청구나 금전 환불은 발생하지 않아요. 주문 환불을 요청하려면 <Link href="/billing/refunds" className="font-semibold text-primary underline underline-offset-2">환불 요청 화면</Link>을 이용해주세요.</FormMessage>
 
-      {isAdminUser(user) ? (
-        <p className="rounded-xl bg-brand-soft px-4 py-3 text-sm">관리자 계정이에요. <Link href="/admin/inquiries" className="font-semibold text-primary underline underline-offset-2">고객 문의 관리로 가기</Link></p>
+      {isAdmin ? (
+        <p className="rounded-xl bg-brand-soft px-4 py-3 text-sm">관리자 계정이에요. <Link href="/admin" className="font-semibold text-primary underline underline-offset-2">관리자 대시보드로 가기</Link></p>
       ) : null}
 
       <section aria-labelledby="support-faq-title" className="space-y-4">

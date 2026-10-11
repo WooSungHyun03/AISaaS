@@ -12,6 +12,7 @@ Next.js (Vercel)
   ├─ src/app/(public)   marketing pages, no auth
   ├─ src/app/(auth)     login / signup
   ├─ src/app/(app)      dashboard, automations, business, billing, settings — auth required
+  ├─ src/app/(admin)    isolated admin shell and dashboard — DB admin membership required
   ├─ src/app/api        webhooks, cron entrypoint (external callers only)
   └─ src/server         AI / automations / connectors / billing / directory / customer-support
                               │
@@ -36,6 +37,12 @@ Next.js (Vercel)
 | Shared types, Supabase clients, migrations | Shared (all) | `src/types/`, `src/lib/`, `supabase/migrations/` |
 
 Business logic never lives inside a UI component — pages/components call a Server Action or a `src/server/` function, never Supabase or an external API directly for anything beyond simple authenticated reads scoped by RLS.
+
+## Admin security
+
+`src/proxy.ts` blocks unauthenticated `/admin` requests early. Every admin layout, page data loader, and Server Action also calls server-only `requireAdmin()` before privileged work, so Proxy is not the authorization boundary. Membership comes only from `admin_users`; Auth metadata and environment email lists do not grant access. Admin reads use the service-role client on the server and select only fields needed by the dashboard. Passwords, tokens, Vault secrets, and encrypted connection values are never queried.
+
+Every successful admin route/action access and every signed-in denial appends an event to `admin_audit_log`. The table has no customer policies or privileges and a trigger prevents updates and deletes. The first production administrator is registered manually with `docs/ADMIN_BOOTSTRAP.sql`; there is no browser flow for granting administrator access.
 
 ## Request Flow (typical page)
 

@@ -5,6 +5,8 @@ describe("matchesPrefix", () => {
   it("protects a route and its children", () => {
     expect(matchesPrefix("/settings", PROTECTED_PREFIXES)).toBe(true);
     expect(matchesPrefix("/usage", PROTECTED_PREFIXES)).toBe(true);
+    expect(matchesPrefix("/admin", PROTECTED_PREFIXES)).toBe(true);
+    expect(matchesPrefix("/admin/inquiries", PROTECTED_PREFIXES)).toBe(true);
     expect(matchesPrefix("/automations/abc/runs/1", PROTECTED_PREFIXES)).toBe(true);
     expect(matchesPrefix("/reset-password", PROTECTED_PREFIXES)).toBe(true);
   });
