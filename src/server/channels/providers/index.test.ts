@@ -61,3 +61,17 @@ describe("getNaverBlogCollector", () => {
     expect(getNaverBlogCollector()).toBe(collectNaverBlogMetrics);
   });
 });
+
+describe("getYouTubeAnalyticsCollector (ticket 1-10)", () => {
+  it("returns the mock collector when CHANNEL_DATA_PROVIDER=mock", async () => {
+    const { getYouTubeAnalyticsCollector } = await import("./index");
+    const { collectMockYouTubeAnalytics } = await import("./youtube-analytics-mock");
+    expect(getYouTubeAnalyticsCollector()).toBe(collectMockYouTubeAnalytics);
+  });
+
+  it("returns null when CHANNEL_DATA_PROVIDER=live — no real implementation exists yet, so callers must skip rather than call-and-catch", async () => {
+    serverEnvMock.CHANNEL_DATA_PROVIDER = "live";
+    const { getYouTubeAnalyticsCollector } = await import("./index");
+    expect(getYouTubeAnalyticsCollector()).toBeNull();
+  });
+});
