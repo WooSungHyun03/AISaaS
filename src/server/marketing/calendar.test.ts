@@ -8,7 +8,7 @@ const { createClientMock, generateStructuredMock } = vi.hoisted(() => ({
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
 
-const { CalendarPlanError, generateCalendarPlan, getMarketingCalendarPageData } = await import("./calendar");
+const { CalendarPlanError, generateCalendarPlan, getMarketingCalendarPageData, calendarPlanSchema } = await import("./calendar");
 
 const business = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -83,7 +83,7 @@ function makeClient({
 
 const generatedItems = [
   { date: "2026-03-01", platform: "blog", contentType: "정보형", topic: "첫 주 블로그", goal: "인지", summary: "요약", cta: "상담" },
-  { date: "2026-03-03", platform: "instagram_reels", contentType: "릴스", topic: "첫 주 릴스", goal: "관심", summary: "요약", cta: "저장" },
+  { date: "2026-03-03", platform: "youtube_shorts", contentType: "쇼츠", topic: "첫 주 쇼츠", goal: "관심", summary: "요약", cta: "저장" },
   { date: "2026-03-08", platform: "blog", contentType: "정보형", topic: "둘째 주 블로그", goal: "검색", summary: "요약", cta: "방문" },
   { date: "2026-03-10", platform: "youtube_shorts", contentType: "쇼츠", topic: "둘째 주 쇼츠", goal: "전환", summary: "요약", cta: "문의" },
 ];
@@ -97,6 +97,23 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe("calendarPlanSchema: instagram_reels is not generable (ticket 1-8)", () => {
+  const baseItem = { date: "2026-03-01", contentType: "정보형", topic: "주제", goal: "목표", summary: "요약", cta: "상담" };
+
+  it("rejects an item with platform: instagram_reels — the AI's structured-output schema itself can never produce one", () => {
+    const result = calendarPlanSchema.safeParse([{ ...baseItem, platform: "instagram_reels" }]);
+    expect(result.success).toBe(false);
+  });
+
+  it("still accepts blog and youtube_shorts", () => {
+    const result = calendarPlanSchema.safeParse([
+      { ...baseItem, platform: "blog" },
+      { ...baseItem, date: "2026-03-02", platform: "youtube_shorts" },
+    ]);
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("generateCalendarPlan", () => {

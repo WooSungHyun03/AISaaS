@@ -9,9 +9,19 @@ import { logger } from "@/lib/logger";
 import { CHANNEL_LABEL, collectPresentChannels } from "@/server/marketing/scoring";
 import type { Business, BusinessSnsLinks, CalendarItem, CalendarPlatform } from "@/types/domain";
 
+/**
+ * instagram_reels is deliberately not generable (ticket 1-8): it's a
+ * dead end that can't actually be produced and doesn't fit the
+ * blog/YouTube direction. calendar_items.platform's DB check constraint
+ * (0030) still allows it — narrowing that constraint would fail
+ * immediately against any existing instagram_reels row — so this zod
+ * enum is the only enforcement point. Same "DB stays permissive, app
+ * enum is stricter" shape as marketing_metric_snapshots.source/DEMO_SEED
+ * (0038, src/server/channels/snapshot-source.ts).
+ */
 const calendarPlanItemSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "날짜는 YYYY-MM-DD 형식이어야 합니다."),
-  platform: z.enum(["blog", "instagram_reels", "youtube_shorts"]),
+  platform: z.enum(["blog", "youtube_shorts"]),
   contentType: z.string().trim().min(1).max(100),
   topic: z.string().trim().min(1).max(300),
   goal: z.string().trim().min(1).max(300),
@@ -19,7 +29,7 @@ const calendarPlanItemSchema = z.object({
   cta: z.string().trim().min(1).max(300),
 });
 
-const calendarPlanSchema = z.array(calendarPlanItemSchema).min(1).max(28);
+export const calendarPlanSchema = z.array(calendarPlanItemSchema).min(1).max(28);
 const diagnosisSchema = z.record(z.string(), z.unknown());
 
 export type GeneratedCalendarPlanItem = z.infer<typeof calendarPlanItemSchema>;
@@ -174,7 +184,7 @@ function buildCalendarPrompt(
       `BUSINESS_NAME=${business.name}`,
       "",
       `${weeks}주 동안 매주 2~4개의 콘텐츠를 균형 있게 계획하세요.`,
-      "platform은 blog, instagram_reels, youtube_shorts 중 하나만 사용하세요.",
+      "platform은 blog, youtube_shorts 중 하나만 사용하세요.",
       "각 날짜는 계획 기간 안의 YYYY-MM-DD 형식이어야 하며 같은 날짜와 플랫폼 조합을 중복하지 마세요.",
       "topic은 서로 확연히 달라야 하고, summary는 글/영상에 꼭 들어가야 할 내용을 2~3문장으로 구체적으로 적으세요(콘텐츠 브리프).",
       "진단에서 부족하다고 나온 부분(없는 채널, 오래된 콘텐츠)을 채우는 주제를 우선하세요.",

@@ -170,7 +170,15 @@
   개수로 의미 유지). 새 테스트 3개(제외 후 저장, 병합 확인, 제외+부족으로 거부) + 기존
   "범위 밖이면 저장 안 함" 테스트가 "제외 후에도 부족해서 거부"로 의미가 바뀐 걸 확인.
   전체 테스트 937개 + typecheck + lint 통과.
-- [ ] **2단계** — `instagram_reels` 제거(zod 스키마 + 프롬프트) + 테스트(릴스 응답이 거부되는지)
+- [x] **2단계** — `calendarPlanItemSchema.platform`을 `z.enum(["blog","youtube_shorts"])`로
+  좁히고(위 결정 1 그대로), 프롬프트의 "platform은 blog, instagram_reels, youtube_shorts
+  중 하나만" 문구도 instagram_reels 삭제. `calendar_items.platform` DB 제약/타입은 안 바꿈.
+  테스트를 위해 `calendarPlanSchema`를 export하고(`generateStructured`가 모킹된 테스트
+  환경에서는 실제 zod 검증을 안 거치므로, 스키마 자체를 직접 `.safeParse()`로 검증) "릴스는
+  거부, blog/youtube_shorts는 허용" 테스트 2개 추가. 기존 테스트 fixture
+  (`generatedItems`)에 남아있던 `instagram_reels` 항목도 `youtube_shorts`로 교체(실제로는
+  절대 통과할 수 없는 값이 테스트 데이터에 섞여 있던 것 정리). 전체 테스트 939개 +
+  typecheck + lint 통과.
 - [ ] **3단계** — 진단 연동: `getLatestChannelDiagnosisSummary` 재사용, `DIAGNOSIS_REQUIRED` 제거,
   `hasDiagnosis` 갱신 + 테스트
 - [ ] **4단계** — `/calendar/page.tsx` 안내 문구/버튼 활성화 변경, `marketing/calendar/actions.ts`
