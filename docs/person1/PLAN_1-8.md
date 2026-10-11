@@ -202,8 +202,24 @@
   "이전 계획을 바꿨어요" 안내와 같은 조건부 패턴). 이 Server Action은 테스트 파일이 없었고
   새로 만들지 않음(해당 파일에 기존 테스트 관례 없음). 전체 테스트 1013개 + typecheck + lint
   통과.
-- [ ] **5단계** — 로컬에서 기존 릴스 `calendar_items` 행을 하나 만들어 `/calendar` 화면에서
-  깨지지 않고 보이는지 직접 확인 + lint/typecheck/test/build + git status
+- [x] **5단계** — 로컬 Supabase(이미 떠 있던 인스턴스)에 기존 데모 사업체 아래
+  `platform='instagram_reels'`인 `calendar_items` 행을 직접 insert(DB 체크 제약이 여전히
+  허용함을 재확인 — 결정 1이 실제로 그렇게 동작하는지 DB에서 직접 확인됨). 실제 로그인
+  세션으로 `/calendar`를 호출해 확인:
+  - 200, 서버 에러 없음.
+  - 레거시 릴스 항목("기존 릴스 항목(레거시 확인용)")이 "오늘 만들 콘텐츠" 섹션에 정상
+    표시되고, 플랫폼 라벨("인스타 릴스")도 그대로 나옴 — `calendar-item-dialog.tsx`를
+    안 건드렸어도 안 깨짐.
+  - "계획 만들기" select/버튼에 `disabled` 속성이 더 이상 없음(HTML 직접 확인) — 4단계
+    변경이 실제로 적용됨.
+  - 채널 진단이 없는 사업체라 "지금도 계획을 만들 수 있어요 ... 채널 진단을 받으면 더
+    정확해져요" 권장 톤 안내가 뜸(차단 아님) — 4단계 문구 변경 확인.
+  - `disabledReason()`은 그대로라 레거시 릴스 항목의 "콘텐츠 생성" 버튼은 여전히 "인스타
+    릴스 제작은 준비 중이에요"로 막혀 있음(변경 없음, 정상).
+  - 검증에 쓴 테스트 행·`.env.local`(로컬 Supabase로 바꿨던 것)·임시 스크립트는 전부
+    원상 복구/삭제함.
+  - `.next` 캐시 삭제 후 재빌드 → lint/typecheck/test(1013개)/`next build` 전부 통과
+    재확인.
 
 ## 기본 규칙 (AGENT_RULES.md 상속)
 기존 migration 수정 금지(이번엔 migration 자체를 안 만듦), AI는 `src/server/ai`만 사용,
