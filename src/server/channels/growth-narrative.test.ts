@@ -113,6 +113,30 @@ describe("getOrCreateGrowthNarrative", () => {
     });
   });
 
+  it("reuses a rule-based fallback from the last hour instead of retrying the AI on every load", async () => {
+    const recent = new Date(NOW.getTime() - 10 * 60 * 1000);
+    const client = makeClient({ selectResult: { data: { narrative: "fallback", ai_used: false, created_at: recent.toISOString() }, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await getOrCreateGrowthNarrative(trackedChannel, CHANNEL, BUSINESS, 7, NOW);
+
+    expect(result).toEqual({ narrative: "fallback", aiUsed: false });
+    expect(generateTextMock).not.toHaveBeenCalled();
+  });
+
+  it("retries the AI when today's cached row is a rule-based fallback older than an hour", async () => {
+    generateTextMock.mockResolvedValue("구독자가 50명 늘어서 1050명이 됐어요.");
+    const earlierToday = new Date(NOW.getTime() - 2 * 60 * 60 * 1000);
+    const client = makeClient({ selectResult: { data: { narrative: "fallback", ai_used: false, created_at: earlierToday.toISOString() }, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await getOrCreateGrowthNarrative(trackedChannel, CHANNEL, BUSINESS, 7, NOW);
+
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    expect(client.insertSpy).toHaveBeenCalledTimes(1);
+    expect(result.aiUsed).toBe(true);
+  });
+
   it("regenerates when the cached row is from a previous KST day", async () => {
     generateTextMock.mockResolvedValue("구독자가 50명 늘어서 1050명이 됐어요.");
     const yesterday = new Date(NOW.getTime() - 24 * 60 * 60 * 1000);

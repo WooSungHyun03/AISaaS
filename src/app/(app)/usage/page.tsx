@@ -17,6 +17,8 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { safeExternalUrl } from "@/lib/safe-external-url";
 
+export const metadata = { title: "이용내역" };
+
 type PeriodFilter = "7d" | "30d" | "90d" | "all";
 
 const PERIOD_OPTIONS: Array<{ value: PeriodFilter; label: string }> = [

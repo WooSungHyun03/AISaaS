@@ -9,6 +9,8 @@ import { PasswordForm } from "@/components/settings/password-form";
 import { DeleteAccountForm } from "@/components/settings/delete-account-form";
 import { EmptyState } from "@/components/ui/page-state";
 
+export const metadata = { title: "설정" };
+
 const INSTAGRAM_MESSAGE: Record<string, { variant: "success" | "info" | "error"; text: string }> = {
   connected: { variant: "success", text: "인스타그램 계정을 연결했어요." },
   denied: { variant: "info", text: "인스타그램 연결을 취소했어요. 권한을 확인하고 다시 시도할 수 있어요." },
@@ -54,7 +56,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="mx-auto max-w-5xl space-y-10">
-      <PageHeader title="설정" description="프로필, 비밀번호, 외부 서비스 연결과 계정을 관리해요." />
+      <PageHeader title="설정" description="프로필, 비밀번호, 외부 서비스 연결과 계정을 관리해요." actions={<Button asChild variant="outline"><Link href="/business">사업 정보 관리</Link></Button>} />
 
       {instagramMessage && <FormMessage variant={instagramMessage.variant}>{instagramMessage.text}</FormMessage>}
       {youtubeMessage && <FormMessage variant={youtubeMessage.variant}>{youtubeMessage.text}</FormMessage>}

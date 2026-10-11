@@ -18,6 +18,8 @@ function profileCompleteness(business: Business) {
   return { filled, total: fields.length, percent: Math.round((filled / fields.length) * 100) };
 }
 
+export const metadata = { title: "사업 정보" };
+
 export default async function BusinessPage() {
   const supabase = await createClient();
   const {

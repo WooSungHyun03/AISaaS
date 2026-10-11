@@ -22,3 +22,4 @@ export * from "./collect-pipeline";
 export * from "./collect-now";
 export * from "./youtube-analytics-scope";
 export * from "./youtube-analytics-pipeline";
+export * from "./remove";

@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, diagnoseWebsiteMock, revalidatePathMock, registerAndDiagnoseChannelMock, diagnoseChannelMock } = vi.hoisted(() => ({
+const { createClientMock, diagnoseWebsiteMock, revalidatePathMock, registerAndDiagnoseChannelMock, diagnoseChannelMock, removeTrackedChannelMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   diagnoseWebsiteMock: vi.fn(),
   revalidatePathMock: vi.fn(),
   registerAndDiagnoseChannelMock: vi.fn(),
   diagnoseChannelMock: vi.fn(),
+  removeTrackedChannelMock: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
@@ -16,10 +17,10 @@ vi.mock("@/server/marketing/diagnosis", async () => {
 });
 vi.mock("@/server/channels", async () => {
   const actual = await vi.importActual<typeof import("@/server/channels")>("@/server/channels");
-  return { ...actual, registerAndDiagnoseChannel: registerAndDiagnoseChannelMock, diagnoseChannel: diagnoseChannelMock };
+  return { ...actual, registerAndDiagnoseChannel: registerAndDiagnoseChannelMock, diagnoseChannel: diagnoseChannelMock, removeTrackedChannel: removeTrackedChannelMock };
 });
 
-const { runDiagnosis, addChannel, rediagnoseChannel } = await import("./actions");
+const { runDiagnosis, addChannel, rediagnoseChannel, removeChannel } = await import("./actions");
 const { DiagnosisError } = await import("@/server/marketing/diagnosis");
 const { ChannelsError, DiagnosisRateLimitError } = await import("@/server/channels");
 
@@ -370,5 +371,43 @@ describe("rediagnoseChannel", () => {
     const result = await rediagnoseChannel("channel-1");
 
     expect(result.error).toContain("한도");
+  });
+});
+
+describe("removeChannel", () => {
+  function signedIn(user: { id: string } | null = { id: "user-1" }) {
+    createClientMock.mockResolvedValue({ auth: { getUser: vi.fn().mockResolvedValue({ data: { user } }) } });
+  }
+
+  it("removes the channel and refreshes diagnosis and growth report", async () => {
+    signedIn();
+    removeTrackedChannelMock.mockResolvedValue({ status: "removed" });
+
+    await expect(removeChannel("channel-1")).resolves.toEqual({ channelId: "channel-1" });
+    expect(removeTrackedChannelMock).toHaveBeenCalledWith("channel-1");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/diagnosis");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/growth-report");
+  });
+
+  it("requires a signed-in user", async () => {
+    signedIn(null);
+    const result = await removeChannel("channel-1");
+    expect(result.error).toBe("로그인이 필요합니다.");
+    expect(removeTrackedChannelMock).not.toHaveBeenCalled();
+  });
+
+  it("reports a channel the caller cannot see as not found", async () => {
+    signedIn();
+    removeTrackedChannelMock.mockResolvedValue({ status: "not_found" });
+    const result = await removeChannel("other-channel");
+    expect(result.error).toBe("채널을 찾을 수 없습니다.");
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("maps a database failure to a Korean message", async () => {
+    signedIn();
+    removeTrackedChannelMock.mockRejectedValue(new ChannelsError("DATABASE_ERROR", "x"));
+    const result = await removeChannel("channel-1");
+    expect(result.error).toContain("삭제하지 못했어요");
   });
 });

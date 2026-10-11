@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { diagnoseWebsite, DiagnosisError } from "@/server/marketing/diagnosis";
 import type { ScoreItem } from "@/server/marketing/scoring";
-import { ChannelsError, DiagnosisRateLimitError, channelPlatformSchema, diagnoseChannel, registerAndDiagnoseChannel } from "@/server/channels";
+import { ChannelsError, DiagnosisRateLimitError, channelPlatformSchema, diagnoseChannel, registerAndDiagnoseChannel, removeTrackedChannel } from "@/server/channels";
 import type { ChannelPlatform } from "@/server/channels";
 import type { BusinessSnsLinks, Json } from "@/types/domain";
 
@@ -105,6 +105,26 @@ export async function rediagnoseChannel(channelId: string): Promise<ChannelActio
 
   revalidatePath("/diagnosis");
   return { channelId: channel.id };
+}
+
+/** "채널 삭제" — 더 이상 추적하지 않을 채널(잘못 입력한 주소 등)을 진단·스냅샷과 함께 지운다. 매일 수집에서도 빠진다. */
+export async function removeChannel(channelId: string): Promise<ChannelActionState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+
+  try {
+    const result = await removeTrackedChannel(channelId);
+    if (result.status === "not_found") return { error: "채널을 찾을 수 없습니다." };
+  } catch {
+    return { error: "채널을 삭제하지 못했어요. 잠시 후 다시 시도해주세요." };
+  }
+
+  revalidatePath("/diagnosis");
+  revalidatePath("/growth-report");
+  return { channelId };
 }
 
 export interface DiagnosisProfileSuggestions {

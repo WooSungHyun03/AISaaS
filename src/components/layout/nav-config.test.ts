@@ -65,4 +65,9 @@ describe("navigation information architecture", () => {
     expect(isNavActive("/settings/profile", settings)).toBe(true);
     expect(isNavActive("/settings-old", settings)).toBe(false);
   });
+
+  it("keeps 설정 active on the business profile page linked from diagnosis, blog and shorts", () => {
+    expect(getActiveNavItem("/business")?.href).toBe("/settings");
+    expect(getActiveNavItem("/businesses")).toBeUndefined();
+  });
 });

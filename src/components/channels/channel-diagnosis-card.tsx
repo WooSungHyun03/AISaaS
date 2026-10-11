@@ -1,6 +1,7 @@
 import { CircleAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { RediagnoseChannelButton } from "@/components/channels/rediagnose-channel-button";
+import { RemoveChannelButton } from "@/components/channels/remove-channel-button";
 import { PLATFORM_LABEL } from "@/server/channels/platform";
 import type { ChannelDiagnosisSummaryItem } from "@/server/channels";
 
@@ -30,7 +31,10 @@ export function ChannelDiagnosisCard({ item, narrative }: { item: ChannelDiagnos
           {item.completeness !== "COMPLETE" ? <Badge variant="warning">데이터 부족</Badge> : null}
           {item.dataSource === "mock" ? <Badge variant="secondary">샘플 데이터</Badge> : null}
         </div>
-        <RediagnoseChannelButton channelId={item.channelId} />
+        <div className="flex flex-wrap items-center gap-1">
+          <RediagnoseChannelButton channelId={item.channelId} />
+          <RemoveChannelButton channelId={item.channelId} channelLabel={PLATFORM_LABEL[item.channel]} />
+        </div>
       </div>
       <p className="break-all text-[13px] text-muted-foreground">{item.url}</p>
 

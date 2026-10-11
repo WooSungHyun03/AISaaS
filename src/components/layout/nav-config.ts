@@ -42,7 +42,7 @@ export const APP_NAV: NavSection[] = [
       { href: "/growth-report", label: "성장 리포트", icon: TrendingUp },
       { href: "/billing", label: "이용권·결제", icon: CreditCard },
       { href: "/support", label: "문의", icon: MessageCircleQuestion },
-      { href: "/settings", label: "설정", icon: Settings },
+      { href: "/settings", label: "설정", icon: Settings, activePaths: ["/business"] },
     ],
   },
 ];

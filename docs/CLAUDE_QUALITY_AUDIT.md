@@ -4,22 +4,44 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 `main`, fixes what it finds, verifies, and pushes. The next run starts its
 "new changes" review from the **last reviewed SHA** below.
 
-**Last reviewed SHA:** `fdccbe1` (2026-10-11 run — update the line on every run)
+**Last reviewed SHA:** `99914a8` (2026-10-12 run — update the line on every run)
 
 ## Open findings (carry over until fixed)
 
 | ID | Sev | Area / owner | Finding | Status |
 |---|---|---|---|---|
-| F-001 | P2 | layout / 팀원 2 | `/business` is no longer in `APP_NAV`; on that page no sidebar item is active. Pages still link to it (diagnosis, blog, shorts, growth report). Decide whether it lives under 설정 or 마케팅 진단 (`activePaths`). | open |
-| F-002 | P2 | usage / 팀원 2 | `/usage` re-exports the history page's default only, so it has no `metadata` title (tab shows the site default). `/settings` also has no title. | open |
-| F-003 | P1 | support / 팀원 2 | `/support` shows FAQ only — no way to send an inquiry. Terms/privacy now tell users to request refunds and account deletion via 문의, so the inquiry form is needed. | open (teammate ticket in progress) |
-| F-004 | P2 | dashboard / 팀원 2 | Dashboard still shows "진행 중인 만들기 설정 / 다음 제작 예정" stats from `automations`, but every `/automations` entry point was removed from navigation. | open |
+| F-001 | P2 | layout / 팀원 2 | `/business` is no longer in `APP_NAV`; on that page no sidebar item is active. | **fixed 2026-10-12** (설정 `activePaths: ["/business"]`, 설정 header links to 사업 정보 관리) |
+| F-002 | P2 | usage / 팀원 2 | `/usage`, `/settings`, `/business` had no `metadata` title. | **fixed 2026-10-12** |
+| F-003 | P1 | support / 팀원 2 | `/support` had no way to send an inquiry. | **fixed** by `f5aa889` (inquiries + admin answers) |
+| F-004 | P2 | dashboard / 팀원 2 | Dashboard showed automation stats although `/automations` left the nav. | **fixed** (no longer on the dashboard, checked 2026-10-12) |
 | F-005 | P1 | account | No self-service account deletion (privacy policy promises deletion on request). | **fixed 2026-10-11** (설정 > 회원 탈퇴) |
-| F-006 | P1 | migrations / 팀원 1·2 | 팀원 1 used `0040`–`0042` (ticket 1-5/1-7), which is 팀원 2's reserved range (0040–0049). 팀원 2's next migration must start at **0043** or later; check `ls supabase/migrations \| sort -V \| tail` before numbering. Claude uses 0050+. | open — tell both teammates |
-| F-007 | P2 | channels / 팀원 1 | A tracked channel can never be removed: `tracked_channels` has no delete policy and there is no UI. A mistyped channel stays on /diagnosis and the daily cron keeps spending YouTube/Naver quota on it. Needs a "채널 삭제" action (owner check + admin delete, or a delete policy). | open |
-| F-008 | P2 | channels / 팀원 1 | Growth narratives cache the rule-based fallback for the whole KST day when the AI call fails (`getOrCreateGrowthNarrative`), so one AI outage hides the AI text until tomorrow. | open (low) |
+| F-006 | P1 | migrations / 팀원 1·2 | 팀원 1 used `0040`–`0042` (ticket 1-5/1-7), which is 팀원 2's reserved range (0040–0049). 팀원 2's next migration must start at **0043** or later; check `ls supabase/migrations \| sort -V \| tail` before numbering. Claude uses 0050+. | superseded — migrations are now numbered sequentially across the team (0051–0066, Claude 0070); always `ls supabase/migrations | sort -V | tail` before numbering |
+| F-007 | P2 | channels / 팀원 1 | A tracked channel could never be removed (daily cron kept spending quota). | **fixed 2026-10-12** (/diagnosis 채널 카드 › 삭제) |
+| F-008 | P2 | channels / 팀원 1 | Growth narratives cached the rule-based fallback for the whole KST day. | **fixed 2026-10-12** (fallback reused for 1h only) |
+| F-009 | P2 | admin tests / 팀원 2 | `admin-security.db.test.ts` › "dashboard counts" compares live table counts and fails when the DB test files run in parallel (other files insert ledger rows in the same 60s window). Passes alone and with `--no-file-parallelism`. Run DB tests serially or assert deltas on fixture-only data. | open |
+| F-010 | P1 | billing refunds / 팀원 2 | Refund approval did not wait for a reservation opened before the request. If that run failed after approval, `release_credit` returned the credit to the grant and `admin_finalize_refund_request` raised **after Toss had cancelled the payment** — every retry hit the same mismatch (order stays PAID, payment cancelled). | **fixed 2026-10-12** (migration `0070`: approval refused while a reservation on the order is open) — **needs prod `db push`**. If 팀원 2 redefines `admin_review_refund_request` again, keep the open-reservation check. |
+| F-011 | P2 | billing refunds / 팀원 2 | `refund_requests` is unique per order and a REJECTED request blocks any new request for that order. When approval fails because the balance changed (user kept using credits after requesting), the only path is reject → the user can never request a refund for the remaining credits. Consider allowing a new request after REJECTED (partial unique index on non-rejected rows). | open (policy decision) |
 
 ## Run log
+
+### 2026-10-12 (run 3)
+
+- **Start SHA:** `99914a8` (49 commits since the run-2 commit `6438089`: 팀원 1 tickets 1-8~1-10 — calendar validation/skip/delete, YouTube Analytics; 팀원 2 refunds (0064), admin security + audit log (0065), admin operations / suspension / refund execution (0066); the user's credits billing, general calendar, inquiries, Shorts/blog pipelines, WordPress/email removal (0063)).
+- **Reviewed:** migrations 0064–0066 (grants, RLS, SECURITY DEFINER functions, `reserve_credit` freeze, refund review/finalize), `src/server/admin/*` (`requireAdmin`, audit, operations), every `(admin)` page and server action (all call `requireAdmin` first), suspension in middleware + app layout, user refund request flow, Toss cancel client, inquiries server/actions, account deletion against the new FKs, carried-over F-001…F-008.
+- **Findings & fixes**
+  - P1 (fixed, F-010) Refund approval vs. in-flight generation race → payment cancelled at Toss but order/credits never finalized. Migration `0070_refund_approval_waits_for_open_reservations.sql` (same function as 0066 + open-reservation check). DB regression test fails on 0066's definition and passes with 0070.
+  - P2 (fixed, F-007) "채널 삭제": `src/server/channels/remove.ts` reads the channel through the RLS-scoped client and deletes only that (id, business_id) with the service role (tracked_channels has no delete policy, so no migration needed); `removeChannel` action + confirmation dialog on each /diagnosis channel card. Diagnoses, snapshots and narratives cascade.
+  - P2 (fixed, F-008) Growth narrative rule-based fallback is reused for one hour, then the AI is retried (AI narratives still cached for the KST day).
+  - P2 (fixed, F-001/F-002) `/business` keeps 설정 active; 설정 header links to 사업 정보 관리; `/usage`, `/settings`, `/business` get tab titles.
+  - Checked, no issue: account deletion still works for a user with a refund request (`refund_requests.order_id ... on delete restrict` resolves inside the cascade — verified locally); customers cannot update `profiles.account_status` (column grant); admin RPCs are service-role only.
+  - Noted: F-009 flaky DB test in parallel, F-011 rejected refund blocks re-request.
+- **Tests added:** `src/server/channels/remove.test.ts`, `removeChannel` cases in `diagnosis/actions.test.ts`, two fallback-cache cases in `growth-narrative.test.ts`, `/business` active-nav case in `nav-config.test.ts`, F-010 case in `admin-operations.db.test.ts`.
+- **Verification:** `npm run lint` ✅, `npm run typecheck` ✅ (after clearing a stale `.next/dev/types` cache that still referenced the moved `(app)/admin` pages), `npm test` ✅ (133 files / 1153 tests, 7 DB files skipped by default), `npm run build` ✅. Local Supabase (`scripts/dev-db.sh reset`, 0001–0066 + 0070): `RUN_DB_TESTS=1 vitest --no-file-parallelism` on all `*.db.test.ts` ✅ 25/25, `npm run test:credits-db` ✅. Channel removal against the local DB: owner's direct REST delete affects 0 rows (no policy), another user cannot see the channel, the scoped service-role delete removes it and its snapshots. Browser smoke test **not run**: dev servers cannot be started from an unattended scheduled run.
+- **User-only actions**
+  1. Production DB: `npx supabase db push --linked --dry-run` then `npx supabase db push --linked` — now 0034–0066 **and 0070** (see `docs/DEPLOY_CHECKLIST_2026-10.md`). 0070 only replaces one function.
+  2. Tell 팀원 2: F-010 check lives in 0070 (do not drop it when changing `admin_review_refund_request`); F-009 / F-011 are theirs to decide. Next free migration numbers: 0067–0069 are left for teammates; Claude used 0070.
+- **Next run priorities:** browser smoke test of /billing/refunds, /admin/*, /diagnosis channel delete (needs an attended session or a running dev server); F-011 decision; per-request `profiles.account_status` query in middleware (one extra DB round-trip per navigation — measure before changing); review calendar general-purpose events (0061) RLS and the Shorts reference-image pipeline cost controls.
+- **Commit:** (see git log — `fix(refunds,channels): …` on 2026-10-12)
 
 ### 2026-10-11 (run 2)
 

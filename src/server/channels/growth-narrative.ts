@@ -85,6 +85,8 @@ export async function buildGrowthNarrative(channel: ChannelGrowthSeries, busines
   return { narrative: verified ?? ruleBased, aiUsed: verified !== null };
 }
 
+const FALLBACK_RETRY_MS = 60 * 60 * 1_000;
+
 type NarrativeRow = { narrative: string; ai_used: boolean; created_at: string };
 
 /**
@@ -115,7 +117,10 @@ export async function getOrCreateGrowthNarrative(
   if (selectError) throw new ChannelsError("DATABASE_ERROR", "기존 성장 해석을 확인하지 못했습니다.", { cause: selectError });
 
   const cached = latest as NarrativeRow | null;
-  if (cached && kstDate(Date.parse(cached.created_at)) === kstDate(now.getTime())) {
+  // A rule-based fallback (AI call failed) is only reused for an hour, so one
+  // AI outage does not hide the AI narrative for the rest of the KST day.
+  const fallbackStillFresh = cached !== null && now.getTime() - Date.parse(cached.created_at) < FALLBACK_RETRY_MS;
+  if (cached && kstDate(Date.parse(cached.created_at)) === kstDate(now.getTime()) && (cached.ai_used || fallbackStillFresh)) {
     return { narrative: cached.narrative, aiUsed: cached.ai_used };
   }
 
