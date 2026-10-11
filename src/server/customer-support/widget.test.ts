@@ -44,6 +44,8 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
     main_offering: null,
     strengths: null,
     marketing_goal: null,
+    promotion_type: null,
+    promotion_details: {},
     public_widget_id: REAL_WIDGET_ID,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",

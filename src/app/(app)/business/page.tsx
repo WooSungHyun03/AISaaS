@@ -9,6 +9,8 @@ import { AutoFillFromWebsiteButton } from "@/components/business/auto-fill-from-
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/ui/page-state";
 import type { Business } from "@/types/domain";
+import { promotionAnswers } from "@/lib/promotion";
+import { PROMOTION_LABEL } from "@/types/promotion";
 
 function profileCompleteness(business: Business) {
   const fields = [business.industry, business.description, business.location, business.target_customer, business.brand_tone, business.website, business.keywords.length ? "keywords" : null];
@@ -33,26 +35,30 @@ export default async function BusinessPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-8">
       <PageHeader
-        title="사업 정보"
-        description="진단과 콘텐츠를 만들 때 AI가 참고하는 우리 가게 정보예요. 자세히 적을수록 글이 가게다워져요."
+        title="홍보 대상 정보"
+        description="가게·상품·플랫폼 중 무엇을 홍보하는지에 따라 글과 영상이 달라져요. 자세히 적을수록 더 구체적으로 만들어드려요."
         actions={<BusinessFormDialog trigger={<Button><Plus aria-hidden="true" /> 새 사업체 등록</Button>} />}
       />
 
       {(businesses ?? []).length === 0 ? (
         <EmptyState
           mascot="welcome"
-          title="아직 등록된 가게가 없어요"
-          description="업체명만 적어도 시작할 수 있어요. 가게 정보가 있어야 진단과 콘텐츠를 가게에 맞게 만들어드려요."
-          action={<BusinessFormDialog trigger={<Button>첫 가게 등록하기</Button>} />}
+          title="아직 등록된 홍보 대상이 없어요"
+          description="이름만 적어도 시작할 수 있어요. 정보가 있어야 진단과 콘텐츠를 맞춤으로 만들어드려요."
+          action={<BusinessFormDialog trigger={<Button>첫 홍보 대상 등록하기</Button>} />}
         />
       ) : (
         <div className="space-y-6">
           {(businesses ?? []).map((business) => {
             const completeness = profileCompleteness(business);
+            const answers = business.promotion_type
+              ? promotionAnswers(business, business.promotion_type).filter((answer) => answer.key !== "name" && answer.key !== "website")
+              : [];
             const rows: Array<[string, React.ReactNode]> = [
-              ["가게 소개", business.description ? <span className="whitespace-pre-line">{business.description}</span> : null],
-              ["지역", business.location],
-              ["주요 손님", business.target_customer],
+              ...(business.promotion_type
+                ? answers.map((answer): [string, React.ReactNode] => [answer.label, answer.value])
+                : [["홍보 대상", <span key="type" className="text-destructive">아직 고르지 않았어요. ‘정보 수정’에서 가게·상품·플랫폼 중 하나를 골라주세요.</span>] as [string, React.ReactNode]]),
+              ["소개", business.description ? <span className="whitespace-pre-line">{business.description}</span> : null],
               ["브랜드 말투", business.brand_tone],
               [
                 "대표 키워드",
@@ -77,7 +83,8 @@ export default async function BusinessPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2.5">
                       <h2 id={`business-${business.id}`} className="text-xl font-extrabold tracking-[-0.03em]">{business.name}</h2>
-                      {business.industry ? <Badge variant="brand">{business.industry}</Badge> : null}
+                      {business.promotion_type ? <Badge variant="brand">{PROMOTION_LABEL[business.promotion_type]} 홍보</Badge> : <Badge variant="warning">홍보 대상 미선택</Badge>}
+                      {business.industry ? <Badge variant="secondary">{business.industry}</Badge> : null}
                     </div>
                   </div>
                   <div className="w-full sm:w-56">

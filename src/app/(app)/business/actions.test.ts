@@ -133,3 +133,35 @@ describe("createBusiness — SNS link ownership", () => {
     expect(inserted).toHaveLength(0);
   });
 });
+
+describe("createBusiness — promotion target", () => {
+  it("saves the chosen type with its extra answers, trimmed and without empty ones", async () => {
+    const { client, inserted } = makeClient();
+    createClientMock.mockResolvedValue(client);
+
+    const result = await createBusiness({}, formData({ ...BASE_FIELDS, promotionType: "PRODUCT", problem: " 눅눅해요 ", priceInfo: "", actionUrl: "https://shop.example/p/1", flow: "" }));
+
+    expect(result.error).toBeUndefined();
+    expect(inserted[0]).toMatchObject({ promotion_type: "PRODUCT", promotion_details: { problem: "눅눅해요", actionUrl: "https://shop.example/p/1" } });
+    expect(inserted[0].promotion_details).not.toHaveProperty("priceInfo");
+  });
+
+  it("rejects an unknown type and a purchase address that is not http(s)", async () => {
+    const { client, inserted } = makeClient();
+    createClientMock.mockResolvedValue(client);
+
+    expect((await createBusiness({}, formData({ ...BASE_FIELDS, promotionType: "COMPANY" }))).error).toContain("홍보 대상");
+    expect((await createBusiness({}, formData({ ...BASE_FIELDS, promotionType: "PRODUCT", actionUrl: "javascript:alert(1)" }))).error).toContain("주소");
+    expect(inserted).toHaveLength(0);
+  });
+
+  it("leaves the type alone when the form does not ask for it", async () => {
+    const { client, inserted } = makeClient();
+    createClientMock.mockResolvedValue(client);
+
+    await createBusiness({}, formData(BASE_FIELDS));
+
+    expect(inserted[0]).not.toHaveProperty("promotion_type");
+    expect(inserted[0]).not.toHaveProperty("promotion_details");
+  });
+});

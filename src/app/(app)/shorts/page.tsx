@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/page-state";
 import { toSafeAutomationRunOutput } from "@/server/automations/run-output";
 import { readDeferredJob } from "@/server/automations/runner";
 import { CreditNotice } from "@/components/billing/credit-notice";
+import { PromotionTargetCard } from "@/components/business/promotion-target-card";
 import { getUsableCredits } from "@/server/billing/run-credits";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
 
@@ -24,7 +25,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: businesses, error: businessError } = await supabase.from("businesses").select("id,name")
+  const { data: businesses, error: businessError } = await supabase.from("businesses").select("*")
     .eq("owner_id", user.id).order("created_at");
   if (businessError) throw new Error("사업체 정보를 불러오지 못했습니다.", { cause: businessError });
   const selectedBusiness = businesses?.find((business) => business.id === query.business) ?? businesses?.[0];
@@ -41,7 +42,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   if (automationError) throw new Error("숏폼 설정을 불러오지 못했습니다.", { cause: automationError });
 
   const businessPicker = businesses && businesses.length > 1 ? <nav className="flex flex-wrap gap-2" aria-label="사업체 선택">{businesses.map((business) => <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness.id ? "default" : "outline"}><Link href={`/shorts?business=${business.id}`} aria-current={business.id === selectedBusiness.id ? "page" : undefined}>{business.name}</Link></Button>)}</nav> : null;
-  if (!automation) return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<EmptyState mascot="point" title={`${selectedBusiness.name}의 숏폼을 시작해보세요`} description="기본 예약 설정을 만든 뒤 바로 AI 영상 미리보기를 생성할 수 있어요." action={<ShortsCreateButton businessId={selectedBusiness.id} />} /></div>;
+  if (!automation) return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<EmptyState mascot="point" title={`${selectedBusiness.name}의 숏폼을 시작해보세요`} description="기본 예약 설정을 만든 뒤 바로 AI 영상 미리보기를 생성할 수 있어요." action={<ShortsCreateButton businessId={selectedBusiness.id} />} /></div>;
 
   const [runsResult, connectionsResult, inFlightResult] = await Promise.all([
     supabase.from("automation_runs").select("id,status,output,created_at").eq("automation_id", automation.id).order("created_at", { ascending: false }).limit(30),
@@ -78,7 +79,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const referenceSettings = parseShortsReferenceSettings(automation.config);
   const referenceViews = await referenceViewsFor(referenceSettings.references, user.id, automation.id);
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} hasImages={referenceViews.length > 0} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} hasImages={referenceViews.length > 0} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
 }
 
 function PageHeading() {

@@ -129,3 +129,33 @@ describe("assignIssues", () => {
     expect(assignIssues(mockPost(), issues).get(4)).toEqual(["표현을 빼 주세요"]);
   });
 });
+
+describe("assessBlogPost — claims that must not be invented", () => {
+  function withParagraph(text: string): BlogPost {
+    const post = mockPost();
+    return { ...post, sections: post.sections.map((section, index) => (index === 2 ? { ...section, blocks: [{ type: "paragraph", text }, ...section.blocks] } : section)) };
+  }
+  const messagesFor = (post: BlogPost, extra: Partial<Parameters<typeof assessBlogPost>[0]> = {}) =>
+    assessBlogPost({ post, keywords, facts, ...extra }).filter((issue) => issue.section === 2).map((issue) => issue.message).join(" ");
+
+  it("flags invented customer praise, review quotes and ratings", () => {
+    for (const text of ["많은 분들이 저희 빵을 찾아주세요.", "손님들이 극찬하는 소금빵이에요.", "후기를 보면 다시 오시는 분이 많아요.", "평점 4.8의 인기 가게예요."]) {
+      expect(messagesFor(withParagraph(text))).toContain("평가를 지어내지 마세요");
+    }
+  });
+
+  it("lets the post talk about reviews when the owner's own facts mention them", () => {
+    expect(messagesFor(withParagraph("손님들이 극찬하는 소금빵이에요."), { facts: `${facts}\n사장님 메모: 네이버 후기에서 극찬을 받았어요` })).not.toContain("평가를 지어내지 마세요");
+  });
+
+  it("flags effect claims only for products, and not when the owner stated them", () => {
+    const post = withParagraph("꾸준히 바르면 주름 개선과 피부 재생에 도움을 줘요.");
+    expect(messagesFor(post, { promotionType: "PRODUCT" })).toContain("효능·효과");
+    expect(messagesFor(post, { promotionType: "STORE" })).not.toContain("효능·효과");
+    expect(messagesFor(post, { promotionType: "PRODUCT", facts: `${facts}\n주요 특징: 주름 개선 기능성 인증, 피부 재생 성분` })).not.toContain("효능·효과");
+  });
+
+  it("treats ratings and multiples written with a unit as numbers that need a source", () => {
+    expect(messagesFor(withParagraph("만족도 조사에서 4.9점, 작업 시간이 3배 빨라졌어요."))).toContain("제공되지 않은 숫자");
+  });
+});

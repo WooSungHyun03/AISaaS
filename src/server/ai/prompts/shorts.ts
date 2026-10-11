@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { Business } from "@/types/domain";
 import { MAX_SHORTS_REFERENCES, type ShortsFormat, type ShortsStyle } from "@/types/shorts-reference";
+import { promotionFactLines, promotionGuidance, resolvePromotionType } from "@/server/promotion/strategy";
+import { PROMOTION_LABEL } from "@/types/promotion";
 
 /** Fallback movements when the image is only tweened (no animation service); see json2video-skit.ts. */
 const TWEEN_MOTIONS = ["pop", "bounce", "wobble", "shake", "slide", "zoom"] as const;
@@ -148,29 +150,20 @@ export function makeShortsPlanSchema(allowed: ShortsFormat[]) {
 }
 
 function buildBusinessContext(business: Business): string {
+  const type = resolvePromotionType(business);
   return [
-    "You are a Korean short-form video strategist for a small business.",
-    `Business name: ${business.name}`,
-    business.industry ? `Industry: ${business.industry}` : null,
-    business.location ? `Location: ${business.location}` : null,
+    `You are a Korean short-form video strategist. What is promoted: a ${PROMOTION_LABEL[type]} (${type}).`,
+    ...promotionFactLines(business, type),
     business.description ? `Description: ${business.description}` : null,
-    business.target_customer ? `Target customer: ${business.target_customer}` : null,
     business.brand_tone ? `Brand tone: ${business.brand_tone}` : null,
-    business.keywords.length ? `Business keywords: ${business.keywords.join(", ")}` : null,
+    business.keywords.length ? `Keywords: ${business.keywords.join(", ")}` : null,
+    ...promotionGuidance(type, "shorts"),
     [
-      "Adapt the story and visual language to the business industry and target customer.",
-      "Food/retail should show the product, texture, use, or visit moment; beauty/fitness should show a relatable concern and visible process;",
-      "professional services should make an abstract problem concrete with a quick example; education should teach one immediately useful insight.",
-      "For any other industry, choose equally specific proof and visuals rather than generic stock footage.",
+      "Every video follows this order: Hook -> Problem or first impression -> Solution or proof -> CTA, staged with the storyline above.",
+      "Hook: stop scrolling in 1-3 seconds with one concrete promise, question, or surprising fact taken from the facts.",
+      "CTA: end with one natural next action that matches the type and uses only the address/contact the facts give.",
     ].join(" "),
-    [
-      "Every video must follow this order: Hook -> Problem -> Solution -> CTA.",
-      "Hook: stop scrolling in 1-3 seconds with one concrete promise, question, or surprising fact.",
-      "Problem: name one situation the target customer immediately recognizes.",
-      "Solution: show how this business resolves it with a specific benefit or proof.",
-      "CTA: end with one natural next action that matches the business and topic.",
-    ].join(" "),
-    "Write spoken text in short, natural Korean sentences. Do not make unverifiable guarantees or fabricate prices, reviews, awards, or statistics.",
+    "Write spoken text in short, natural Korean sentences. Do not make unverifiable guarantees or fabricate prices, reviews, awards, statistics, user counts or effects.",
   ]
     .filter(Boolean)
     .join("\n");

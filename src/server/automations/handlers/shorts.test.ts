@@ -99,6 +99,8 @@ const business: Business = {
   main_offering: null,
   strengths: null,
   marketing_goal: null,
+  promotion_type: null,
+  promotion_details: {},
   public_widget_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
@@ -190,9 +192,10 @@ describe("shortsAutomationHandler", () => {
 
     const topicRequest = generateStructuredMock.mock.calls[0][0] as { prompt: string; system: string };
     const planRequest = generateStructuredMock.mock.calls[1][0] as { prompt: string; system: string };
-    expect(topicRequest.system).toContain("Industry: 베이커리");
+    expect(topicRequest.system).toContain("업종: 베이커리");
     expect(topicRequest.prompt).toContain("이지 마케팅을 소개해줘");
-    expect(planRequest.system).toContain("Hook -> Problem -> Solution -> CTA");
+    expect(planRequest.system).toContain("Hook -> Problem or first impression -> Solution or proof -> CTA");
+    expect(planRequest.system).toContain("Short storyline:");
     expect(planRequest.prompt).toContain("1. [character] 이지 마케팅 마스코트 로봇");
     expect(planRequest.prompt).toContain("3. [character] 놀란 표정의 고양이 일러스트");
 

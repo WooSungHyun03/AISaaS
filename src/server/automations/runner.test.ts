@@ -103,7 +103,7 @@ const AUTOMATION = {
   updated_at: "2026-01-01T00:00:00.000Z",
 };
 
-const BUSINESS = { id: "biz-1", owner_id: "user-1", name: "Test Biz" };
+const BUSINESS = { id: "biz-1", owner_id: "user-1", name: "Test Biz", promotion_type: "STORE" };
 const TEMPLATE = { id: "tmpl-1", slug: "blog-marketing", name: "Blog Marketing", is_active: true };
 
 function noInFlight(): Result {
@@ -472,5 +472,22 @@ describe("runDueAutomation / runAutomationNow — exception isolation", () => {
     expect(admin.updates.automation_runs[0]).toMatchObject({ status: "FAILED" });
     // [0] advances the schedule, [1] records last_run_at, and [2] parks the automation.
     expect(admin.updates.automations[2]).toMatchObject({ status: "ERROR" });
+  });
+
+  it("refuses blog and shorts runs until the owner has chosen what is promoted, without touching credits", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: AUTOMATION, error: null }],
+      businesses: [{ data: { ...BUSINESS, promotion_type: null }, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [{ data: { id: "refused-type" }, error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorMessage).toContain("홍보 대상");
+    expect(getHandlerMock).not.toHaveBeenCalled();
+    expect(reserveCreditMock).not.toHaveBeenCalled();
   });
 });

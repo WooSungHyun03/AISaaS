@@ -32,6 +32,20 @@ export const AI_TELL_PHRASES = [
 
 export const UNPROVABLE_CLAIMS = ["최고의", "최고급", "최저가", "1등", "일등", "유일한", "압도적", "혁신적", "100%", "완벽한", "세계 최초", "국내 최초"] as const;
 
+/**
+ * Social proof the writer must not invent: reviews, "many customers love it", ratings. A post may say these only
+ * when the owner's own facts already mention reviews/ratings.
+ */
+const SOCIAL_PROOF_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /(고객|손님|사용자|이용자|구매자)(님)?(들)?(이|은|들은|께서)[^.!?\n]{0,14}(극찬|만족해|추천해|인정|호평|입소문)/, label: "손님·사용자의 평가" },
+  { pattern: /(많은|수많은)\s*(분들|고객|손님|사용자|이용자)(님)?(들)?(이|께서)[^.!?\n]{0,12}(찾|선택|사랑|만족|추천)/, label: "‘많은 분들이’ 식의 평가" },
+  { pattern: /후기(를|에서|들을)?[^.!?\n]{0,8}(보면|따르면|살펴보면)/, label: "후기 인용" },
+  { pattern: /(재방문율|재구매율|만족도|평점|별점)[^.!?\n]{0,8}\d/, label: "평점·만족도 수치" },
+];
+
+/** Effect claims for goods (cosmetics, food, health): advertising rules treat these as unprovable unless the owner states them. */
+const EFFICACY_CLAIMS = ["치료", "완치", "효과가 입증", "임상", "살이 빠", "체중 감량", "주름 개선", "피부 재생", "면역력", "항암", "디톡스", "독소 배출", "부작용이 없", "부작용 없"] as const;
+
 export const BLOG_LENGTH = {
   /** Naver-style count: characters without spaces. */
   minTotal: 1_500,
@@ -61,10 +75,12 @@ export interface BlogQualityInput {
   keywords: string[];
   /** Everything the writer was allowed to rely on; numbers with units must come from here. */
   facts: string;
+  /** What is promoted; products also get the effect-claim check. */
+  promotionType?: "STORE" | "PRODUCT" | "PLATFORM";
 }
 
 const EMOJI = /\p{Extended_Pictographic}/gu;
-const NUMBER_WITH_UNIT = /\d[\d,.]*\s*(?:원|만원|천원|%|퍼센트|시간|시|분|초|명|년|월|일|호|km|m|kg|g|ml|인분)/g;
+const NUMBER_WITH_UNIT = /\d[\d,.]*\s*(?:원|만원|천원|%|퍼센트|시간|시|분|초|명|년|개월|월|일|호|km|m|kg|g|ml|인분|배|점)/g;
 
 function sectionText(section: BlogSection): string {
   return postBodyText({ title: "", sections: [section], hashtags: [] });
@@ -89,7 +105,7 @@ function endings(text: string): string[] {
  * (never the whole post, never a loop). Messages are Korean fix instructions
  * that are fed straight back to the writer.
  */
-export function assessBlogPost({ post, keywords, facts }: BlogQualityInput): BlogIssue[] {
+export function assessBlogPost({ post, keywords, facts, promotionType }: BlogQualityInput): BlogIssue[] {
   const issues: BlogIssue[] = [];
   const body = postBodyText(post);
   const total = countCharsNoSpaces(body);
@@ -151,6 +167,15 @@ export function assessBlogPost({ post, keywords, facts }: BlogQualityInput): Blo
     if (tells.length > 0) issues.push({ kind: "wording", section: index, message: `상투적인 표현을 빼 주세요: ${tells.slice(0, 4).map((phrase) => `“${phrase}”`).join(", ")}.` });
     const claims = UNPROVABLE_CLAIMS.filter((phrase) => text.includes(phrase));
     if (claims.length > 0) issues.push({ kind: "wording", section: index, message: `증명할 수 없는 과장 표현을 빼 주세요: ${claims.slice(0, 4).map((phrase) => `“${phrase}”`).join(", ")}.` });
+    // Invented social proof, unless the owner's own facts bring reviews into it.
+    if (!/후기|리뷰|평점|별점|만족도/.test(facts)) {
+      const proof = SOCIAL_PROOF_PATTERNS.filter(({ pattern }) => pattern.test(text));
+      if (proof.length > 0) issues.push({ kind: "wording", section: index, message: `제공되지 않은 평가를 지어내지 마세요(${proof.map((item) => item.label).join(", ")}). 후기·평점·‘많은 분들이’ 같은 표현을 빼고 사실만 써 주세요.` });
+    }
+    if (promotionType === "PRODUCT") {
+      const effects = EFFICACY_CLAIMS.filter((phrase) => text.includes(phrase) && !facts.includes(phrase));
+      if (effects.length > 0) issues.push({ kind: "wording", section: index, message: `효능·효과를 단정하는 표현을 빼 주세요: ${effects.slice(0, 4).map((phrase) => `“${phrase}”`).join(", ")}. 제공된 특징만 설명해 주세요.` });
+    }
     if ((text.match(/!/g) ?? []).length > 4) issues.push({ kind: "wording", section: index, message: "느낌표를 줄여 주세요(부분당 4개 이하)." });
 
     // Numbers with units that the facts never mentioned are the most likely inventions.

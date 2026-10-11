@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { validateSnsLink, type SnsLinkKey } from "@/lib/sns-links";
-import type { BusinessSnsLinks } from "@/types/domain";
+import type { BusinessSnsLinks, Json } from "@/types/domain";
+import { isPromotionType, PROMOTION_DETAIL_LIMITS, type PromotionDetails, type PromotionType } from "@/types/promotion";
 
 export interface BusinessActionState {
   error?: string;
@@ -32,7 +33,14 @@ function snsLinksFromForm(formData: FormData): BusinessSnsLinks {
   return links;
 }
 
+function promotionDetailsFromForm(formData: FormData): PromotionDetails {
+  const read = (key: string) => String(formData.get(key) ?? "").trim() || undefined;
+  const details: PromotionDetails = { problem: read("problem"), priceInfo: read("priceInfo"), actionUrl: read("actionUrl"), flow: read("flow") };
+  return Object.fromEntries(Object.entries(details).filter(([, value]) => value !== undefined)) as PromotionDetails;
+}
+
 function businessFieldsFromForm(formData: FormData) {
+  const promotionTypeRaw = String(formData.get("promotionType") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const services = String(formData.get("services") ?? "").trim();
   return {
@@ -48,11 +56,27 @@ function businessFieldsFromForm(formData: FormData) {
     strengths: String(formData.get("strengths") ?? "").trim() || null,
     marketing_goal: String(formData.get("marketingGoal") ?? "").trim() || null,
     sns_links: snsLinksFromForm(formData),
+    // Forms that do not ask the question (older dialogs, tests) must not wipe an earlier answer.
+    ...(promotionTypeRaw ? { promotion_type: promotionTypeRaw as PromotionType, promotion_details: promotionDetailsFromForm(formData) as unknown as Json } : {}),
   };
 }
 
 function validateBusinessFields(fields: ReturnType<typeof businessFieldsFromForm>): string | null {
   if (!fields.name) return "사업체 이름을 입력해주세요.";
+  if ("promotion_type" in fields && !isPromotionType(fields.promotion_type)) return "홍보 대상(가게·상품·플랫폼)을 다시 골라주세요.";
+  const details = (fields.promotion_details ?? {}) as PromotionDetails;
+  if ((details.problem?.length ?? 0) > PROMOTION_DETAIL_LIMITS.problem || (details.priceInfo?.length ?? 0) > PROMOTION_DETAIL_LIMITS.priceInfo
+    || (details.flow?.length ?? 0) > PROMOTION_DETAIL_LIMITS.flow || (details.actionUrl?.length ?? 0) > PROMOTION_DETAIL_LIMITS.actionUrl) {
+    return "해결하는 문제, 가격, 사용 흐름, 주소 입력 길이를 확인해주세요.";
+  }
+  if (details.actionUrl) {
+    try {
+      const url = new URL(details.actionUrl);
+      if (url.protocol !== "http:" && url.protocol !== "https:") return "구매·가입 주소는 http 또는 https 주소로 입력해주세요.";
+    } catch {
+      return "구매·가입 주소 형식을 확인해주세요.";
+    }
+  }
   if (fields.name.length > 100) return "사업체 이름은 100자 이하로 입력해주세요.";
   if ((fields.industry?.length ?? 0) > 100 || (fields.location?.length ?? 0) > 200) return "업종과 위치 입력이 너무 깁니다.";
   if ((fields.description?.length ?? 0) > 2500 || (fields.target_customer?.length ?? 0) > 500 || (fields.brand_tone?.length ?? 0) > 200) return "사업 정보 입력 길이를 확인해주세요.";

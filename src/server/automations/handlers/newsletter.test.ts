@@ -45,6 +45,8 @@ const business: Business = {
   main_offering: null,
   strengths: null,
   marketing_goal: null,
+  promotion_type: null,
+  promotion_details: {},
   public_widget_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",

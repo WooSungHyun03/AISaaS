@@ -22,6 +22,8 @@ import { assessBlogPost, assignIssues } from "@/server/ai/blog-quality";
 import { postToMarkup } from "@/server/blog/markup";
 import { blogSectionSchema, countCharsNoSpaces, postBodyText, stripInlineMarkup, type BlogBlock, type BlogPost, type BlogSection } from "@/server/blog/post";
 import { renderBlogHtml } from "@/server/blog/render";
+import { promotionFieldValue } from "@/lib/promotion";
+import { resolvePromotionType } from "@/server/promotion/strategy";
 import { blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
 import { z } from "zod";
 import type { AutomationHandler, AutomationHandlerOutcome, AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
@@ -135,20 +137,41 @@ async function writeSection(
   return { heading: kind === "body" ? state.outline.sections[bodyIndex].heading : undefined, blocks };
 }
 
-/** Business facts as the box at the end of the post — built from the profile, never written by the AI. */
+/** The facts box at the end of the post — built from what the owner entered for this type, never written by the AI. */
 function infoSection(ctx: AutomationRunContext): BlogSection | null {
   const { business } = ctx;
-  const rows = [
-    business.location ? { label: "📍 위치", value: business.location } : null,
-    business.main_offering ? { label: "🛍️ 대표 메뉴·서비스", value: business.main_offering } : null,
-    business.website ? { label: "🔗 웹사이트", value: business.website } : null,
-  ].filter((row): row is { label: string; value: string } => Boolean(row));
+  const type = resolvePromotionType(business);
+  const value = (key: Parameters<typeof promotionFieldValue>[1]) => promotionFieldValue(business, key);
+  const candidates: Array<{ label: string; value: string | null }> =
+    type === "PRODUCT"
+      ? [
+        { label: "🛍️ 상품", value: value("name") },
+        { label: "✨ 주요 특징", value: value("mainOffering") },
+        { label: "💰 가격", value: value("priceInfo") },
+        { label: "🔗 구매하기", value: value("actionUrl") },
+      ]
+      : type === "PLATFORM"
+        ? [
+          { label: "💻 서비스", value: value("name") },
+          { label: "✨ 주요 기능", value: value("mainOffering") },
+          { label: "🌐 홈페이지", value: value("website") },
+          { label: "🚀 시작하기", value: value("actionUrl") },
+        ]
+        : [
+          { label: "📍 위치", value: value("location") },
+          { label: "🛍️ 대표 메뉴·서비스", value: value("mainOffering") },
+          { label: "💰 가격·프로모션", value: value("priceInfo") },
+          { label: "🔗 웹사이트", value: value("website") },
+        ];
+  const rows = candidates.filter((row): row is { label: string; value: string } => Boolean(row.value));
   if (rows.length === 0) return null;
-  return { heading: `📌 ${business.name} 정보`, blocks: [{ type: "info", rows }] };
+  const heading = type === "PRODUCT" ? `📌 ${business.name} 정보` : type === "PLATFORM" ? `📌 ${business.name} 시작하기` : `📌 ${business.name} 정보`;
+  return { heading, blocks: [{ type: "info", rows }] };
 }
 
 function hashtagsFor(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined, outline: BlogOutline): string[] {
-  const location = ctx.business.location?.split(/[\s,]+/).find((part) => part.length >= 2);
+  // A place name only helps a store's local search; products and platforms are not found by neighbourhood.
+  const location = resolvePromotionType(ctx.business) === "STORE" ? ctx.business.location?.split(/[\s,]+/).find((part) => part.length >= 2) : undefined;
   const raw = [
     ...(config?.keywords ?? []),
     ...ctx.business.keywords,
@@ -229,7 +252,7 @@ async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | 
   const firstParagraph = state.sections[0]?.blocks.find((block) => block.type === "paragraph");
   const excerpt = stripInlineMarkup(firstParagraph && "text" in firstParagraph ? firstParagraph.text : text).replace(/\s+/g, " ").slice(0, 140);
   const photoSlots = post.sections.flatMap((section) => section.blocks).filter((block) => block.type === "photo").map((block) => ("slot" in block ? block.slot : ""));
-  const remaining = assessBlogPost({ post, keywords: qualityKeywords(ctx, config), facts: buildBlogFacts(ctx.business, config).text }).map((issue) => issue.message);
+  const remaining = assessBlogPost({ post, keywords: qualityKeywords(ctx, config), facts: buildBlogFacts(ctx.business, config).text, promotionType: resolvePromotionType(ctx.business) }).map((issue) => issue.message);
   const delivery = await deliver(ctx, config, post, bodyHtml, excerpt);
   const markup = postToMarkup(post);
 
@@ -238,6 +261,7 @@ async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | 
       title: post.title,
       topic: state.topic,
       platform: config?.platform ?? "naver",
+      promotionType: resolvePromotionType(ctx.business),
       markup,
       bodyHtml,
       excerpt,
@@ -308,7 +332,7 @@ export const blogAutomationHandler: AutomationHandler = {
 
       // Everything is written: check it, and queue a one-time rewrite of only the sections that fail.
       const post = assemble(ctx, config, state, false);
-      const issues = assessBlogPost({ post, keywords: qualityKeywords(ctx, config), facts: buildBlogFacts(ctx.business, config).text });
+      const issues = assessBlogPost({ post, keywords: qualityKeywords(ctx, config), facts: buildBlogFacts(ctx.business, config).text, promotionType: resolvePromotionType(ctx.business) });
       const assigned = assignIssues(post, issues);
       if (assigned.size === 0) return finish(ctx, config, state);
       // At most four sections are rewritten, the ones with the most problems.

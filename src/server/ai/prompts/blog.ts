@@ -3,6 +3,7 @@ import type { Business } from "@/types/domain";
 import type { BlogAutomationConfig } from "@/types/blog-automation";
 import { AI_TELL_PHRASES, BLOG_LENGTH, UNPROVABLE_CLAIMS } from "@/server/ai/blog-quality";
 import { blogBlockSchema, type BlogPlatform, type BlogSection } from "@/server/blog/post";
+import { promotionFactLines, promotionGuidance, PROMOTION_STRATEGY, resolvePromotionType } from "@/server/promotion/strategy";
 
 export const blogTopicSchema = z.object({
   topic: z.string().min(1),
@@ -16,6 +17,8 @@ export const blogOutlineSchema = z.object({
   title: z.string().trim().min(6).max(80),
   reader: z.string().trim().min(1).max(200),
   angle: z.string().trim().min(1).max(300),
+  /** What the searcher wants to get done — the post must answer exactly that. */
+  searchIntent: z.string().trim().max(300).optional(),
   hookIdea: z.string().trim().min(1).max(300),
   sections: z
     .array(
@@ -42,16 +45,10 @@ export const blogSectionOutputSchema = z.object({ blocks: z.array(blogBlockSchem
 /** Facts the writer may rely on, as lines, plus the same text for the numeric fact check. */
 export function buildBlogFacts(business: Business, config?: BlogAutomationConfig, calendar?: { goal: string; summary: string; cta: string }): { lines: string[]; text: string } {
   const lines = [
-    `상호: ${business.name}`,
-    business.industry ? `업종: ${business.industry}` : null,
-    business.location ? `위치: ${business.location}` : null,
+    ...promotionFactLines(business, resolvePromotionType(business)),
     business.description ? `소개: ${business.description}` : null,
-    business.main_offering ? `대표 상품/서비스: ${business.main_offering}` : null,
-    business.strengths ? `강점: ${business.strengths}` : null,
-    business.target_customer ? `주요 고객: ${business.target_customer}` : null,
     business.marketing_goal ? `마케팅 목표: ${business.marketing_goal}` : null,
     business.brand_tone ? `브랜드 톤: ${business.brand_tone}` : null,
-    business.website ? `웹사이트: ${business.website}` : null,
     business.keywords.length ? `업체 키워드: ${business.keywords.join(", ")}` : null,
     config?.objective ? `이번 글의 목적: ${config.objective}` : null,
     config?.keywords.length ? `이번 글의 핵심 키워드: ${config.keywords.join(", ")}` : null,
@@ -87,9 +84,11 @@ const WRITING_RULES = [
 
 function buildSystem(business: Business, platform: Exclude<BlogPlatform, "generic">, config?: BlogAutomationConfig, calendar?: { goal: string; summary: string; cta: string }): string {
   const facts = buildBlogFacts(business, config, calendar);
+  const type = resolvePromotionType(business);
   return [
     WRITING_RULES,
     PLATFORM_STYLE[platform],
+    ...promotionGuidance(type, "blog").slice(0, 3),
     config?.tone ? `Tone for this automation: ${config.tone}` : null,
     "FACTS (the only things you may state as true):",
     facts.text,
@@ -113,7 +112,8 @@ export function buildBlogTopicPrompt(
     : "";
 
   const prompt = [
-    "Pick one specific blog topic that a local customer searching Naver or Google would click, relevant to this business.",
+    "Pick one specific blog topic that a customer searching Naver or Google would click, relevant to what is promoted.",
+    `Choose one of these angles (and vary it from recent topics): ${PROMOTION_STRATEGY[resolvePromotionType(business)].angles.join(" | ")}.`,
     avoid,
     "Return JSON with exactly these fields:",
     '{ "topic": "short topic phrase", "title": "catchy blog title" }',
@@ -140,12 +140,14 @@ export function buildBlogOutlinePrompt({ business, topic, title, config, calenda
     "AUTOBIZ_BLOG_OUTLINE_V1",
     `Plan one marketing blog post about "${topic}" (working title: "${title}").`,
     `Length target: about ${BLOG_LENGTH.targetTotal} Korean characters without spaces in total, as an intro, 5-7 sub-headed sections and a closing.`,
-    "Choose one angle that a real reader searching this topic would want answered, and build the sections so each one gives a reason to keep reading and a reason to choose this business.",
+    ...promotionGuidance(resolvePromotionType(business), "blog").slice(3),
+    "Choose one angle that a real reader searching this topic would want answered, and build the sections so each one gives a reason to keep reading and a reason to choose what is promoted.",
+    "State the searcher's intent in searchIntent and make the post answer exactly that, early.",
     "Every section's points must come from the FACTS; where facts are thin, plan sections about the reader's situation, how to choose, what to look for, or how the business works — never invented specifics.",
     "Distribute photo spots (what the owner's own photo should show) across at least 4 sections, one quote section and one callout section, and a list where it helps.",
     "The final title: main keyword near the front, 15-35 characters, specific and honest.",
     "Return JSON with exactly these fields:",
-    '{ "title": "final title", "reader": "who this is for and what they want", "angle": "the one angle of this post", "hookIdea": "how the first two sentences hook the reader", "sections": [{ "heading": "🥐 sub-heading starting with one emoji", "purpose": "what this section does for the reader", "points": ["fact-based point"], "photo": "what the photo here shows or null", "extra": "quote|callout|list|none" }], "closing": { "takeaway": "one-line takeaway", "cta": "one soft, specific call to action" } }',
+    '{ "title": "final title", "reader": "who this is for and what they want", "angle": "the one angle of this post", "searchIntent": "what the searcher wants to get done", "hookIdea": "how the first two sentences hook the reader", "sections": [{ "heading": "🥐 sub-heading starting with one emoji", "purpose": "what this section does for the reader", "points": ["fact-based point"], "photo": "what the photo here shows or null", "extra": "quote|callout|list|none" }], "closing": { "takeaway": "one-line takeaway", "cta": "one soft, specific call to action" } }',
   ].join("\n");
   return { system, prompt };
 }

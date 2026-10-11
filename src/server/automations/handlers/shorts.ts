@@ -28,6 +28,8 @@ import {
   type VideoRenderScene,
 } from "@/server/connectors/video";
 import { canUseAnimatedShorts } from "@/server/billing/entitlements";
+import { promotionFieldValue } from "@/lib/promotion";
+import { resolvePromotionType } from "@/server/promotion/strategy";
 import { prepareCharacterFrame, preparePhotoFrame } from "@/server/shorts/character-frame";
 import { analyzeReferenceImage } from "@/server/shorts/reference-analysis";
 import {
@@ -253,13 +255,29 @@ async function withAnalysis(
   return { ...settings, references };
 }
 
-/** The business details shown on the closing card — straight from the profile, never written by the AI. */
+/** "https://shop.example.com/p/1/" -> "shop.example.com/p/1": what fits on a card and what a viewer can type. */
+function shortUrl(url: string | null): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "")}`.slice(0, 40);
+  } catch {
+    return "";
+  }
+}
+
+/** The closing card: straight from what the owner entered for this type, never written by the AI. */
 function endCardFor(ctx: AutomationRunContext): PromoEndCard {
-  const lines = [
-    ctx.business.location ? `📍 ${ctx.business.location}` : "",
-    ctx.business.main_offering ? ctx.business.main_offering.slice(0, 40) : "",
-  ].filter(Boolean);
-  return { title: ctx.business.name, lines };
+  const { business } = ctx;
+  const type = resolvePromotionType(business);
+  const value = (key: Parameters<typeof promotionFieldValue>[1]) => promotionFieldValue(business, key);
+  const lines =
+    type === "PRODUCT"
+      ? [value("priceInfo") ? `💰 ${value("priceInfo")!.slice(0, 40)}` : "", value("actionUrl") ? `🛒 ${shortUrl(value("actionUrl"))}` : "", value("mainOffering")?.slice(0, 40) ?? ""]
+      : type === "PLATFORM"
+        ? [value("mainOffering")?.slice(0, 40) ?? "", value("actionUrl") ? `🚀 ${shortUrl(value("actionUrl"))}` : value("website") ? `🌐 ${shortUrl(value("website"))}` : ""]
+        : [value("location") ? `📍 ${value("location")!.slice(0, 40)}` : "", value("mainOffering")?.slice(0, 40) ?? "", value("priceInfo") ? `💰 ${value("priceInfo")!.slice(0, 40)}` : ""];
+  return { title: business.name, lines: lines.filter(Boolean) };
 }
 
 async function checkAnimation(

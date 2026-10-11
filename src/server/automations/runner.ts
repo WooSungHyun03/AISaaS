@@ -23,6 +23,8 @@ import { computeNextRunAt } from "./scheduler";
 
 type AdminClient = SupabaseClient<Database>;
 
+export const PROMOTION_TYPE_REQUIRED_MESSAGE = "홍보 대상(가게·상품·플랫폼)을 먼저 골라주세요. 사업 정보에서 고르면 바로 만들 수 있어요.";
+
 export interface RunAutomationResult {
   runId: string;
   /** `RUNNING` means the handler deferred: the run continues from the cron tick or the open page. */
@@ -312,6 +314,11 @@ async function executeAutomation(
   }
 
   const creditKind = getAutomationCreditKind(template.slug);
+  // Blog posts and Shorts are written for a store, a product or a platform — each is planned differently, so the
+  // owner has to say which before anything is generated (and before a credit is touched).
+  if (creditKind && !business.promotion_type && !(template.slug === "shorts" && options.shorts?.publish)) {
+    return recordRefusedRun(admin, automation, source, PROMOTION_TYPE_REQUIRED_MESSAGE, { advanceSchedule });
+  }
   // Re-publishing an already rendered Shorts preview performs no AI/render
   // work and follows the existing aiGenerationCount: 0 precedent.
   const consumesCredit = Boolean(creditKind) && !(template.slug === "shorts" && options.shorts?.publish);

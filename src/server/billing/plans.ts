@@ -6,12 +6,18 @@ import type { SubscriptionPlan } from "@/types/domain";
  * price or limit anywhere else — read it from here (getPlanConfig) so
  * changing a number doesn't require touching business logic.
  */
+/**
+ * Generation is paid per use (credits), so the number of saved setups is no longer a way to meter a plan: a free
+ * account needs one blog and one Shorts setup per business to use its trial. This only guards against runaway setups.
+ */
+export const AUTOMATION_SETUP_LIMIT = 30;
+
 export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
   FREE: {
     id: "FREE",
     name: "Free",
     priceMonthlyKrw: 0,
-    automationLimit: 1,
+    automationLimit: AUTOMATION_SETUP_LIMIT,
     animationQuality: "standard",
     allowedTemplateSlugs: null,
     features: [
@@ -24,7 +30,7 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     id: "STARTER",
     name: "Starter",
     priceMonthlyKrw: 19000,
-    automationLimit: 2,
+    automationLimit: AUTOMATION_SETUP_LIMIT,
     animationQuality: "standard",
     allowedTemplateSlugs: null,
     features: [
@@ -38,7 +44,7 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     id: "PRO",
     name: "Pro",
     priceMonthlyKrw: 49000,
-    automationLimit: 10,
+    automationLimit: AUTOMATION_SETUP_LIMIT,
     animationQuality: "premium",
     allowedTemplateSlugs: null,
     features: [

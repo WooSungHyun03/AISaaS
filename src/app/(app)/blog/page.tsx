@@ -7,6 +7,8 @@ import { RunNowButton } from "@/components/automations/run-now-button";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { CreditNotice } from "@/components/billing/credit-notice";
+import { PromotionTargetCard } from "@/components/business/promotion-target-card";
+import { QuickBlogStart } from "@/components/automations/quick-blog-start";
 import { getUsableCredits } from "@/server/billing/run-credits";
 import { readDeferredJob } from "@/server/automations/runner";
 import { describeSchedule } from "@/server/automations/schedule-input";
@@ -33,7 +35,7 @@ export default async function BlogPage({
 
   const { data: businesses, error: businessError } = await supabase
     .from("businesses")
-    .select("id, name, keywords, brand_tone")
+    .select("*")
     .eq("owner_id", user.id)
     .order("created_at");
   if (businessError) throw new Error("사업체 정보를 불러오지 못했습니다.", { cause: businessError });
@@ -54,7 +56,12 @@ export default async function BlogPage({
   }
 
   const credits = await getUsableCredits(supabase, user.id, "BLOG");
-  const creditNotice = <CreditNotice kind="BLOG" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />;
+  const creditNotice = (
+    <>
+      <PromotionTargetCard business={selectedBusiness} />
+      <CreditNotice kind="BLOG" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />
+    </>
+  );
 
   const { data: template, error: templateError } = await supabase
     .from("automation_templates")
@@ -92,9 +99,9 @@ export default async function BlogPage({
         {businessPickers}
         <EmptyState
           mascot="point"
-          title={`${selectedBusiness.name}에는 아직 블로그 글 만들기 설정이 없어요`}
-          description="설정을 만들면 정해진 때마다 새 글 초안을 만들어드려요."
-          action={<Button asChild><Link href="/automations/new?template=blog-marketing">블로그 글 만들기 설정하기</Link></Button>}
+          title={`${selectedBusiness.name}의 첫 블로그 글을 만들어볼까요?`}
+          description="올릴 곳만 고르면 가게·상품·플랫폼 정보에 맞는 글을 한 편 써드려요. 이용권 1회가 쓰이고, 실패하면 돌려드려요."
+          action={<div className="space-y-3"><QuickBlogStart businessId={selectedBusiness.id} disabled={!selectedBusiness.promotion_type} /><p className="text-[13px] text-muted-foreground">정해진 때마다 자동으로 만들고 싶다면 <Link href="/automations/new?template=blog-marketing" className="font-semibold text-primary underline underline-offset-2">자세히 설정하기</Link></p></div>}
         />
       </div>
     );
