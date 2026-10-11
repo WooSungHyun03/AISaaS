@@ -143,10 +143,10 @@ GET https://youtubeanalytics.googleapis.com/v2/reports?
   "미구현" 에러가 기존 공개 지표 수집까지 끌고 내려가는 걸 원천적으로 막음. 테스트 13개
   (mock 결정론성, 48~72시간 지연 반영, `now` 기준 상대 날짜, `live`→null) 통과.
   전체 테스트 1036개 + typecheck + lint 통과.
-- [ ] **2단계** — 스코프 확인 헬퍼(`youtube-analytics-scope.ts`) + 테스트
-- [ ] **3단계** — 수집 파이프라인 연결(`youtube-analytics-pipeline.ts` + `collect-pipeline.ts`/`collect-now.ts` 호출 추가) + 테스트(연결 해제 시 중단 포함, 기존 공개 지표 테스트 안 깨짐 확인)
-- [ ] **4단계** — 성장 리포트 연결(`growth-series.ts`의 조건부 `ALLOWED_GROWTH_METRICS` + `EXTERNAL_VERIFIED` 표시, `channel-growth-card.tsx` 배지) + 테스트
-- [ ] **5단계** — Dev1 요청 문서 + 팀장(구글 클라우드) 문서 작성(코드 없음)
+- [x] **2단계** — 스코프 확인 헬퍼(`youtube-analytics-scope.ts`: `YOUTUBE_ANALYTICS_SCOPE` + `hasYouTubeAnalyticsScope`) + 테스트 7개 통과.
+- [x] **3단계** — 수집 파이프라인 연결(`youtube-analytics-pipeline.ts` 신규 + `collect-pipeline.ts`/`collect-now.ts`에 `owner_id` 조회 + 호출 추가). 연결 해제 시 중단 테스트, **사람1 추가 요청사항 1번**(live 모드에서 조용히 스킵, 기존 공개 지표 수집에 영향 없음) 전용 테스트 포함 — 호출부에도 `.catch()`로 이중 방어. 테스트 9개(파이프라인 단독) + 2개(기존 collect-pipeline/collect-now 회귀 테스트에 추가) 통과.
+- [x] **4단계** — 성장 리포트 연결. `ALLOWED_GROWTH_METRICS`는 그대로 두고, `getChannelGrowthSeries()`가 매 호출마다 business owner의 YouTube 연결 상태를 한 번 확인해서 연결+스코프 있을 때만 `yt_analytics.*`를 목록에 추가(`source: "EXTERNAL_VERIFIED"`). `channel-growth-card.tsx`에 "플랫폼 확인" 배지 추가. **사람1 추가 요청사항 2번**(해제 후 보존되지만 화면에 안 보임) 전용 테스트 포함. 테스트 15개(growth-series 전체, 신규 5개) 통과.
+- [x] **5단계** — `docs/person1/REQUEST_FOR_DEV1_youtube_analytics.md`, `docs/person1/GOOGLE_CLOUD_SETUP_youtube_analytics.md` 작성. 두 문서 모두 "해제 후 데이터는 보존되지만 화면에 표시되지 않음, 필요하면 나중에 삭제 정책 추가" 명시.
 - [ ] **6단계** — 로컬 DB reset(migration 없지만 확인), lint/typecheck/test/build, git status, 브라우저 체크리스트
 
 ## 기본 규칙 (AGENT_RULES.md 상속)
