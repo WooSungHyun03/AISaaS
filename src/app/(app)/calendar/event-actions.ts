@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
+import { isMissingSchemaError } from "@/server/shared/db-errors";
 import { createEvent, deleteEvent, listEvents, moveEvent, searchEvents, updateEvent, type EventResult } from "@/server/calendar/events";
 import type { CalendarEventView, CalendarSearchHit, EditScope } from "@/types/calendar-events";
 import type { CalendarItem } from "@/types/domain";
@@ -53,7 +54,10 @@ export async function listCalendarRange(startDate: string, endDate: string): Pro
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message === "RANGE_TOO_LARGE") return { events: [], planItems: [], error: "한 번에 볼 수 있는 기간을 넘었어요." };
-    logger.error("calendar_list_failed", { message: error instanceof Error ? error.message : String(error) });
+    const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : undefined;
+    logger.error("calendar_list_failed", { code, message: error instanceof Error ? error.message : String((error as { message?: unknown })?.message ?? error) });
+    // calendar_events comes from migration 0061: until it is applied, say so instead of "try again later".
+    if (isMissingSchemaError(error)) return { events: [], planItems: [], error: "캘린더를 준비하는 중이에요. 서비스 관리자가 데이터베이스 업데이트를 마치면 바로 쓸 수 있어요." };
     return { events: [], planItems: [], error: "일정을 불러오지 못했어요. 잠시 후 다시 시도해주세요." };
   }
 }
