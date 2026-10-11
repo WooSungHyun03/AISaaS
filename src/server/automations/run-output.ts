@@ -24,7 +24,8 @@ export interface SafeAutomationRunOutput {
   blogStats: { chars: number; sections: number; photos: number } | null;
   qualityNotes: string[];
   /** Shorts built from reference images: how the characters were produced. */
-  animationMode: "video" | "tween" | null;
+  format: "character" | "promo" | null;
+  animationMode: "video" | "tween" | "photos" | null;
   animationNote: string | null;
   publicationResults: Partial<Record<"instagram" | "youtube", {
     externalId: string | null;
@@ -149,7 +150,8 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
     qualityNotes: Array.isArray(output.qualityNotes)
       ? output.qualityNotes.filter((item): item is string => typeof item === "string").slice(0, 6).map((item) => item.slice(0, 200))
       : [],
-    animationMode: output.animationMode === "video" || output.animationMode === "tween" ? output.animationMode : null,
+    format: output.format === "character" || output.format === "promo" ? output.format : null,
+    animationMode: output.animationMode === "video" || output.animationMode === "tween" || output.animationMode === "photos" ? output.animationMode : null,
     animationNote: safeText(output.animationNote, 300),
     publicationResults: safePublicationResults(output.publicationResults),
   };

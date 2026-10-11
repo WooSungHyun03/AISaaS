@@ -50,6 +50,7 @@ describe("toSafeAutomationRunOutput", () => {
       platform: null,
       blogStats: null,
       qualityNotes: [],
+      format: null,
       animationMode: null,
       animationNote: null,
       publicationResults: {},

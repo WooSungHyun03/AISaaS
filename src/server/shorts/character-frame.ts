@@ -57,3 +57,43 @@ export async function prepareCharacterFrame(source: Uint8Array, sceneIndex: numb
     .png()
     .toBuffer();
 }
+
+/** Size of a framed photo: what JSON2Video shows full-screen and what the animator starts from. */
+export const PHOTO_FRAME_WIDTH = 1080;
+export const PHOTO_FRAME_HEIGHT = 1920;
+
+/**
+ * Frames one of the owner's photos (product, menu, shop …) as 9:16 without ever altering what it shows:
+ * a photo already close to portrait is cropped to fill the frame (keeping the most interesting part);
+ * a landscape or very tall photo is shown whole over a blurred, darkened copy of itself, like a standard
+ * Reels letterbox. The result is an opaque JPEG.
+ */
+export async function preparePhotoFrame(source: Uint8Array): Promise<Buffer> {
+  const image = sharp(source, { failOn: "error" }).rotate();
+  const oriented = await image.flatten({ background: "#FFFFFF" }).toBuffer({ resolveWithObject: true });
+  const aspect = oriented.info.width / oriented.info.height;
+
+  if (aspect >= 0.45 && aspect <= 0.75) {
+    return sharp(oriented.data)
+      .resize({ width: PHOTO_FRAME_WIDTH, height: PHOTO_FRAME_HEIGHT, fit: "cover", position: sharp.strategy.attention })
+      .jpeg({ quality: 88 })
+      .toBuffer();
+  }
+
+  const background = await sharp(oriented.data)
+    .resize({ width: PHOTO_FRAME_WIDTH, height: PHOTO_FRAME_HEIGHT, fit: "cover" })
+    .blur(36)
+    .modulate({ brightness: 0.6 })
+    .toBuffer();
+  const foreground = await sharp(oriented.data)
+    .resize({ width: PHOTO_FRAME_WIDTH, height: PHOTO_FRAME_HEIGHT, fit: "inside", withoutEnlargement: false })
+    .toBuffer({ resolveWithObject: true });
+  return sharp(background)
+    .composite([{
+      input: foreground.data,
+      left: Math.round((PHOTO_FRAME_WIDTH - foreground.info.width) / 2),
+      top: Math.round((PHOTO_FRAME_HEIGHT - foreground.info.height) / 2),
+    }])
+    .jpeg({ quality: 88 })
+    .toBuffer();
+}

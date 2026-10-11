@@ -8,6 +8,7 @@ import { advanceDeferredRun, runAutomationNow } from "@/server/automations/runne
 import { computeNextRunAt } from "@/server/automations/scheduler";
 import { parseScheduleFromForm } from "@/server/automations/schedule-input";
 import { canCreateAutomation } from "@/server/billing/entitlements";
+import { analyzeReferenceImage } from "@/server/shorts/reference-analysis";
 import {
   deleteReferenceImage,
   detectImageType,
@@ -23,6 +24,7 @@ import {
   REFERENCE_LABEL_MAX_LENGTH,
   SHORTS_BRIEF_MAX_LENGTH,
   SHORTS_STYLES,
+  isReferenceSubject,
   parseShortsReferenceSettings,
   type ShortsReference,
   type ShortsStyle,
@@ -39,8 +41,8 @@ export interface ShortsActionResult {
   progress?: string;
 }
 
-/** Shorts are always character videos; without a character image there is nothing to animate. */
-const NEEDS_CHARACTER = "캐릭터 이미지를 먼저 추가해주세요. 이지 마케팅 마스코트를 불러오거나 캐릭터 이미지를 올리면 영상을 만들 수 있어요.";
+/** A video is built from the owner's images (a character, a product, a shop …); without one there is nothing to build from. */
+const NEEDS_CHARACTER = "참고 이미지를 먼저 추가해주세요. 이지 마케팅 마스코트를 불러오거나 캐릭터·상품·매장 이미지를 올리면 영상을 만들 수 있어요.";
 
 function parsePlatforms(values: string[]): ShortsPublishPlatform[] {
   return [...new Set(values.filter((value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube"))];
@@ -248,7 +250,9 @@ export async function uploadShortsReference(automationId: string, formData: Form
   } catch {
     return { error: "이미지를 저장하지 못했어요. 잠시 후 다시 시도해주세요." };
   }
-  const failure = await writeShortsConfig(owned, { references: [...settings.references, { id, kind: "upload", source: path, label }] });
+  // The AI looks at the image once so the video planner knows what it shows (never fails the upload).
+  const analysis = await analyzeReferenceImage(bytes, label);
+  const failure = await writeShortsConfig(owned, { references: [...settings.references, { id, kind: "upload", source: path, label, subject: analysis.subject, summary: analysis.summary }] });
   if (failure) {
     await deleteReferenceImage(admin, path);
     return { error: failure };
@@ -267,6 +271,7 @@ export async function addMascotReferences(automationId: string): Promise<ShortsA
     kind: "mascot",
     source: pose.key,
     label: pose.label,
+    subject: "character",
   }));
   if (additions.length === 0) {
     return { error: room <= 0 ? "참고 이미지가 가득 찼어요. 일부를 지운 뒤 마스코트를 불러오세요." : "마스코트 이미지를 이미 모두 불러왔어요." };
@@ -302,5 +307,17 @@ export async function saveShortsCreativeSettings(
   const brief = input.brief.trim();
   if (brief.length > SHORTS_BRIEF_MAX_LENGTH) return { error: `요청 사항은 ${SHORTS_BRIEF_MAX_LENGTH}자 이내로 적어주세요.` };
   const failure = await writeShortsConfig(owned, { shortsStyle: input.style as ShortsStyle, shortsBrief: brief });
+  return failure ? { error: failure } : { success: true };
+}
+
+/** The owner corrects what the AI thought an image shows (a product it called "other", a person it called a character …). */
+export async function setReferenceSubject(automationId: string, referenceId: string, subject: string): Promise<ShortsActionResult> {
+  const owned = await ownedShortsAutomation(automationId);
+  if ("error" in owned) return { error: owned.error };
+  if (!isReferenceSubject(subject)) return { error: "이미지 종류를 확인해주세요." };
+  const settings = parseShortsReferenceSettings(owned.automation.config);
+  const target = settings.references.find((item) => item.id === referenceId);
+  if (!target || target.kind === "mascot") return { error: "바꿀 이미지를 찾을 수 없어요." };
+  const failure = await writeShortsConfig(owned, { references: settings.references.map((item) => (item.id === referenceId ? { ...item, subject } : item)) });
   return failure ? { error: failure } : { success: true };
 }

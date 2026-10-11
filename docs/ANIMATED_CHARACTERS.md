@@ -1,8 +1,10 @@
-# Character Shorts (animated characters)
+# Shorts pipeline: animated characters, product and shop promos
 
-Shorts are **always character videos**. The owner adds 1–8 character images (the 이지 마케팅 mascot with one click, or their own uploads), optionally writes what they want ("마스코트가 바쁜 사장님을 도와주는 이야기로 서비스를 소개해줘"), and picks a tone: 캐릭터 콩트 (funny skit) or 캐릭터 설명 (explainer). Without a character image the studio does not generate or schedule anything (`NEEDS_CHARACTER` in `src/app/(app)/shorts/actions.ts`, backed by an error in the handler).
+Shorts are built from the owner's **reference images** (up to 8; the 이지 마케팅 mascot with one click, or uploads). The AI looks at what each image shows and makes the matching video — see `docs/AD_SHORTS.md` for the format rules and research. This file covers the shared pipeline: setup, cost and how a run works.
 
-The character is **really animated** by an image-to-video model (one 5 s clip per spoken line), voiced by TTS, and assembled with a speech bubble by JSON2Video.
+- **character** images are really animated (one 5 s clip per spoken line), voiced by TTS, with a speech bubble.
+- **product / place** photos become a promo; at most four scenes are animated, the rest are panned/zoomed photos.
+- Without a reference image the studio does not generate or schedule anything (`NEEDS_CHARACTER` in `src/app/(app)/shorts/actions.ts`, backed by an error in the handler).
 
 ## Setup (once, by the account owner)
 
@@ -24,7 +26,7 @@ Without `ANIMATION_PROVIDER=fal` (or without the key) character videos still wor
 ## Cost and limits
 
 - Kling 2.5 Turbo Pro on fal.ai: US$0.35 per 5 s clip (verify at https://fal.ai/models). A video has 4–6 scenes → roughly **US$1.4–2.1**, plus the JSON2Video render (≈ 25 credits).
-- Plans cap animated videos per month (`monthlyAnimatedShortsLimit` in `src/server/billing/plans.ts`: Free 0, Starter 2, Pro 6). Past the cap the video is still made, with the simple motion effect and a note. Change the numbers there only.
+- A promo animates at most 4 scenes (≈ US$1.4); a character video has 4–6 clips. Plans cap animated videos per month (`monthlyAnimatedShortsLimit` in `src/server/billing/plans.ts`: Free 0, Starter 2, Pro 6). Past the cap the video is still made, with the simple motion effect and a note. Change the numbers there only.
 - Clips are a fixed 5 s (the shortest length these models bill); each spoken line is ≤ 28 characters so one clip covers it, and the clip is cut to / looped over the voice.
 - Only the images the owner marked as characters are sent to the animation model. fal retries server failures itself; the app retries a failed clip once with a fresh request, then fails the run.
 - The default endpoint can be deprecated (the Veo 3.1 Fast endpoint, for example, is scheduled to be). If clips fail with "not found", pick a current endpoint and set `ANIMATION_MODEL`.
@@ -33,7 +35,7 @@ Without `ANIMATION_PROVIDER=fal` (or without the key) character videos still wor
 
 Clips take minutes, so the run is split into short steps (`runner.ts`, `handlers/shorts.ts`):
 
-1. **Start (one request):** the AI plans the skit (`buildShortsPlanPrompt` → 4–6 scenes, each with speaker, image number, an English `action` for the animator and a fallback `motion`); each scene's character image is placed on a 9:16 gradient frame (`server/shorts/character-frame.ts`, sharp), uploaded to the private bucket, and a clip is queued. The handler returns `{ deferred: { state, progress } }`; the run stays `RUNNING` with its state in `automation_runs.output.job`.
+1. **Start (one request):** images that were never analysed are looked at; the AI plans the video (`buildShortsPlanPrompt`: a character skit with speaker/`action`/fallback `motion`, or a promo with caption/`camera`/`animate`/`motionPrompt`); each scene's image is framed to 9:16 (`server/shorts/character-frame.ts`, sharp: a gradient frame for characters, `preparePhotoFrame` for photos), uploaded to the private bucket, and a clip is queued where the plan animates. The handler returns `{ deferred: { state, progress } }`; the run stays `RUNNING` with its state in `automation_runs.output.job`.
 2. **Advance (many short requests):** `advanceDeferredRun` — called every 6 s by the open Shorts page (`advanceShortsJob`) and by every cron tick — checks the clips; when all are done it posts the movie to JSON2Video; then checks the render. A lease + compare-and-swap on `output.job.rev` makes concurrent callers harmless.
 3. **Finish:** the video URL is stored, optional platform publishing happens, temporary frames are deleted, usage is counted. Failures end the run through the normal failure path; retryable errors (network blips) are tolerated up to 4 times in a row.
 

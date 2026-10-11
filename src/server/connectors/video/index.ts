@@ -6,6 +6,7 @@ import type { VideoRenderProvider } from "./types";
 
 export type { VideoRenderProvider, VideoRenderScene, VideoRenderStatus } from "./types";
 export { buildCharacterMovie } from "./json2video-skit";
+export { buildPromoMovie, type PromoEndCard, type PromoRenderScene } from "./json2video-promo";
 
 export function getVideoRenderProvider(): VideoRenderProvider {
   return serverEnv.VIDEO_RENDER_PROVIDER === "json2video"

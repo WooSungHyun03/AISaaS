@@ -124,16 +124,45 @@ describe("MockAIProvider", () => {
   });
 });
 
-describe("MockAIProvider character plan", () => {
-  it("plans a schema-valid skit whose image numbers stay inside the listed images", async () => {
-    const [{ MockAIProvider }, { shortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+describe("MockAIProvider reference-image plans", () => {
+  const listing = (tags: string[]) => tags.map((tag, index) => `${index + 1}. [${tag}] 이미지 ${index + 1}`).join("\n");
+
+  it("plans a character skit that only uses the listed character images", async () => {
+    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+    const { text } = await new MockAIProvider().generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "character".\n${listing(["product", "character", "character"])}\nRules:` });
+    const plan = makeShortsPlanSchema(["character"]).parse(JSON.parse(text));
+    expect(plan.format).toBe("character");
+    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
+  });
+
+  it("plans a promo from the non-character images and never animates a person", async () => {
+    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+    const { text } = await new MockAIProvider().generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "promo".\n${listing(["character", "person", "product"])}\nRules:` });
+    const plan = makeShortsPlanSchema(["promo"]).parse(JSON.parse(text));
+    expect(plan.format).toBe("promo");
+    if (plan.format !== "promo") return;
+    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
+    expect(plan.scenes.filter((scene) => scene.imageIndex === 2).every((scene) => !scene.animate)).toBe(true);
+  });
+
+  it("follows the request when both formats are allowed", async () => {
+    const { MockAIProvider } = await import("./mock");
     const provider = new MockAIProvider();
-    for (const count of [1, 2, 8]) {
-      const images = Array.from({ length: count }, (_, index) => `${index + 1}. 캐릭터 이미지 ${index + 1}`).join("\n");
-      const { text } = await provider.generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\n${images}\nRules:` });
-      const plan = shortsPlanSchema.parse(JSON.parse(text));
-      expect(plan.scenes.every((scene) => scene.imageIndex >= 1 && scene.imageIndex <= count)).toBe(true);
-    }
+    const both = (request: string) => `AUTOBIZ_SHORTS_PLAN_V1\nThe owner's request (follow it): ${request}\n${listing(["character", "product"])}\nRules:`;
+    expect((JSON.parse((await provider.generateText({ prompt: both("마스코트가 나와서 소개해줘") })).text) as { format: string }).format).toBe("character");
+    expect((JSON.parse((await provider.generateText({ prompt: both("신메뉴를 홍보해줘") })).text) as { format: string }).format).toBe("promo");
+  });
+
+  it("recognises what an image shows from the owner's label", async () => {
+    const [{ MockAIProvider }, { referenceAnalysisSchema }] = await Promise.all([import("./mock"), import("@/server/shorts/reference-analysis")]);
+    const provider = new MockAIProvider();
+    const analyse = async (label: string) =>
+      referenceAnalysisSchema.parse(JSON.parse((await provider.generateText({ prompt: `AUTOBIZ_REFERENCE_ANALYSIS_V1\nThe owner's label for this image (may be empty): "${label}"\nDecide…` })).text)).subject;
+    expect(await analyse("귀여운 곰 마스코트")).toBe("character");
+    expect(await analyse("매장 내부")).toBe("place");
+    expect(await analyse("사장님 사진")).toBe("person");
+    expect(await analyse("시그니처 소금빵")).toBe("product");
+    expect(await analyse("")).toBe("product");
   });
 });
 
