@@ -1,4 +1,5 @@
-import { ArrowDownRight, ArrowRight, ArrowUpRight, Minus } from "lucide-react";
+import Link from "next/link";
+import { ArrowDownRight, ArrowRight, ArrowUpRight, Info, Minus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { GrowthLineChart } from "@/components/channels/growth-line-chart";
 import { PLATFORM_LABEL } from "@/server/channels/platform";
@@ -56,6 +57,16 @@ export function ChannelGrowthCard({ channel, narrative, days }: { channel: Chann
           {channel.externalId} <ArrowRight className="size-3" aria-hidden="true" />
         </a>
       </div>
+
+      {channel.analyticsNotice ? (
+        <p role="status" className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-brand-soft px-3.5 py-3 text-sm leading-6 text-secondary-foreground">
+          <Info className="size-4 shrink-0" aria-hidden="true" />
+          <span>{channel.analyticsNotice.message}</span>
+          {channel.analyticsNotice.kind === "CONNECT" || channel.analyticsNotice.kind === "RECONNECT" || channel.analyticsNotice.kind === "CHANNEL_MISMATCH" ? (
+            <Link href="/settings" className="font-semibold text-primary underline underline-offset-2">설정에서 YouTube 연결하기</Link>
+          ) : null}
+        </p>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
         {channel.metrics.map((metric) => <MetricCard key={metric.metric} metric={metric} days={days} />)}

@@ -203,25 +203,106 @@ describe("getChannelGrowthSeries", () => {
   });
 
   describe("ticket 1-10: yt_analytics.* metrics", () => {
+    const SCOPED = { status: "CONNECTED", metadata: { scope: "https://www.googleapis.com/auth/yt-analytics.readonly" } };
+
+    function analyticsClient(rows: ReturnType<typeof snapshot>[]) {
+      return makeClient({
+        tracked_channels: listQuery([{ id: "c1", platform: "youtube", external_id: "@my", url: "" }]),
+        marketing_metric_snapshots: listQuery(rows),
+        businesses: singleQuery({ owner_id: "user-1" }),
+      });
+    }
+
     it("appear, tagged EXTERNAL_VERIFIED, only when the business owner has a CONNECTED + scoped YouTube integration", async () => {
-      createClientMock.mockResolvedValue(
-        makeClient({
-          tracked_channels: listQuery([{ id: "c1", platform: "youtube", external_id: "@my", url: "" }]),
-          marketing_metric_snapshots: listQuery([snapshot("c1", "yt_analytics.estimatedMinutesWatched", 400, 1)]),
-          businesses: singleQuery({ owner_id: "user-1" }),
-        }),
-      );
-      getConnectionMock.mockResolvedValue({ status: "CONNECTED", metadata: { scope: "https://www.googleapis.com/auth/yt-analytics.readonly" } });
+      createClientMock.mockResolvedValue(analyticsClient([snapshot("c1", "yt_analytics.estimatedMinutesWatched", 400, 4)]));
+      getConnectionMock.mockResolvedValue(SCOPED);
 
       const result = await getChannelGrowthSeries("business-1", { now: NOW, days: 7 });
       const metrics = result.channels[0].metrics.map((m) => m.metric);
-      expect(metrics).toEqual(["subscriberCount", "viewCount", "yt_analytics.estimatedMinutesWatched", "yt_analytics.averageViewDuration"]);
+      expect(metrics).toEqual([
+        "subscriberCount",
+        "viewCount",
+        "yt_analytics.views",
+        "yt_analytics.estimatedMinutesWatched",
+        "yt_analytics.netSubscribers",
+        "yt_analytics.averageViewDuration",
+      ]);
 
       const watched = result.channels[0].metrics.find((m) => m.metric === "yt_analytics.estimatedMinutesWatched")!;
       expect(watched.source).toBe("EXTERNAL_VERIFIED");
       expect(watched.current).toBe(400);
       const subscriberCount = result.channels[0].metrics.find((m) => m.metric === "subscriberCount")!;
       expect(subscriberCount.source).toBeUndefined();
+    });
+
+    it("totals each period's days and compares with the period before, ending 3 days ago (the API's lag)", async () => {
+      // days=7, lag=3: current window = days 4..10 ago, previous window = days 11..17 ago.
+      const rows = [
+        snapshot("c1", "yt_analytics.views", 100, 4),
+        snapshot("c1", "yt_analytics.views", 150, 6),
+        snapshot("c1", "yt_analytics.views", 50, 12),
+        snapshot("c1", "yt_analytics.views", 50, 15),
+        // Inside the lag: must not be counted at all.
+        snapshot("c1", "yt_analytics.views", 9999, 1),
+      ];
+      createClientMock.mockResolvedValue(analyticsClient(rows));
+      getConnectionMock.mockResolvedValue(SCOPED);
+
+      const views = (await getChannelGrowthSeries("business-1", { now: NOW, days: 7 })).channels[0].metrics.find((m) => m.metric === "yt_analytics.views")!;
+      expect(views.current).toBe(250);
+      expect(views.previous).toBe(100);
+      expect(views.absoluteDelta).toBe(150);
+      expect(views.deltaPercent).toBe(150);
+      expect(views.status).toBe("OK");
+      // The chart shows real days only: a missing day is null, never a carried-forward value.
+      expect(views.points.filter((point) => point.value !== null).map((point) => point.value)).toEqual([150, 100]);
+    });
+
+    it("averages (does not add up) the average view duration", async () => {
+      createClientMock.mockResolvedValue(analyticsClient([
+        snapshot("c1", "yt_analytics.averageViewDuration", 90, 5),
+        snapshot("c1", "yt_analytics.averageViewDuration", 110, 6),
+      ]));
+      getConnectionMock.mockResolvedValue(SCOPED);
+
+      const avg = (await getChannelGrowthSeries("business-1", { now: NOW, days: 7 })).channels[0].metrics.find((m) => m.metric === "yt_analytics.averageViewDuration")!;
+      expect(avg.current).toBe(100);
+    });
+
+    it("reports a net subscriber loss as a negative total, not a missing value", async () => {
+      createClientMock.mockResolvedValue(analyticsClient([
+        snapshot("c1", "yt_analytics.netSubscribers", -3, 5),
+        snapshot("c1", "yt_analytics.netSubscribers", 1, 6),
+      ]));
+      getConnectionMock.mockResolvedValue(SCOPED);
+
+      const net = (await getChannelGrowthSeries("business-1", { now: NOW, days: 7 })).channels[0].metrics.find((m) => m.metric === "yt_analytics.netSubscribers")!;
+      expect(net.current).toBe(-2);
+    });
+
+    it("says COLLECTING and shows no total for a period with no data yet", async () => {
+      createClientMock.mockResolvedValue(analyticsClient([]));
+      getConnectionMock.mockResolvedValue(SCOPED);
+
+      const views = (await getChannelGrowthSeries("business-1", { now: NOW, days: 7 })).channels[0].metrics.find((m) => m.metric === "yt_analytics.views")!;
+      expect(views.current).toBeNull();
+      expect(views.status).toBe("COLLECTING");
+    });
+
+    it("tells the owner what to do: connect, reconnect, wrong account, or wait", async () => {
+      const notice = async (connection: unknown) => {
+        createClientMock.mockResolvedValue(analyticsClient([]));
+        getConnectionMock.mockResolvedValue(connection);
+        return (await getChannelGrowthSeries("business-1", { now: NOW, days: 7 })).channels[0].analyticsNotice;
+      };
+      expect((await notice(null))?.kind).toBe("CONNECT");
+      expect((await notice({ status: "CONNECTED", metadata: { scope: "https://www.googleapis.com/auth/youtube.upload" } }))?.kind).toBe("RECONNECT");
+      expect((await notice({ ...SCOPED, metadata: { ...SCOPED.metadata, analytics: { status: "TOKEN_REVOKED" } } }))?.kind).toBe("RECONNECT");
+      expect((await notice({ ...SCOPED, metadata: { ...SCOPED.metadata, analytics: { status: "CHANNEL_MISMATCH" } } }))?.kind).toBe("CHANNEL_MISMATCH");
+      expect((await notice({ ...SCOPED, metadata: { ...SCOPED.metadata, analytics: { status: "API_DISABLED" } } }))?.kind).toBe("API_DISABLED");
+      expect((await notice({ ...SCOPED, metadata: { ...SCOPED.metadata, analytics: { status: "QUOTA" } } }))?.kind).toBe("QUOTA");
+      expect((await notice({ ...SCOPED, metadata: { ...SCOPED.metadata, analytics: { status: "WAITING_FOR_DATA" } } }))?.kind).toBe("WAITING");
+      expect(await notice({ ...SCOPED, metadata: { ...SCOPED.metadata, analytics: { status: "OK" } } })).toBeNull();
     });
 
     it("stay hidden (not just empty) for an unconnected YouTube channel — no business row at all", async () => {

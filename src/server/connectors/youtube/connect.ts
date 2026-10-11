@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnection, getConnection, getConnectionSecret, updateConnectionStatus } from "@/server/connectors/integrations";
 import type { Database } from "@/types/database.types";
 import { YouTubeConnector } from "./index";
+import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/youtube-scopes";
 import { buildYouTubeAuthorizationUrl, exchangeYouTubeCode, getYouTubeChannel } from "./oauth";
 
 type DbClient = SupabaseClient<Database>;
@@ -41,7 +42,8 @@ export function isMatchingYouTubeOAuthState(actual: string, expected: string): b
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export type YouTubeOAuthOutcome = "connected" | "error";
+/** `connected_limited`: linked, but the owner did not allow Analytics (Google lets people untick scopes). */
+export type YouTubeOAuthOutcome = "connected" | "connected_limited" | "error";
 
 export async function completeYouTubeOAuth(
   params: { userId: string; businessId: string; clientId: string; clientSecret: string; redirectUri: string; code: string },
@@ -65,7 +67,7 @@ export async function completeYouTubeOAuth(
       },
       admin,
     );
-    return "connected";
+    return token.scope?.split(/\s+/).includes(YOUTUBE_ANALYTICS_SCOPE) ? "connected" : "connected_limited";
   } catch {
     await markYouTubeConnectionError(admin, params.userId, params.businessId);
     return "error";

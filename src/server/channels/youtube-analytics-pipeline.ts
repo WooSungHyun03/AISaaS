@@ -2,7 +2,9 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { serverEnv } from "@/lib/env/server";
 import { logger } from "@/lib/logger";
-import { getConnection } from "@/server/connectors/integrations";
+import { getConnection, updateConnectionStatus } from "@/server/connectors/integrations";
+import { YouTubeAnalyticsError } from "@/server/connectors/youtube/analytics";
+import type { IntegrationConnection, Json } from "@/types/domain";
 import { getYouTubeAnalyticsCollector } from "./providers";
 import { hasYouTubeAnalyticsScope } from "./youtube-analytics-scope";
 import { saveMetricSnapshot } from "./snapshot";
@@ -34,14 +36,12 @@ export async function collectYouTubeAnalyticsIfConnected(
 ): Promise<void> {
   if (channel.platform !== "youtube" || !ownerId) return;
 
-  // null = no real (OAuth-backed) implementation yet (CHANNEL_DATA_PROVIDER=live).
-  // Skip outright rather than call-and-catch: there is nothing to call.
   const collector = getYouTubeAnalyticsCollector();
-  if (!collector) return;
 
+  let connection: IntegrationConnection | null = null;
+  const admin = createAdminClient();
   try {
-    const admin = createAdminClient();
-    const connection = await getConnection(admin, ownerId, channel.business_id, "youtube");
+    connection = await getConnection(admin, ownerId, channel.business_id, "youtube");
     if (!connection || connection.status !== "CONNECTED") return;
     if (!hasYouTubeAnalyticsScope(connection)) return;
 
@@ -50,14 +50,42 @@ export async function collectYouTubeAnalyticsIfConnected(
 
     for (const day of days) {
       const recordedAt = kstMidnight(day.date);
-      await saveMetricSnapshot({ channelId: channel.id, metric: "yt_analytics.estimatedMinutesWatched", value: day.estimatedMinutesWatched, source, recordedAt });
-      await saveMetricSnapshot({ channelId: channel.id, metric: "yt_analytics.averageViewDuration", value: day.averageViewDuration, source, recordedAt });
+      const save = (metric: string, value: number) => saveMetricSnapshot({ channelId: channel.id, metric: `yt_analytics.${metric}`, value, source, recordedAt });
+      await save("views", day.views);
+      await save("estimatedMinutesWatched", day.estimatedMinutesWatched);
+      await save("averageViewDuration", day.averageViewDuration);
+      await save("netSubscribers", day.subscribersGained - day.subscribersLost);
     }
+    await recordAnalyticsOutcome(admin, connection, now, days.length > 0 ? "OK" : "WAITING_FOR_DATA");
   } catch (cause) {
+    const failure = cause instanceof YouTubeAnalyticsError ? cause.failure : "UNKNOWN";
     logger.warn("youtube_analytics_collection_failed", {
       channelId: channel.id,
       businessId: channel.business_id,
+      failure,
       message: cause instanceof Error ? cause.message : String(cause),
     });
+    if (connection) await recordAnalyticsOutcome(admin, connection, now, failure);
+  }
+}
+
+/**
+ * Remembers on the connection why Analytics is (not) flowing so the growth report can tell the
+ * owner what to do instead of showing an empty chart. Never throws: this is bookkeeping.
+ */
+async function recordAnalyticsOutcome(
+  admin: ReturnType<typeof createAdminClient>,
+  connection: IntegrationConnection,
+  now: Date,
+  status: string,
+): Promise<void> {
+  try {
+    const current = connection.metadata && typeof connection.metadata === "object" && !Array.isArray(connection.metadata) ? connection.metadata : {};
+    await updateConnectionStatus(admin, connection.id, connection.status, {
+      ...current,
+      analytics: { status, checkedAt: now.toISOString() } as Json,
+    });
+  } catch (cause) {
+    logger.warn("youtube_analytics_outcome_not_recorded", { connectionId: connection.id, message: cause instanceof Error ? cause.message : String(cause) });
   }
 }

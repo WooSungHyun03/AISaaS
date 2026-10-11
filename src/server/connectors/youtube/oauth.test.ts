@@ -4,6 +4,8 @@ import {
   buildYouTubeAuthorizationUrl,
   exchangeYouTubeCode,
   getYouTubeChannel,
+  YOUTUBE_ANALYTICS_SCOPE,
+  YOUTUBE_READONLY_SCOPE,
   YOUTUBE_UPLOAD_SCOPE,
 } from "./oauth";
 
@@ -13,7 +15,7 @@ afterEach(() => {
 });
 
 describe("YouTube OAuth", () => {
-  it("builds an offline authorization URL with youtube.upload and CSRF state", () => {
+  it("builds an offline authorization URL asking for upload, read-only and Analytics scopes with CSRF state", () => {
     const url = new URL(buildYouTubeAuthorizationUrl({
       clientId: "client-1",
       redirectUri: "https://app.example.com/api/integrations/youtube/callback",
@@ -21,7 +23,8 @@ describe("YouTube OAuth", () => {
     }));
 
     expect(url.origin).toBe("https://accounts.google.com");
-    expect(url.searchParams.get("scope")).toBe(YOUTUBE_UPLOAD_SCOPE);
+    expect(url.searchParams.get("scope")?.split(" ")).toEqual([YOUTUBE_UPLOAD_SCOPE, YOUTUBE_READONLY_SCOPE, YOUTUBE_ANALYTICS_SCOPE]);
+    expect(url.searchParams.get("include_granted_scopes")).toBe("true");
     expect(url.searchParams.get("access_type")).toBe("offline");
     expect(url.searchParams.get("prompt")).toBe("consent");
     expect(url.searchParams.get("state")).toBe("csrf-state");

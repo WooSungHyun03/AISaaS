@@ -27,13 +27,16 @@ describe("collectMockYouTubeAnalytics", () => {
     }
   });
 
-  it("only returns the two documented metrics, both positive numbers", async () => {
+  it("only returns the documented metrics, all valid numbers", async () => {
     const now = new Date("2026-10-10T00:00:00.000Z");
     const days = await collectMockYouTubeAnalytics({ userId: "u1", businessId: "b1", externalId: "@x", now });
     for (const day of days) {
+      expect(day.views).toBeGreaterThan(0);
       expect(day.estimatedMinutesWatched).toBeGreaterThan(0);
       expect(day.averageViewDuration).toBeGreaterThan(0);
-      expect(Object.keys(day).sort()).toEqual(["averageViewDuration", "date", "estimatedMinutesWatched"]);
+      expect(day.subscribersGained).toBeGreaterThanOrEqual(0);
+      expect(day.subscribersLost).toBeGreaterThanOrEqual(0);
+      expect(Object.keys(day).sort()).toEqual(["averageViewDuration", "date", "estimatedMinutesWatched", "subscribersGained", "subscribersLost", "views"]);
     }
   });
 });

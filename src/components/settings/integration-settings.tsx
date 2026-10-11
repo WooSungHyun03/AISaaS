@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import type { ConnectionStatus, IntegrationProvider, Json } from "@/types/domain";
+import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/youtube-scopes";
 
 export interface SafeConnection {
   id: string;
@@ -141,6 +142,7 @@ export function IntegrationSettings({ businessId, connections }: { businessId: s
   const instagram = get("instagram");
   const email = get("email");
   const youtube = get("youtube");
+  const youtubeNeedsAnalyticsConsent = youtube?.status === "CONNECTED" && !String(metadata(youtube.metadata).scope ?? "").split(/\s+/).includes(YOUTUBE_ANALYTICS_SCOPE);
 
   return <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
     <IntegrationRow icon={<Globe2 className="size-5" aria-hidden="true" />} title="WordPress" description="만든 블로그 글을 내 WordPress에 초안으로 보내고 싶을 때 연결해요." connection={wordpress}>
@@ -151,7 +153,7 @@ export function IntegrationSettings({ businessId, connections }: { businessId: s
       <Button asChild size="sm" variant={instagram ? "outline" : "default"}><a href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`}>{instagram ? <RefreshCw aria-hidden="true" /> : null}{instagram ? "다시 연결" : "인스타그램 연결"}</a></Button>
       {instagram && <DisconnectButton businessId={businessId} provider="instagram" />}
     </IntegrationRow>
-    <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description="Shorts를 내 채널에 업로드해요. 현재 비공개로만 업로드됩니다." connection={youtube}>
+    <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description={youtubeNeedsAnalyticsConsent ? "Shorts를 내 채널에 업로드해요(비공개). 조회수·시청 시간·구독자 증감을 성장 리포트에 보려면 ‘다시 연결’에서 Analytics 권한도 허용해주세요." : "Shorts를 내 채널에 업로드하고, 성장 리포트에 조회수·시청 시간·구독자 증감을 보여줘요. 업로드는 비공개로만 해요."} connection={youtube}>
       <Button asChild size="sm" variant={youtube ? "outline" : "default"}><a href={`/api/integrations/youtube/connect?businessId=${encodeURIComponent(businessId)}`}>{youtube ? <RefreshCw aria-hidden="true" /> : null}{youtube ? "다시 연결" : "YouTube 연결"}</a></Button>
       {youtube && <DisconnectButton businessId={businessId} provider="youtube" />}
     </IntegrationRow>

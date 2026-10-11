@@ -69,9 +69,10 @@ describe("getYouTubeAnalyticsCollector (ticket 1-10)", () => {
     expect(getYouTubeAnalyticsCollector()).toBe(collectMockYouTubeAnalytics);
   });
 
-  it("returns null when CHANNEL_DATA_PROVIDER=live — no real implementation exists yet, so callers must skip rather than call-and-catch", async () => {
+  it("returns the real OAuth-backed collector when CHANNEL_DATA_PROVIDER=live", async () => {
     serverEnvMock.CHANNEL_DATA_PROVIDER = "live";
     const { getYouTubeAnalyticsCollector } = await import("./index");
-    expect(getYouTubeAnalyticsCollector()).toBeNull();
+    const { collectYouTubeAnalyticsLive } = await import("@/server/connectors/youtube/analytics");
+    expect(getYouTubeAnalyticsCollector()).toBe(collectYouTubeAnalyticsLive);
   });
 });

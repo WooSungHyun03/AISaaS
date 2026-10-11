@@ -20,7 +20,8 @@ const INSTAGRAM_MESSAGE: Record<string, { variant: "success" | "info" | "error";
 };
 
 const YOUTUBE_MESSAGE: Record<string, { variant: "success" | "info" | "error"; text: string }> = {
-  connected: { variant: "success", text: "YouTube 채널을 연결했어요. 현재 비공개로만 업로드됩니다." },
+  connected: { variant: "success", text: "YouTube 채널과 Analytics 권한을 연결했어요. 업로드는 비공개로만 해요." },
+  connected_limited: { variant: "info", text: "YouTube 채널은 연결했지만 Analytics 권한을 허용하지 않아 조회수·시청 시간·구독자 증감은 볼 수 없어요. ‘다시 연결’에서 모든 권한을 허용해주세요." },
   denied: { variant: "info", text: "YouTube 연결을 취소했어요. 권한을 확인하고 다시 시도할 수 있어요." },
   state_error: { variant: "error", text: "YouTube 연결 요청이 만료됐거나 확인할 수 없어요. 다시 시도해주세요." },
   invalid_business: { variant: "error", text: "연결할 사업체를 확인할 수 없어요." },

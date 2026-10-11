@@ -23,8 +23,11 @@ export const collectMockYouTubeAnalytics: YouTubeAnalyticsCollector = async ({ n
     const ageFromOldest = LAG_DAYS + MOCK_WINDOW_DAYS - 1 - offset;
     days.push({
       date: kstDate(nowMs - offset * DAY_MS),
+      views: 300 + ageFromOldest * 9,
       estimatedMinutesWatched: 400 + ageFromOldest * 12,
       averageViewDuration: 95 + ageFromOldest * 2,
+      subscribersGained: 6 + ageFromOldest,
+      subscribersLost: 2,
     });
   }
   return days;

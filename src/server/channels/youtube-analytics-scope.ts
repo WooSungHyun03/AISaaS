@@ -1,15 +1,8 @@
 import "server-only";
 import type { IntegrationConnection } from "@/types/domain";
+import { YOUTUBE_ANALYTICS_SCOPE } from "@/server/connectors/youtube/oauth";
 
-/**
- * OAuth scope required to call the YouTube Analytics API (Channel reports).
- * Mirrors the upload scope's naming style in
- * src/server/connectors/youtube/oauth.ts (Dev1 area, not imported from here
- * to avoid a cross-owner dependency — see
- * docs/person1/REQUEST_FOR_DEV1_youtube_analytics.md for the actual scope
- * addition Dev1 needs to make at the OAuth-request side).
- */
-export const YOUTUBE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly";
+export { YOUTUBE_ANALYTICS_SCOPE };
 
 /**
  * Reads the OAuth scope string Dev1's completeYouTubeOAuth() already stores

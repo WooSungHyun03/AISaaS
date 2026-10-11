@@ -21,17 +21,22 @@ export interface YouTubeAnalyticsDailyMetrics {
    * silently misrepresent it in any day-over-day comparison.
    */
   date: string;
+  /** Views of the channel's videos on this day. */
+  views: number;
   /** Total minutes watched across the channel's videos on this day. */
   estimatedMinutesWatched: number;
   /** Average length, in seconds, of video playbacks on this day. */
   averageViewDuration: number;
+  /** Subscribers gained / lost on this day (net growth = gained - lost). */
+  subscribersGained: number;
+  subscribersLost: number;
 }
 
 /**
  * Fetches a trailing window of advanced Analytics for one connected,
  * already-scope-verified YouTube channel. The real (OAuth-backed)
- * implementation is Dev1's to write in src/server/connectors/youtube/ —
- * see docs/person1/REQUEST_FOR_DEV1_youtube_analytics.md — and wire into
+ * implementation is collectYouTubeAnalyticsLive in
+ * src/server/connectors/youtube/analytics.ts, wired into
  * getYouTubeAnalyticsCollector()'s live branch (providers/index.ts). This
  * file only defines the shape and a deterministic mock.
  *

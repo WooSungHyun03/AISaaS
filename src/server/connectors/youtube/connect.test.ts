@@ -74,7 +74,7 @@ describe("YouTube OAuth connection", () => {
 
     const outcome = await completeYouTubeOAuth(oauthParams, fakeAdmin);
 
-    expect(outcome).toBe("connected");
+    expect(outcome).toBe("connected_limited");
     expect(createConnectionMock).toHaveBeenCalledWith({
       userId: "user-1",
       businessId: "biz-1",
@@ -88,6 +88,19 @@ describe("YouTube OAuth connection", () => {
       },
     }, fakeAdmin);
     expect(JSON.stringify(createConnectionMock.mock.calls[0])).not.toContain("short-lived-access");
+  });
+
+  it("reports a full connection when the owner allowed Analytics too", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        access_token: "access",
+        refresh_token: "refresh",
+        scope: "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ id: "channel-1", snippet: { title: "채널" } }] }), { status: 200 })));
+    createConnectionMock.mockResolvedValueOnce({ id: "conn-1", status: "CONNECTED" });
+
+    await expect(completeYouTubeOAuth(oauthParams, fakeAdmin)).resolves.toBe("connected");
   });
 
   it("marks an existing connection as ERROR when OAuth completion fails", async () => {

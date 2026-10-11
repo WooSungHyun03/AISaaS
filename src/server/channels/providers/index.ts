@@ -11,6 +11,7 @@ import { collectMockNaverBlogMetrics } from "./naver-blog-mock";
 import type { NaverBlogCollector } from "./naver-types";
 import { collectMockYouTubeAnalytics } from "./youtube-analytics-mock";
 import type { YouTubeAnalyticsCollector } from "./youtube-analytics-types";
+import { collectYouTubeAnalyticsLive } from "@/server/connectors/youtube/analytics";
 
 let cachedProvider: YouTubeDataProvider | undefined;
 
@@ -32,18 +33,14 @@ export function getNaverBlogCollector(): NaverBlogCollector {
 }
 
 /**
- * Ticket 1-10: unlike the other getXCollector()s above, this can return
- * `null` — there is no real (OAuth-backed) implementation yet. That piece
- * is Dev1's to write in src/server/connectors/youtube/ and wire in here
- * (see docs/person1/REQUEST_FOR_DEV1_youtube_analytics.md). Returning
- * `null` for "live" lets the caller (youtube-analytics-pipeline.ts) skip
- * cleanly before even attempting anything — no throw-and-catch standing
- * in for "not implemented yet", and no risk of a mock value ever being
- * mistaken for a real one in production.
+ * Ticket 1-10: owner-only YouTube Analytics. `mock` returns deterministic
+ * sample days; `live` calls the real YouTube Analytics API with the
+ * channel owner's OAuth token (src/server/connectors/youtube/analytics.ts).
+ * The pipeline only calls it for a CONNECTED connection whose consent
+ * included yt-analytics.readonly.
  */
-export function getYouTubeAnalyticsCollector(): YouTubeAnalyticsCollector | null {
-  if (serverEnv.CHANNEL_DATA_PROVIDER === "mock") return collectMockYouTubeAnalytics;
-  return null;
+export function getYouTubeAnalyticsCollector(): YouTubeAnalyticsCollector {
+  return serverEnv.CHANNEL_DATA_PROVIDER === "live" ? collectYouTubeAnalyticsLive : collectMockYouTubeAnalytics;
 }
 
 export * from "./youtube-types";

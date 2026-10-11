@@ -1,7 +1,13 @@
 import "server-only";
 import { classifyHttpStatus, ConnectorError } from "@/server/shared/errors";
+import { YOUTUBE_OAUTH_SCOPES } from "@/lib/youtube-scopes";
 
-export const YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload";
+export {
+  YOUTUBE_ANALYTICS_SCOPE,
+  YOUTUBE_OAUTH_SCOPES,
+  YOUTUBE_READONLY_SCOPE,
+  YOUTUBE_UPLOAD_SCOPE,
+} from "@/lib/youtube-scopes";
 export const YOUTUBE_OAUTH_COOKIE = "autobiz_youtube_oauth";
 
 export interface YouTubeToken {
@@ -21,7 +27,7 @@ export function buildYouTubeAuthorizationUrl(params: { clientId: string; redirec
   url.searchParams.set("client_id", params.clientId);
   url.searchParams.set("redirect_uri", params.redirectUri);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", YOUTUBE_UPLOAD_SCOPE);
+  url.searchParams.set("scope", YOUTUBE_OAUTH_SCOPES.join(" "));
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("include_granted_scopes", "true");
   url.searchParams.set("prompt", "consent");

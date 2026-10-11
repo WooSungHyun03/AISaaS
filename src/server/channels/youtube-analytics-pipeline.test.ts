@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { adminClientMock, getConnectionMock, collectorMock, getCollectorMock, saveMetricSnapshotMock } = vi.hoisted(() => ({
+const { adminClientMock, getConnectionMock, updateConnectionStatusMock, collectorMock, getCollectorMock, saveMetricSnapshotMock } = vi.hoisted(() => ({
   adminClientMock: { __marker: "admin" },
   getConnectionMock: vi.fn(),
+  updateConnectionStatusMock: vi.fn().mockResolvedValue(undefined),
   collectorMock: vi.fn(),
   getCollectorMock: vi.fn(),
   saveMetricSnapshotMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => adminClientMock }));
-vi.mock("@/server/connectors/integrations", () => ({ getConnection: getConnectionMock }));
+vi.mock("@/server/connectors/integrations", () => ({ getConnection: getConnectionMock, updateConnectionStatus: updateConnectionStatusMock }));
 vi.mock("./providers", () => ({ getYouTubeAnalyticsCollector: getCollectorMock }));
 vi.mock("./snapshot", () => ({ saveMetricSnapshot: saveMetricSnapshotMock }));
 
@@ -35,13 +36,6 @@ describe("collectYouTubeAnalyticsIfConnected", () => {
     expect(getConnectionMock).not.toHaveBeenCalled();
   });
 
-  it("skips cleanly when no real collector exists yet (CHANNEL_DATA_PROVIDER=live) — never calls getConnection or saveMetricSnapshot", async () => {
-    getCollectorMock.mockReturnValue(null);
-    await collectYouTubeAnalyticsIfConnected(CHANNEL, "user-1", NOW);
-    expect(getConnectionMock).not.toHaveBeenCalled();
-    expect(saveMetricSnapshotMock).not.toHaveBeenCalled();
-  });
-
   it("skips when there is no connection at all", async () => {
     getCollectorMock.mockReturnValue(collectorMock);
     getConnectionMock.mockResolvedValue(null);
@@ -64,25 +58,47 @@ describe("collectYouTubeAnalyticsIfConnected", () => {
     expect(saveMetricSnapshotMock).not.toHaveBeenCalled();
   });
 
-  it("collects and saves both metrics under the yt_analytics namespace when connected with scope", async () => {
+  it("collects and saves views, watch time, average duration and net subscribers under the yt_analytics namespace", async () => {
     getCollectorMock.mockReturnValue(collectorMock);
-    getConnectionMock.mockResolvedValue({ status: "CONNECTED", metadata: { scope: "https://www.googleapis.com/auth/yt-analytics.readonly" } });
+    getConnectionMock.mockResolvedValue({ id: "conn-1", status: "CONNECTED", metadata: { scope: "https://www.googleapis.com/auth/yt-analytics.readonly" } });
     collectorMock.mockResolvedValue([
-      { date: "2026-10-07", estimatedMinutesWatched: 400, averageViewDuration: 95 },
-      { date: "2026-10-08", estimatedMinutesWatched: 412, averageViewDuration: 97 },
+      { date: "2026-10-07", views: 300, estimatedMinutesWatched: 400, averageViewDuration: 95, subscribersGained: 9, subscribersLost: 2 },
+      { date: "2026-10-08", views: 320, estimatedMinutesWatched: 412, averageViewDuration: 97, subscribersGained: 3, subscribersLost: 5 },
     ]);
 
     await collectYouTubeAnalyticsIfConnected(CHANNEL, "user-1", NOW);
 
-    expect(saveMetricSnapshotMock).toHaveBeenCalledTimes(4);
-    expect(saveMetricSnapshotMock).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: "channel-1", metric: "yt_analytics.estimatedMinutesWatched", value: 400 }),
-    );
-    expect(saveMetricSnapshotMock).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: "channel-1", metric: "yt_analytics.averageViewDuration", value: 95 }),
-    );
+    expect(saveMetricSnapshotMock).toHaveBeenCalledTimes(8);
+    const saved = (metric: string, value: number) => expect(saveMetricSnapshotMock).toHaveBeenCalledWith(expect.objectContaining({ channelId: "channel-1", metric, value }));
+    saved("yt_analytics.views", 300);
+    saved("yt_analytics.estimatedMinutesWatched", 400);
+    saved("yt_analytics.averageViewDuration", 95);
+    saved("yt_analytics.netSubscribers", 7);
+    saved("yt_analytics.netSubscribers", -2);
     const call = saveMetricSnapshotMock.mock.calls.find((args) => args[0].metric === "yt_analytics.estimatedMinutesWatched" && args[0].value === 400);
     expect(call?.[0].recordedAt.toISOString()).toBe(new Date("2026-10-07T00:00:00+09:00").toISOString());
+    expect(updateConnectionStatusMock).toHaveBeenCalledWith(adminClientMock, "conn-1", "CONNECTED", expect.objectContaining({ analytics: { status: "OK", checkedAt: NOW.toISOString() } }));
+  });
+
+  it("records WAITING_FOR_DATA when the API has nothing yet (new channel / 48–72h delay)", async () => {
+    getCollectorMock.mockReturnValue(collectorMock);
+    getConnectionMock.mockResolvedValue({ id: "conn-1", status: "CONNECTED", metadata: { scope: "https://www.googleapis.com/auth/yt-analytics.readonly" } });
+    collectorMock.mockResolvedValue([]);
+
+    await collectYouTubeAnalyticsIfConnected(CHANNEL, "user-1", NOW);
+
+    expect(saveMetricSnapshotMock).not.toHaveBeenCalled();
+    expect(updateConnectionStatusMock).toHaveBeenCalledWith(adminClientMock, "conn-1", "CONNECTED", expect.objectContaining({ analytics: expect.objectContaining({ status: "WAITING_FOR_DATA" }) }));
+  });
+
+  it("remembers why collection failed (so the report can tell the owner what to do) without throwing", async () => {
+    const { YouTubeAnalyticsError } = await import("@/server/connectors/youtube/analytics");
+    getCollectorMock.mockReturnValue(collectorMock);
+    getConnectionMock.mockResolvedValue({ id: "conn-1", status: "CONNECTED", metadata: { scope: "https://www.googleapis.com/auth/yt-analytics.readonly" } });
+    collectorMock.mockRejectedValue(new YouTubeAnalyticsError("CHANNEL_MISMATCH", "PERMISSION_DENIED", "mismatch"));
+
+    await expect(collectYouTubeAnalyticsIfConnected(CHANNEL, "user-1", NOW)).resolves.toBeUndefined();
+    expect(updateConnectionStatusMock).toHaveBeenCalledWith(adminClientMock, "conn-1", "CONNECTED", expect.objectContaining({ analytics: expect.objectContaining({ status: "CHANNEL_MISMATCH" }) }));
   });
 
   it("never throws when the collector itself fails — logs and swallows instead", async () => {

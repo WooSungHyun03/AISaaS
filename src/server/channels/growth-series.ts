@@ -34,7 +34,27 @@ export const ALLOWED_GROWTH_METRICS: Record<ChannelPlatform, readonly string[]> 
  * every unconnected YouTube channel instead of omitting the metric
  * entirely.
  */
-const YOUTUBE_ANALYTICS_METRICS: readonly string[] = ["yt_analytics.estimatedMinutesWatched", "yt_analytics.averageViewDuration"];
+const YOUTUBE_ANALYTICS_METRICS: readonly string[] = [
+  "yt_analytics.views",
+  "yt_analytics.estimatedMinutesWatched",
+  "yt_analytics.netSubscribers",
+  "yt_analytics.averageViewDuration",
+];
+
+/**
+ * Analytics rows are one value *per day* (a flow), unlike subscriberCount/viewCount (a running
+ * total). A period is therefore the sum of its days (the mean for an average), never "the latest
+ * value" — comparing one day to another day would say nothing about growth.
+ */
+const ANALYTICS_AGGREGATION: Record<string, "sum" | "mean"> = {
+  "yt_analytics.views": "sum",
+  "yt_analytics.estimatedMinutesWatched": "sum",
+  "yt_analytics.netSubscribers": "sum",
+  "yt_analytics.averageViewDuration": "mean",
+};
+
+/** The API reports a day 48–72h late, so a period ends this many days before today to compare full days with full days. */
+export const ANALYTICS_LAG_DAYS = 3;
 
 export const GROWTH_METRIC_LABEL: Record<string, string> = {
   subscriberCount: "구독자 수",
@@ -42,8 +62,10 @@ export const GROWTH_METRIC_LABEL: Record<string, string> = {
   matchedPostCount: "검색된 글 수",
   postsLast30Days: "최근 30일 게시 수",
   postCount: "게시글 수",
-  "yt_analytics.estimatedMinutesWatched": "시청 시간(분)",
-  "yt_analytics.averageViewDuration": "평균 시청 지속시간(초)",
+  "yt_analytics.views": "조회수 (기간 합계)",
+  "yt_analytics.estimatedMinutesWatched": "시청 시간 (기간 합계, 분)",
+  "yt_analytics.netSubscribers": "구독자 증감 (기간 합계)",
+  "yt_analytics.averageViewDuration": "평균 시청 지속시간 (초)",
 };
 
 /** Below this many snapshots in the current period, there isn't enough history to call it a trend yet. */
@@ -83,12 +105,22 @@ export interface GrowthMetricSeries {
   source?: MetricSource;
 }
 
+/** What the owner has to do (or wait for) before YouTube Analytics numbers appear; null when nothing is needed. */
+export type YouTubeAnalyticsNoticeKind = "CONNECT" | "RECONNECT" | "CHANNEL_MISMATCH" | "API_DISABLED" | "QUOTA" | "WAITING";
+
+export interface YouTubeAnalyticsNotice {
+  kind: YouTubeAnalyticsNoticeKind;
+  message: string;
+}
+
 export interface ChannelGrowthSeries {
   channelId: string;
   platform: ChannelPlatform;
   externalId: string;
   url: string;
   metrics: GrowthMetricSeries[];
+  /** YouTube channels only: why owner-only Analytics numbers are missing, with the fix. */
+  analyticsNotice?: YouTubeAnalyticsNotice | null;
 }
 
 export interface GrowthSeriesResult {
@@ -133,6 +165,75 @@ function buildMetricSeries(metric: string, rows: Array<{ value: number; recorded
   };
 }
 
+function aggregate(values: number[], mode: "sum" | "mean"): number | null {
+  if (values.length === 0) return null;
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return mode === "sum" ? total : Math.round((total / values.length) * 10) / 10;
+}
+
+/** Period totals for a per-day metric: this period vs the one before it, ending ANALYTICS_LAG_DAYS ago. */
+function buildFlowSeries(metric: string, rows: Array<{ value: number; recorded_at: string; source: string }>, nowMs: number, days: number): GrowthMetricSeries {
+  const mode = ANALYTICS_AGGREGATION[metric] ?? "sum";
+  const endMs = nowMs - ANALYTICS_LAG_DAYS * DAY_MS;
+  const currentStart = endMs - days * DAY_MS;
+  const previousStart = currentStart - days * DAY_MS;
+  const time = (row: { recorded_at: string }) => Date.parse(row.recorded_at);
+  const inCurrent = rows.filter((row) => time(row) > currentStart && time(row) <= endMs + DAY_MS);
+  const inPrevious = rows.filter((row) => time(row) > previousStart && time(row) <= currentStart);
+
+  const current = aggregate(inCurrent.map((row) => row.value), mode);
+  const previous = aggregate(inPrevious.map((row) => row.value), mode);
+  const byDate = new Map(inCurrent.map((row) => [kstDate(time(row)), row.value]));
+  const points: GrowthSeriesPoint[] = [];
+  for (let offset = days - 1; offset >= 0; offset--) {
+    const date = kstDate(endMs - offset * DAY_MS);
+    points.push({ date, value: byDate.get(date) ?? null });
+  }
+
+  return {
+    metric,
+    label: GROWTH_METRIC_LABEL[metric] ?? metric,
+    status: inCurrent.length < MIN_SNAPSHOTS_FOR_TREND ? "COLLECTING" : "OK",
+    current,
+    previous,
+    absoluteDelta: current !== null && previous !== null ? Math.round((current - previous) * 10) / 10 : null,
+    deltaPercent: deltaPercent(current, previous),
+    points,
+    hasDemoSeedData: rows.some((row) => row.source === "DEMO_SEED"),
+    source: "EXTERNAL_VERIFIED",
+  };
+}
+
+/** Plain-language state of YouTube Analytics for one business, from what the connection and the last collection recorded. */
+export function describeYouTubeAnalyticsState(
+  connection: { status: string; metadata: unknown } | null,
+): YouTubeAnalyticsNotice | null {
+  if (!connection || connection.status !== "CONNECTED") {
+    return { kind: "CONNECT", message: "YouTube 계정을 연결하고 Analytics 권한을 허용하면 조회수·시청 시간·구독자 증감을 정확히 볼 수 있어요." };
+  }
+  if (!hasYouTubeAnalyticsScope({ metadata: connection.metadata as never })) {
+    return { kind: "RECONNECT", message: "Analytics 권한이 아직 없어요. 설정에서 YouTube를 다시 연결하고 ‘YouTube Analytics 보고서 보기’를 허용해주세요." };
+  }
+  const metadata = connection.metadata && typeof connection.metadata === "object" && !Array.isArray(connection.metadata) ? (connection.metadata as Record<string, unknown>) : {};
+  const analytics = metadata.analytics && typeof metadata.analytics === "object" ? (metadata.analytics as Record<string, unknown>) : null;
+  switch (analytics?.status) {
+    case "TOKEN_REVOKED":
+    case "SCOPE_MISSING":
+      return { kind: "RECONNECT", message: "YouTube 연결이 만료됐거나 권한이 바뀌었어요. 설정에서 다시 연결해주세요." };
+    case "CHANNEL_MISMATCH":
+      return { kind: "CHANNEL_MISMATCH", message: "연결한 구글 계정의 채널과 추적 중인 채널이 달라요. 채널 주인 계정으로 다시 연결해주세요." };
+    case "API_DISABLED":
+    case "NOT_CONFIGURED":
+      return { kind: "API_DISABLED", message: "서비스 쪽 YouTube Analytics 설정이 아직 끝나지 않았어요. 관리자에게 문의해주세요." };
+    case "QUOTA":
+      return { kind: "QUOTA", message: "YouTube 조회 한도에 걸려 잠시 쉬고 있어요. 곧 다시 수집해요." };
+    case "WAITING_FOR_DATA":
+      return { kind: "WAITING", message: "아직 받을 데이터가 없어요. YouTube Analytics는 보통 2~3일 늦게 집계돼요." };
+    default:
+      return null;
+  }
+}
+
 /**
  * Per-channel, per-metric time series for the growth report (ticket 1-7):
  * current value, vs.-previous-period comparison, and a chart-ready series
@@ -167,13 +268,15 @@ export async function getChannelGrowthSeries(businessId: string, options: { days
   // see docs/person1/PLAN_1-10.md) or a scope predating this feature both
   // fall through to false here, which is what hides those rows below.
   let youtubeAnalyticsConnected = false;
+  let analyticsNotice: YouTubeAnalyticsNotice | null = null;
   if (channels.some((channel) => channel.platform === "youtube")) {
     const { data: business } = await supabase.from("businesses").select("owner_id").eq("id", businessId).maybeSingle();
     const connection = business?.owner_id ? await getConnection(supabase, business.owner_id, businessId, "youtube") : null;
     youtubeAnalyticsConnected = connection?.status === "CONNECTED" && hasYouTubeAnalyticsScope(connection);
+    analyticsNotice = describeYouTubeAnalyticsState(connection);
   }
 
-  const since = new Date(nowMs - days * 2 * DAY_MS).toISOString();
+  const since = new Date(nowMs - (days * 2 + ANALYTICS_LAG_DAYS + 1) * DAY_MS).toISOString();
   const { data: snapshotRows, error: snapshotsError } = await supabase
     .from("marketing_metric_snapshots")
     .select("channel_id, metric, value, recorded_at, source")
@@ -200,14 +303,11 @@ export async function getChannelGrowthSeries(businessId: string, options: { days
       externalId: channel.external_id,
       url: channel.url,
       metrics: metricNames.map((metric) =>
-        buildMetricSeries(
-          metric,
-          byChannelMetric.get(`${channel.id}:${metric}`) ?? [],
-          nowMs,
-          days,
-          YOUTUBE_ANALYTICS_METRICS.includes(metric) ? "EXTERNAL_VERIFIED" : undefined,
-        ),
+        YOUTUBE_ANALYTICS_METRICS.includes(metric)
+          ? buildFlowSeries(metric, byChannelMetric.get(`${channel.id}:${metric}`) ?? [], nowMs, days)
+          : buildMetricSeries(metric, byChannelMetric.get(`${channel.id}:${metric}`) ?? [], nowMs, days),
       ),
+      ...(channel.platform === "youtube" ? { analyticsNotice } : {}),
     };
   });
 
