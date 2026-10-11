@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { PageHeader } from "@/components/layout/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { safeExternalUrl } from "@/lib/safe-external-url";
 
 type PeriodFilter = "7d" | "30d" | "90d" | "all";
 
@@ -81,16 +82,6 @@ function usageHref(period: PeriodFilter, kind: CreditKind | null, status: UsageH
   if (page > 1) params.set("page", String(page));
   const query = params.toString();
   return `/usage${query ? `?${query}` : ""}`;
-}
-
-function safeExternalUrl(value: string | null) {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
 }
 
 function UsageStatusBadge({ item }: { item: UsageHistoryItem }) {

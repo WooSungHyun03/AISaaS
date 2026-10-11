@@ -1,227 +1,101 @@
-import Link from "next/link";
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { ArrowRight, Check, CircleCheck, CircleX, PlayCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { ensureTrialCredits } from "@/server/billing/credits";
-import { getCreditBalances } from "@/server/billing/run-credits";
-import { getPeriodKey, SERVICE_TIMEZONE, zonedTimeToUtc } from "@/lib/utils/date";
-import { StatCard, StatGroup } from "@/components/dashboard/stat-card";
-import { Mascot } from "@/components/brand/mascot";
 import { PageHeader } from "@/components/layout/page-header";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import type { AutomationRun } from "@/types/domain";
-import { EmptyState } from "@/components/ui/page-state";
-
-const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "Asia/Seoul",
-});
-
-const RUN_STATUS_LABEL = {
-  QUEUED: "대기 중",
-  RUNNING: "만드는 중",
-  SUCCESS: "완료",
-  FAILED: "실패",
-} as const;
-
-type RecentRun = Pick<AutomationRun, "id" | "automation_id" | "status" | "created_at" | "error_message">;
+import {
+  CalendarSummarySection,
+  CreditsSection,
+  DashboardSectionSkeleton,
+  DiagnosisSummarySection,
+  GrowthSummarySection,
+  NextActionSection,
+  RecentContentSection,
+  RecentUsageSection,
+} from "@/components/dashboard/dashboard-sections";
+import { getGrowthSummary, getLatestChannelDiagnosisSummary } from "@/server/channels";
+import { ensureTrialCredits } from "@/server/billing/credits";
+import {
+  buildDashboardNextAction,
+  getDashboardCalendar,
+  getDashboardCredits,
+  getDashboardIdentity,
+  getDashboardProgress,
+  getDashboardRecentContent,
+  getDashboardRecentUsage,
+} from "@/server/dashboard/overview";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  // Layouts and pages may render concurrently, so the dashboard also performs
-  // the idempotent first-entry grant before reading its balances.
+
+  // Layout and page rendering can overlap. The RPC is idempotent, so the
+  // dashboard may safely ensure the first-entry grant before reading it.
   await ensureTrialCredits(user.id).catch(() => false);
-  const periodKey = getPeriodKey();
-  const [year, month] = periodKey.split("-").map(Number);
+  const identity = await getDashboardIdentity(user.id);
+  const businessId = identity.business?.id ?? null;
 
-  const [businessResult, automationResult, credits, profileResult] = await Promise.all([
-    supabase.from("businesses").select("id").eq("owner_id", user.id).limit(1).maybeSingle(),
-    supabase.from("automations").select("id, name, status, next_run_at").eq("user_id", user.id),
-    // The dashboard still opens when credit data is unavailable.
-    getCreditBalances(supabase, user.id).catch(() => ({ BLOG: { remaining: 0, nextExpiry: null }, SHORTS: { remaining: 0, nextExpiry: null } })),
-    supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
-  ]);
-
-  const readError = businessResult.error || automationResult.error;
-  if (readError) throw new Error("대시보드 데이터를 불러오지 못했습니다.", { cause: readError });
-
-  const automations = automationResult.data ?? [];
-  const automationIds = automations.map((automation) => automation.id);
-  const automationNames = new Map(automations.map((automation) => [automation.id, automation.name]));
-  let recentRuns: RecentRun[] = [];
-  let monthlyRuns = 0;
-
-  if (automationIds.length) {
-    const [recentResult, countResult] = await Promise.all([
-      supabase.from("automation_runs")
-        .select("id, automation_id, status, created_at, error_message")
-        .in("automation_id", automationIds)
-        .order("created_at", { ascending: false })
-        .limit(6),
-      supabase.from("automation_runs")
-        .select("id", { count: "exact", head: true })
-        .in("automation_id", automationIds)
-        .gte("created_at", zonedTimeToUtc(year, month, 1, 0, 0, SERVICE_TIMEZONE).toISOString())
-        .lt("created_at", zonedTimeToUtc(year, month + 1, 1, 0, 0, SERVICE_TIMEZONE).toISOString()),
-    ]);
-    const runError = recentResult.error || countResult.error;
-    if (runError) throw new Error("이용내역을 불러오지 못했습니다.", { cause: runError });
-    recentRuns = recentResult.data ?? [];
-    monthlyRuns = countResult.count ?? 0;
-  }
-
-  const activeAutomations = automations.filter((automation) => automation.status === "ACTIVE");
-  const nextAutomation = activeAutomations
-    .filter((automation) => automation.next_run_at)
-    .sort((a, b) => Date.parse(a.next_run_at!) - Date.parse(b.next_run_at!))[0];
-  const hasBusiness = Boolean(businessResult.data);
-
-  let calendarCount = 0;
-  let diagnosisCount = 0;
-  if (businessResult.data) {
-    const [calendarResult, diagnosisResult] = await Promise.all([
-      supabase.from("calendar_items").select("id", { count: "exact", head: true }).eq("business_id", businessResult.data.id),
-      supabase.from("marketing_diagnoses").select("id", { count: "exact", head: true }).eq("business_id", businessResult.data.id),
-    ]);
-    calendarCount = calendarResult.count ?? 0;
-    diagnosisCount = diagnosisResult.count ?? 0;
-  }
-
-  const displayName = profileResult.data?.display_name?.trim();
-  const hasCreated = automations.length > 0 || recentRuns.some((run) => run.status === "SUCCESS");
-  const steps = [
-    { label: "가게 정보", href: hasBusiness ? "/business" : "/onboarding", done: hasBusiness },
-    { label: "마케팅 진단", href: "/marketing/diagnosis", done: diagnosisCount > 0 },
-    { label: "마케팅 캘린더", href: "/calendar", done: calendarCount > 0 },
-    { label: "콘텐츠 만들기", href: "/calendar", done: hasCreated },
-  ];
-  const currentStep = steps.findIndex((step) => !step.done);
-  const nextAction = [
-    { title: "먼저 가게 정보를 알려주세요", description: "업체명만 적어도 시작할 수 있어요. 나머지는 나중에 채워도 괜찮아요.", cta: "가게 정보 입력하기", href: "/onboarding", pose: "welcome" as const },
-    { title: "마케팅 진단부터 받아볼까요?", description: "지금 마케팅이 몇 점인지, 어느 채널이 비어 있는지 알려드려요.", cta: "무료 진단 받기", href: "/marketing/diagnosis", pose: "point" as const },
-    { title: "이번 달 마케팅 계획을 세워볼까요?", description: "진단 결과에 맞춰 날짜별로 어떤 콘텐츠를 올릴지 정해드려요.", cta: "캘린더 만들기", href: "/calendar", pose: "guide" as const },
-    { title: "첫 콘텐츠를 만들어볼까요?", description: "캘린더에 적어둔 주제 중 하나를 골라 블로그 글이나 숏폼을 만들어요. 만들고 나면 확인하고 고쳐서 직접 올리시면 돼요.", cta: "캘린더에서 만들기", href: "/calendar", pose: "guide" as const },
-  ][currentStep] ?? { title: "잘 하고 계세요!", description: "다음 제작 일정과 이번 달 계획을 캘린더에서 확인해보세요.", cta: "캘린더 보기", href: "/calendar", pose: "thumbsUp" as const };
+  // Start every independent read before rendering the section components.
+  // Each section awaits only its own promise under a separate Suspense boundary.
+  const diagnosisPromise = businessId
+    ? getLatestChannelDiagnosisSummary(businessId)
+    : Promise.resolve(null);
+  const growthPromise = businessId
+    ? getGrowthSummary(businessId)
+    : Promise.resolve(null);
+  const calendarPromise = businessId
+    ? getDashboardCalendar(businessId)
+    : Promise.resolve(null);
+  const contentPromise = businessId
+    ? getDashboardRecentContent(businessId)
+    : Promise.resolve(null);
+  const progressPromise = businessId
+    ? getDashboardProgress(businessId)
+    : Promise.resolve({ channelCount: 0, calendarCount: 0, contentCount: 0 });
+  const creditsPromise = getDashboardCredits(user.id);
+  const usagePromise = getDashboardRecentUsage();
+  const actionPromise = Promise.all([progressPromise, diagnosisPromise]).then(([progress, diagnosis]) =>
+    buildDashboardNextAction({
+      hasBusiness: Boolean(businessId),
+      channelCount: progress.channelCount,
+      hasDiagnosis: diagnosis?.hasAnyData ?? false,
+      calendarCount: progress.calendarCount,
+      contentCount: progress.contentCount,
+    }),
+  );
 
   return (
     <div className="mx-auto max-w-6xl space-y-8">
       <PageHeader
-        title={displayName ? `${displayName}님, 안녕하세요` : "안녕하세요"}
-        description="오늘 할 일과 이번 달 진행 상황을 한눈에 확인하세요."
+        title={identity.displayName ? `${identity.displayName}님, 안녕하세요` : "안녕하세요"}
+        description={identity.business ? `${identity.business.name}의 마케팅 현황과 다음 할 일을 한눈에 확인하세요.` : "마케팅 현황과 다음 할 일을 한눈에 확인하세요."}
       />
 
-      <section aria-labelledby="next-action-title" className="relative overflow-hidden rounded-2xl bg-brand-soft">
-        <div className="grid items-center gap-6 px-6 py-7 sm:px-9 md:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="max-w-xl">
-            <p className="text-sm font-semibold text-primary">다음 할 일</p>
-            <h2 id="next-action-title" className="mt-2 text-2xl font-extrabold tracking-[-0.04em] sm:text-[1.75rem]">{nextAction.title}</h2>
-            <p className="mt-2 text-[15px] leading-7 text-muted-foreground">{nextAction.description}</p>
-            <Button asChild size="lg" className="mt-6">
-              <Link href={nextAction.href}>{nextAction.cta} <ArrowRight aria-hidden="true" /></Link>
-            </Button>
-          </div>
-          <Mascot pose={nextAction.pose} size={190} className="mx-auto hidden w-[170px] md:block lg:w-[190px]" />
-        </div>
-        <ol className="grid border-t border-primary/10 bg-card/60 sm:grid-cols-4" aria-label="시작 단계">
-          {steps.map((step, index) => (
-            <li key={step.label} className="border-b border-primary/10 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
-              <Link href={step.href} aria-current={index === currentStep ? "step" : undefined} className="flex min-h-14 items-center gap-3 px-5 py-3 text-sm font-semibold transition-colors hover:bg-card">
-                <span className={`flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${step.done ? "bg-success text-white" : index === currentStep ? "bg-primary text-white" : "bg-muted text-muted-foreground"}`}>
-                  {step.done ? <Check className="size-3.5" strokeWidth={3} aria-label="완료" /> : index + 1}
-                </span>
-                <span className={step.done ? "text-muted-foreground" : ""}>{step.label}</span>
-              </Link>
-            </li>
-          ))}
-        </ol>
-      </section>
+      <Suspense fallback={<DashboardSectionSkeleton className="min-h-48" />}>
+        <NextActionSection actionPromise={actionPromise} />
+      </Suspense>
 
-      <StatGroup>
-        <StatCard
-          label="이번 달 만든 콘텐츠"
-          value={<>{monthlyRuns.toLocaleString()}<span className="ml-1 text-sm font-semibold text-muted-foreground">개</span></>}
-          hint={<Link href="/growth-report" className="font-medium text-primary hover:underline">성장 리포트 보기</Link>}
-        />
-        <StatCard
-          label="진행 중인 만들기 설정"
-          value={<>{activeAutomations.length}<span className="ml-1 text-sm font-semibold text-muted-foreground">개</span></>}
-          hint={`전체 ${automations.length}개`}
-        />
-        <StatCard
-          label="다음 제작 예정"
-          value={nextAutomation?.next_run_at ? <span className="block text-lg leading-8">{dateFormatter.format(new Date(nextAutomation.next_run_at))}</span> : "예정 없음"}
-          hint={nextAutomation?.name ?? "만들기를 켜면 일정이 표시돼요"}
-        />
-        <StatCard
-          label="남은 이용권"
-          value={<>블로그 {credits.BLOG.remaining}<span className="mx-1.5 text-sm font-semibold text-muted-foreground">·</span>숏폼 {credits.SHORTS.remaining}</>}
-          hint={<Link href="/billing" className="font-medium text-primary hover:underline">이용권 구매·관리</Link>}
-        />
-      </StatGroup>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(300px,1fr)]">
+        <Suspense fallback={<DashboardSectionSkeleton />}>
+          <DiagnosisSummarySection diagnosisPromise={diagnosisPromise} />
+        </Suspense>
+        <Suspense fallback={<DashboardSectionSkeleton />}>
+          <CreditsSection creditsPromise={creditsPromise} />
+        </Suspense>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.7fr)_minmax(260px,1fr)]">
-        <section aria-labelledby="recent-title">
-          <div className="flex items-end justify-between gap-3 border-b border-border pb-3">
-            <h2 id="recent-title" className="text-lg font-bold tracking-[-0.02em]">최근 이용내역</h2>
-            <Link href="/usage" className="text-sm font-semibold text-primary hover:underline">전체 보기</Link>
-          </div>
-          {recentRuns.length === 0 ? (
-            <EmptyState
-              className="mt-5"
-              mascot={null}
-              title="아직 이용내역이 없어요"
-              description="블로그 글이나 숏폼 영상을 만들면 여기에서 바로 확인할 수 있어요."
-              action={<Button asChild size="sm"><Link href="/calendar">캘린더에서 만들기</Link></Button>}
-            />
-          ) : (
-            <ul className="divide-y divide-border">
-              {recentRuns.map((run) => {
-                const StatusIcon = run.status === "SUCCESS" ? CircleCheck : run.status === "FAILED" ? CircleX : PlayCircle;
-                return (
-                  <li key={run.id} className="flex flex-wrap items-center gap-3 py-4 sm:flex-nowrap">
-                    <span className={`flex size-10 shrink-0 items-center justify-center rounded-full ${run.status === "SUCCESS" ? "bg-success-soft text-success" : run.status === "FAILED" ? "bg-destructive/10 text-destructive" : "bg-brand-soft text-primary"}`}>
-                      <StatusIcon className="size-5" aria-hidden="true" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <Link href={`/automations/${run.automation_id}/runs/${run.id}`} className="block truncate font-semibold hover:text-primary hover:underline">
-                        {automationNames.get(run.automation_id) ?? "콘텐츠 만들기"}
-                      </Link>
-                      <p className="mt-0.5 text-[13px] text-muted-foreground">{dateFormatter.format(new Date(run.created_at))}</p>
-                      {run.status === "FAILED" && run.error_message ? <p className="mt-1 line-clamp-1 text-[13px] text-destructive">{run.error_message}</p> : null}
-                    </div>
-                    <Badge variant={run.status === "FAILED" ? "destructive" : run.status === "SUCCESS" ? "success" : "brand"}>{RUN_STATUS_LABEL[run.status]}</Badge>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+        <Suspense fallback={<DashboardSectionSkeleton />}>
+          <CalendarSummarySection calendarPromise={calendarPromise} />
+        </Suspense>
+        <Suspense fallback={<DashboardSectionSkeleton />}>
+          <RecentContentSection contentPromise={contentPromise} />
+        </Suspense>
 
-        <aside aria-label="이용권">
-          <section aria-labelledby="usage-title" className="rounded-xl border border-border bg-card p-5">
-            <h2 id="usage-title" className="text-base font-bold tracking-[-0.02em]">남은 이용권</h2>
-            <dl className="mt-3 space-y-3 text-sm">
-              {([["블로그 글", credits.BLOG], ["숏폼 영상", credits.SHORTS]] as const).map(([label, balance]) => (
-                <div key={label} className="flex items-baseline justify-between gap-3">
-                  <dt className="text-muted-foreground">{label}</dt>
-                  <dd className="tabular text-right">
-                    <span className="text-xl font-extrabold tracking-[-0.03em]">{balance.remaining}</span>
-                    <span className="ml-0.5 text-muted-foreground">회</span>
-                    {balance.nextExpiry ? <span className="block text-[12px] text-muted-foreground">~{dateFormatter.format(new Date(balance.nextExpiry))}</span> : null}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-            <p className="mt-3 text-[13px] leading-5 text-muted-foreground">콘텐츠 한 건을 만들 때마다 1회씩 차감돼요. 만들기에 실패하면 자동으로 돌려드려요.</p>
-            <Button asChild size="sm" variant="outline" className="mt-4 w-full"><Link href="/billing">이용권 구매하기</Link></Button>
-          </section>
-        </aside>
+        <Suspense fallback={<DashboardSectionSkeleton />}>
+          <RecentUsageSection usagePromise={usagePromise} />
+        </Suspense>
+        <Suspense fallback={<DashboardSectionSkeleton />}>
+          <GrowthSummarySection growthPromise={growthPromise} />
+        </Suspense>
       </div>
     </div>
   );
