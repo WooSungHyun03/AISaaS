@@ -190,6 +190,11 @@ export async function updateEvent(db: Db, userId: string, target: TargetParams, 
     return error ? fail("이 일정만 수정하지 못했어요. 잠시 후 다시 시도해주세요.") : { ok: true, id: row.id };
   }
 
+  const firstOccurrence = kstDateOf(row.starts_at);
+  if (target.scope === "FOLLOWING" && occurrenceDate > firstOccurrence) {
+    return splitSeries(db, userId, row, occurrenceDate, input, fields);
+  }
+
   // ALL: the series moves with the occurrence that was edited (a different date shifts the whole series).
   const firstDate = kstDateOf(row.starts_at);
   const editedDate = input.start.slice(0, 10);
@@ -231,6 +236,45 @@ export async function moveEvent(db: Db, userId: string, target: TargetParams, mo
   return updateEvent(db, userId, target, input);
 }
 
+/** Ends a series the day before `date` (its changed days from `date` on go with it). Used when "this and the following" are edited or deleted. */
+async function endSeriesBefore(db: Db, userId: string, row: CalendarEventRow, date: string): Promise<EventResult> {
+  const { error } = await db.from("calendar_events").update({
+    recur_until: addDays(date, -1),
+    recur_count: null,
+    exdates: row.exdates.filter((exdate) => exdate < date),
+  }).eq("id", row.id).eq("user_id", userId);
+  if (error) return fail("반복 일정을 바꾸지 못했어요. 잠시 후 다시 시도해주세요.");
+  const { error: cleanupError } = await db.from("calendar_events").delete().eq("series_id", row.id).eq("user_id", userId).gte("original_date", date);
+  return cleanupError ? fail("이후 일정을 정리하지 못했어요. 잠시 후 다시 시도해주세요.") : { ok: true, id: row.id };
+}
+
+/**
+ * "This and the following": the old series stops the day before and a new series, made from the edited values,
+ * carries on from this day. The new one is saved first, so a failure never loses the future days (at worst they
+ * show twice until it is retried).
+ */
+async function splitSeries(
+  db: Db,
+  userId: string,
+  row: CalendarEventRow,
+  occurrenceDate: string,
+  input: CalendarEventInput,
+  fields: Pick<EventInsert, "title" | "description" | "all_day" | "color" | "category" | "starts_at" | "ends_at">,
+): Promise<EventResult> {
+  if (!seriesDates(row, addDays(occurrenceDate, 1)).includes(occurrenceDate) || row.exdates.includes(occurrenceDate)) return fail("이 날짜에는 반복 일정이 없어요.");
+  // A count is the series' total; the new series gets what is left after the days that stay in the old one.
+  let recurrence = input.recurrence;
+  if (recurrence?.count) {
+    const remaining = recurrence.count - seriesDates(row, addDays(occurrenceDate, -1)).length;
+    if (remaining < 1) return fail("반복 횟수가 이 날짜보다 먼저 끝나요. 횟수를 늘려주세요.");
+    recurrence = { ...recurrence, count: remaining };
+  }
+  const { data, error } = await db.from("calendar_events").insert({ user_id: userId, ...fields, ...recurrenceColumns(recurrence) }).select("id").single();
+  if (error || !data) return fail("이후 일정을 저장하지 못했어요. 잠시 후 다시 시도해주세요.");
+  const ended = await endSeriesBefore(db, userId, row, occurrenceDate);
+  return ended.ok ? { ok: true, id: data.id } : ended;
+}
+
 export async function deleteEvent(db: Db, userId: string, target: TargetParams): Promise<EventResult> {
   const row = await loadRow(db, userId, target.id);
   if (!row) return fail("일정을 찾을 수 없어요.");
@@ -240,6 +284,13 @@ export async function deleteEvent(db: Db, userId: string, target: TargetParams):
     if (!date || !isValidDateString(date)) return fail("반복 일정은 날짜를 함께 알려주세요.");
     const { error } = await db.from("calendar_events").update({ exdates: [...new Set([...row.exdates, date])].sort() }).eq("id", row.id).eq("user_id", userId);
     return error ? fail("일정을 삭제하지 못했어요. 잠시 후 다시 시도해주세요.") : { ok: true };
+  }
+
+  if (row.recur_freq && target.scope === "FOLLOWING") {
+    const date = target.occurrenceDate;
+    if (!date || !isValidDateString(date)) return fail("반복 일정은 날짜를 함께 알려주세요.");
+    if (date > kstDateOf(row.starts_at)) return endSeriesBefore(db, userId, row, date);
+    // Deleting "this and the following" from the first day removes the whole series.
   }
 
   // A single event, a changed occurrence (its day stays hidden: the series already lists it as replaced) or a whole series.

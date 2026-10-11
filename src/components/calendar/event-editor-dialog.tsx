@@ -42,7 +42,7 @@ function ScopeChoice({ value, onChange, verb }: { value: EditScope; onChange: (s
   return (
     <fieldset className="space-y-2 rounded-xl border bg-muted/40 p-3">
       <legend className="px-1 text-sm font-semibold">반복 일정 {verb} 범위</legend>
-      {([["THIS", "이 일정만"], ["ALL", "모든 반복 일정"]] as const).map(([scope, label]) => (
+      {([["THIS", "이 일정만"], ["FOLLOWING", "이 일정과 이후 일정"], ["ALL", "모든 반복 일정"]] as const).map(([scope, label]) => (
         <label key={scope} className="flex cursor-pointer items-center gap-2 text-sm">
           <input type="radio" name={`scope-${verb}`} checked={value === scope} onChange={() => onChange(scope)} className="size-4 accent-[var(--primary)]" />
           {label}
@@ -220,7 +220,9 @@ export function EventEditorDialog({ state, onClose, onSaved }: { state: EditorSt
                   <NativeSelect aria-label="반복 종료" value={values.endMode} onChange={(event) => update({ endMode: event.target.value as EditorValues["endMode"] })} disabled={isPending} className="w-36">
                     <option value="NEVER">계속 반복</option>
                     <option value="UNTIL">종료일까지</option>
+                    <option value="COUNT">횟수만큼</option>
                   </NativeSelect>
+                  {values.endMode === "COUNT" ? <><Input aria-label="반복 횟수" type="number" min={1} max={500} value={values.count} onChange={(event) => update({ count: Math.max(1, Math.min(500, Number(event.target.value) || 1)) })} required disabled={isPending} className="w-24" /><span>회 (처음부터 센 총 횟수)</span></> : null}
                   {values.endMode === "UNTIL" ? <Input aria-label="반복 종료일" type="date" value={values.until} min={values.startDate} onChange={(event) => update({ until: event.target.value })} required disabled={isPending} className="w-44" /> : null}
                 </div>
               </div>

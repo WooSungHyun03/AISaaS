@@ -87,6 +87,51 @@ suite("calendar events against the real database", () => {
     expect((await series()).filter((entry) => entry.includes("주간 보고"))).toEqual([]);
   });
 
+  it("edits 'this and the following': the old series stops the day before, a new one carries the change on", async () => {
+    const [a] = users;
+    const created = await createEvent(a.db, a.id, { ...base, title: "스탠드업", recurrence: { freq: "DAILY", interval: 1, until: "2026-10-09" } });
+    if (!created.ok) throw new Error(created.error);
+    const id = created.id!;
+    const standups = async () => (await listEvents(a.db, a.id, ...window)).filter((view) => view.title.includes("스탠드업")).map((view) => `${view.occurrenceDate}@${view.start.slice(11, 16)}:${view.title}`);
+
+    // a one-day edit on the 8th first: it must not survive a later 'following' edit from the 7th
+    await updateEvent(a.db, a.id, { id, scope: "THIS", occurrenceDate: "2026-10-08" }, { ...base, title: "스탠드업(8일 특별)", start: "2026-10-08T15:00", end: "2026-10-08T16:00" });
+
+    const changed = await updateEvent(a.db, a.id, { id, scope: "FOLLOWING", occurrenceDate: "2026-10-07" }, { ...base, title: "스탠드업 새 시간", start: "2026-10-07T09:30", end: "2026-10-07T10:00", recurrence: { freq: "DAILY", interval: 1, until: "2026-10-09" } });
+    expect(changed.ok).toBe(true);
+    expect(await standups()).toEqual([
+      "2026-10-05@10:00:스탠드업",
+      "2026-10-06@10:00:스탠드업",
+      "2026-10-07@09:30:스탠드업 새 시간",
+      "2026-10-08@09:30:스탠드업 새 시간",
+      "2026-10-09@09:30:스탠드업 새 시간",
+    ]);
+
+    // delete 'this and the following' from the 8th: only the days before remain, in both series
+    const newSeries = (await listEvents(a.db, a.id, ...window)).find((view) => view.title === "스탠드업 새 시간")!;
+    expect((await deleteEvent(a.db, a.id, { id: newSeries.eventId, scope: "FOLLOWING", occurrenceDate: "2026-10-08" })).ok).toBe(true);
+    expect(await standups()).toEqual(["2026-10-05@10:00:스탠드업", "2026-10-06@10:00:스탠드업", "2026-10-07@09:30:스탠드업 새 시간"]);
+
+    // 'following' from the first day is the whole series
+    expect((await deleteEvent(a.db, a.id, { id, scope: "FOLLOWING", occurrenceDate: "2026-10-05" })).ok).toBe(true);
+    expect((await standups()).some((entry) => entry.includes("10:00:스탠드업"))).toBe(false);
+  });
+
+  it("splits a counted series so the total stays the same, and refuses a count that already ended", async () => {
+    const [a] = users;
+    const created = await createEvent(a.db, a.id, { ...base, title: "다섯번 수업", recurrence: { freq: "DAILY", interval: 1, count: 5 } });
+    if (!created.ok) throw new Error(created.error);
+    const lessons = async () => (await listEvents(a.db, a.id, ...window)).filter((view) => view.title.includes("다섯번 수업")).map((view) => view.occurrenceDate);
+    expect(await lessons()).toHaveLength(5);
+
+    const tooShort = await updateEvent(a.db, a.id, { id: created.id!, scope: "FOLLOWING", occurrenceDate: "2026-10-08" }, { ...base, title: "다섯번 수업", start: "2026-10-08T10:00", end: "2026-10-08T11:00", recurrence: { freq: "DAILY", interval: 1, count: 3 } });
+    expect(tooShort.ok).toBe(false);
+
+    const ok = await updateEvent(a.db, a.id, { id: created.id!, scope: "FOLLOWING", occurrenceDate: "2026-10-08" }, { ...base, title: "다섯번 수업", start: "2026-10-08T14:00", end: "2026-10-08T15:00", recurrence: { freq: "DAILY", interval: 1, count: 5 } });
+    expect(ok.ok).toBe(true);
+    expect(await lessons()).toEqual(["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"]);
+  });
+
   it("drags a one-off event and a single day of a series", async () => {
     const [a] = users;
     const single = await createEvent(a.db, a.id, { ...base, title: "이동 테스트" });

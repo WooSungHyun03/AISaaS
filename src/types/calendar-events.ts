@@ -65,8 +65,8 @@ export const calendarEventInputSchema = z
   });
 export type CalendarEventInput = z.infer<typeof calendarEventInputSchema>;
 
-/** "this one" or "the whole series" when changing a repeating event. */
-export type EditScope = "THIS" | "ALL";
+/** When changing a repeating event: only this day, this day and every later one, or the whole series. */
+export type EditScope = "THIS" | "FOLLOWING" | "ALL";
 
 /** What the screen draws. Times are Seoul wall-clock (all-day: dates, `end` exclusive). */
 export interface CalendarEventView {

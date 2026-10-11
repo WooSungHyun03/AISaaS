@@ -337,6 +337,7 @@ export function CalendarWorkspace() {
           </DialogHeader>
           <DialogFooter className="gap-2 sm:flex-col sm:items-stretch">
             <Button type="button" onClick={() => { if (pendingMove) { void commitMove(pendingMove.view, pendingMove.times, "THIS", pendingMove.revert); setPendingMove(null); } }}>이 일정만 옮기기</Button>
+            <Button type="button" variant="outline" onClick={() => { if (pendingMove) { void commitMove(pendingMove.view, pendingMove.times, "FOLLOWING", pendingMove.revert); setPendingMove(null); } }}>이 일정과 이후 일정 옮기기</Button>
             <Button type="button" variant="outline" onClick={() => { if (pendingMove) { void commitMove(pendingMove.view, pendingMove.times, "ALL", pendingMove.revert); setPendingMove(null); } }}>모든 반복 일정 옮기기</Button>
             <Button type="button" variant="ghost" onClick={() => { pendingMove?.revert(); setPendingMove(null); }}>취소</Button>
           </DialogFooter>

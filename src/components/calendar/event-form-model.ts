@@ -21,8 +21,10 @@ export interface EditorValues {
   repeat: "NONE" | "DAILY" | "WEEKLY" | "MONTHLY";
   interval: number;
   weekdays: number[];
-  endMode: "NEVER" | "UNTIL";
+  endMode: "NEVER" | "UNTIL" | "COUNT";
   until: string;
+  /** Total number of occurrences of the series (COUNT). */
+  count: number;
 }
 
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
@@ -54,6 +56,7 @@ export function valuesForNew(startWall: string, endWall?: string, allDay = false
     weekdays: [weekdayOf(startDate)],
     endMode: "NEVER",
     until: "",
+    count: 10,
   };
 }
 
@@ -78,8 +81,9 @@ export function valuesFromView(view: CalendarEventView): EditorValues {
     repeat: recurrence?.freq ?? "NONE",
     interval: recurrence?.interval ?? 1,
     weekdays: recurrence?.weekdays && recurrence.weekdays.length > 0 ? recurrence.weekdays : [weekdayOf(startDate)],
-    endMode: recurrence?.until ? "UNTIL" : "NEVER",
+    endMode: recurrence?.until ? "UNTIL" : recurrence?.count ? "COUNT" : "NEVER",
     until: recurrence?.until ?? "",
+    count: recurrence?.count ?? 10,
   };
 }
 
@@ -102,6 +106,7 @@ export function toInput(values: EditorValues): CalendarEventInput {
         interval: values.interval,
         ...(values.repeat === "WEEKLY" && values.weekdays.length > 0 ? { weekdays: [...new Set(values.weekdays)].sort() } : {}),
         ...(values.endMode === "UNTIL" && values.until ? { until: values.until } : {}),
+        ...(values.endMode === "COUNT" ? { count: values.count } : {}),
       },
   };
 }

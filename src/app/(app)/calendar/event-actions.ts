@@ -8,7 +8,7 @@ import type { CalendarEventView, CalendarSearchHit, EditScope } from "@/types/ca
 import type { CalendarItem } from "@/types/domain";
 
 const idSchema = z.string().uuid();
-const scopeSchema = z.enum(["THIS", "ALL"]);
+const scopeSchema = z.enum(["THIS", "FOLLOWING", "ALL"]);
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 export interface CalendarRangeResult {

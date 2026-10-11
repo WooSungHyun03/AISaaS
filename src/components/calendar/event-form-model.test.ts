@@ -65,4 +65,11 @@ describe("event form model", () => {
     expect(describeRecurrence("WEEKLY", 2, [1, 3])).toBe("2주마다 월·수");
     expect(describeRecurrence("MONTHLY", 3)).toBe("3개월마다");
   });
+
+  it("keeps a repeat count through the form", () => {
+    const counted = { ...view, recurrence: { freq: "DAILY" as const, interval: 1, count: 4 } };
+    const values = valuesFromView(counted);
+    expect(values).toMatchObject({ endMode: "COUNT", count: 4 });
+    expect(toInput(values).recurrence).toEqual({ freq: "DAILY", interval: 1, count: 4 });
+  });
 });
