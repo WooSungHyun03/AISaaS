@@ -6,12 +6,12 @@
 ## 1. DB (본인 터미널에서)
 
 ```bash
-npx supabase db push --linked --dry-run   # 적용될 migration 0034~0062 목록 확인
+npx supabase db push --linked --dry-run   # 적용될 migration 0034~0063 목록 확인
 npx supabase db push --linked
 ```
 
 새로 들어가는 것: 채널 진단/성장(0034~0042, 0050), 이용권 원장·결제(0051~0054), 홍보 대상 유형(0060), 캘린더 일정(0061),
-문의(0062). 모두 새 테이블/컬럼 추가라 기존 데이터를 지우지 않습니다. 적용 뒤 확인:
+문의(0062), WordPress·이메일 연결 정리(0063: 저장된 연동 비밀값·연결 행 삭제). 모두 새 테이블/컬럼 추가라 기존 데이터를 지우지 않습니다. 적용 뒤 확인:
 
 ```bash
 node --env-file=.env.local scripts/check-providers.mjs   # 결제·채널 테이블, 키 상태 점검
