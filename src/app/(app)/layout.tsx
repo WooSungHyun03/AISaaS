@@ -18,6 +18,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     redirect("/login");
   }
 
+  const { data: profile } = await supabase.from("profiles").select("account_status").eq("id", user.id).maybeSingle();
+  if (profile?.account_status === "SUSPENDED") redirect("/account-suspended");
+
   // The RPC is idempotent, so every authenticated first-party entry can safely
   // ensure the one-time trial. A migration rolling out behind the app shell
   // must not make every protected page unavailable.

@@ -3,6 +3,7 @@ import { requireAdmin } from "@/server/admin/access";
 import { ADMIN_PAGE_SIZE, listInquiriesForAdmin } from "@/server/inquiries/inquiries";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { InquiryStatusBadge } from "@/components/support/inquiry-status-badge";
 import { cn } from "@/lib/utils";
 import { INQUIRY_CATEGORY_LABEL, INQUIRY_STATUSES, INQUIRY_STATUS_LABEL, type InquiryStatus } from "@/types/inquiries";
@@ -11,19 +12,20 @@ export const metadata = { title: "고객 문의 관리" };
 
 const dateFormat = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-export default async function AdminInquiriesPage({ searchParams }: { searchParams: Promise<{ status?: string; page?: string }> }) {
+export default async function AdminInquiriesPage({ searchParams }: { searchParams: Promise<{ status?: string; page?: string; q?: string }> }) {
   const { admin } = await requireAdmin({ action: "ADMIN_INQUIRIES_VIEW", targetType: "route", targetId: "/admin/inquiries", onDenied: "navigate" });
   const query = await searchParams;
 
   const status = (INQUIRY_STATUSES as readonly string[]).includes(query.status ?? "") ? (query.status as InquiryStatus) : undefined;
   const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1);
-  const { items, total } = await listInquiriesForAdmin(admin, { status, page });
+  const { items, total } = await listInquiriesForAdmin(admin, { status, page, search: query.q });
   const pages = Math.max(1, Math.ceil(total / ADMIN_PAGE_SIZE));
-  const href = (nextStatus?: string, nextPage = 1) => `/admin/inquiries?${new URLSearchParams({ ...(nextStatus ? { status: nextStatus } : {}), ...(nextPage > 1 ? { page: String(nextPage) } : {}) }).toString()}`;
+  const href = (nextStatus?: string, nextPage = 1) => `/admin/inquiries?${new URLSearchParams({ ...(nextStatus ? { status: nextStatus } : {}), ...(query.q ? { q: query.q } : {}), ...(nextPage > 1 ? { page: String(nextPage) } : {}) }).toString()}`;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader title="고객 문의 관리" description={`총 ${total.toLocaleString()}건 (한국 시간)`} />
+      <form className="flex max-w-xl gap-2"><Input name="q" defaultValue={query.q} placeholder="사용자 이메일 검색" /><Button type="submit" variant="outline">검색</Button></form>
       <nav className="flex flex-wrap gap-2" aria-label="상태별 보기">
         {[{ value: undefined, label: "전체" }, ...INQUIRY_STATUSES.map((value) => ({ value, label: INQUIRY_STATUS_LABEL[value] }))].map((item) => (
           <Link key={item.label} href={href(item.value)} aria-current={status === item.value ? "page" : undefined} className={cn("inline-flex h-9 items-center rounded-full border px-4 text-sm font-semibold", status === item.value ? "border-primary bg-primary text-primary-foreground" : "bg-card hover:border-primary/40")}>{item.label}</Link>

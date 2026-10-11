@@ -160,7 +160,7 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
     const expectedNext = computeNextRunAt(SCHEDULE).toISOString();
     expect(admin.updates.automations[0]).toMatchObject({ next_run_at: expectedNext });
     expect(reserveCreditMock).toHaveBeenCalledWith({ userId: "user-1", kind: "BLOG", referenceId: "run-1" });
-    expect(admin.rpc).toHaveBeenCalledWith("complete_automation_run_credit", expect.objectContaining({
+    expect(admin.rpc).toHaveBeenCalledWith("complete_automation_run_credit_v2", expect.objectContaining({
       p_run_id: "run-1",
       p_requires_credit: true,
     }));
@@ -366,7 +366,7 @@ describe("runDueAutomation / runAutomationNow — refusal to run", () => {
     expect(ensureTrialCreditsMock).not.toHaveBeenCalled();
     expect(canExecuteAutomationMock).not.toHaveBeenCalled();
     expect(reserveCreditMock).not.toHaveBeenCalled();
-    expect(admin.rpc).toHaveBeenCalledWith("complete_automation_run_credit", expect.objectContaining({
+    expect(admin.rpc).toHaveBeenCalledWith("complete_automation_run_credit_v2", expect.objectContaining({
       p_run_id: "run-publish",
       p_requires_credit: false,
     }));

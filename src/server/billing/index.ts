@@ -15,6 +15,11 @@ export function getBillingProvider(): BillingProvider {
   }
 }
 
+/** Resolves the provider that originally processed an order. */
+export function getBillingProviderByName(provider: "mock" | "toss"): BillingProvider {
+  return provider === "toss" ? new TossBillingProvider() : new MockBillingProvider();
+}
+
 export * from "./provider";
 export * from "./plans";
 export * from "./products";

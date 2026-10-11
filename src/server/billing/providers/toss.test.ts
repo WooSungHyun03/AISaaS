@@ -66,15 +66,16 @@ vi.mock("../checkout-sessions", async () => {
   };
 });
 
-const { issueBillingKeyMock, chargeBillingKeyMock, confirmPaymentMock, deleteBillingKeyMock, TossApiClientMock } = vi.hoisted(() => {
+const { issueBillingKeyMock, chargeBillingKeyMock, confirmPaymentMock, cancelPaymentMock, deleteBillingKeyMock, TossApiClientMock } = vi.hoisted(() => {
   const issueBillingKeyMock = vi.fn();
   const chargeBillingKeyMock = vi.fn();
   const confirmPaymentMock = vi.fn();
+  const cancelPaymentMock = vi.fn();
   const deleteBillingKeyMock = vi.fn();
   const TossApiClientMock = vi.fn().mockImplementation(function () {
-    return { issueBillingKey: issueBillingKeyMock, chargeBillingKey: chargeBillingKeyMock, confirmPayment: confirmPaymentMock, deleteBillingKey: deleteBillingKeyMock };
+    return { issueBillingKey: issueBillingKeyMock, chargeBillingKey: chargeBillingKeyMock, confirmPayment: confirmPaymentMock, cancelPayment: cancelPaymentMock, deleteBillingKey: deleteBillingKeyMock };
   });
-  return { issueBillingKeyMock, chargeBillingKeyMock, confirmPaymentMock, deleteBillingKeyMock, TossApiClientMock };
+  return { issueBillingKeyMock, chargeBillingKeyMock, confirmPaymentMock, cancelPaymentMock, deleteBillingKeyMock, TossApiClientMock };
 });
 vi.mock("./toss-api", async () => {
   const actual = await vi.importActual<typeof import("./toss-api")>("./toss-api");
@@ -106,7 +107,7 @@ const SESSION_ROW = {
 afterEach(() => {
   vi.resetAllMocks();
   TossApiClientMock.mockImplementation(function () {
-    return { issueBillingKey: issueBillingKeyMock, chargeBillingKey: chargeBillingKeyMock, confirmPayment: confirmPaymentMock, deleteBillingKey: deleteBillingKeyMock };
+    return { issueBillingKey: issueBillingKeyMock, chargeBillingKey: chargeBillingKeyMock, confirmPayment: confirmPaymentMock, cancelPayment: cancelPaymentMock, deleteBillingKey: deleteBillingKeyMock };
   });
 });
 
@@ -175,6 +176,16 @@ describe("TossBillingProvider product orders", () => {
 
     expect(confirmPaymentMock).not.toHaveBeenCalled();
     expect(completeProductOrderMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a partial Toss cancellation and returns the verified transaction", async () => {
+    cancelPaymentMock.mockResolvedValue({
+      paymentKey: "pay-1", orderId: "order-1", totalAmount: 19900, status: "PARTIAL_CANCELED",
+      cancels: [{ transactionKey: "cancel-1", cancelAmount: 9950, cancelStatus: "DONE" }],
+    });
+    const result = await new TossBillingProvider().refundPayment({ paymentKey: "pay-1", reason: "고객 요청", amount: 9950, originalAmount: 19900, idempotencyKey: "refund-1" });
+    expect(cancelPaymentMock).toHaveBeenCalledWith({ paymentKey: "pay-1", reason: "고객 요청", cancelAmount: 9950, idempotencyKey: "refund-1" });
+    expect(result).toEqual({ providerRefundId: "cancel-1", refundedAmount: 9950 });
   });
 });
 

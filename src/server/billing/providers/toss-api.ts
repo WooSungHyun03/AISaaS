@@ -17,6 +17,11 @@ export interface TossPaymentResponse {
   orderId: string;
   status: string;
   totalAmount: number;
+  cancels?: Array<{
+    transactionKey: string;
+    cancelAmount: number;
+    cancelStatus: string;
+  }>;
 }
 
 export class TossApiError extends Error {
@@ -111,6 +116,25 @@ export class TossApiClient {
           paymentKey: params.paymentKey,
           orderId: params.orderId,
           amount: params.amount,
+        }),
+      },
+      params.idempotencyKey,
+    );
+  }
+
+  cancelPayment(params: {
+    paymentKey: string;
+    reason: string;
+    cancelAmount?: number;
+    idempotencyKey: string;
+  }) {
+    return this.request<TossPaymentResponse>(
+      `/v1/payments/${encodeURIComponent(params.paymentKey)}/cancel`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          cancelReason: params.reason,
+          ...(params.cancelAmount !== undefined ? { cancelAmount: params.cancelAmount } : {}),
         }),
       },
       params.idempotencyKey,

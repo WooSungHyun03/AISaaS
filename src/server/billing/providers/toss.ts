@@ -13,6 +13,7 @@ import type {
   CreateCheckoutParams,
   CreatePortalParams,
   HandleWebhookParams,
+  RefundPaymentParams,
 } from "../provider";
 import { completeProductOrder, createProductOrder, getProductOrderByCheckoutSession } from "../orders";
 import { isProductId } from "../products";
@@ -101,6 +102,27 @@ export class TossBillingProvider implements BillingProvider {
       logger.error("toss_product_order_failed", { userId, sessionId, code: details.code });
       throw error;
     }
+  }
+
+  async refundPayment(params: RefundPaymentParams) {
+    if (!Number.isSafeInteger(params.amount) || params.amount <= 0 || params.amount > params.originalAmount) {
+      throw new BillingCheckoutError("INVALID_REFUND_AMOUNT", "환불 금액이 올바르지 않습니다.");
+    }
+    const { secretKey } = getTestKeys();
+    const payment = await new TossApiClient(secretKey).cancelPayment({
+      paymentKey: params.paymentKey,
+      reason: params.reason,
+      ...(params.amount < params.originalAmount ? { cancelAmount: params.amount } : {}),
+      idempotencyKey: params.idempotencyKey,
+    });
+    if (!['CANCELED', 'PARTIAL_CANCELED'].includes(payment.status)) {
+      throw new BillingCheckoutError("REFUND_VERIFICATION_FAILED", "토스 결제 취소 결과를 확인할 수 없습니다.");
+    }
+    const cancellation = payment.cancels?.at(-1);
+    if (!cancellation || cancellation.cancelAmount !== params.amount || cancellation.cancelStatus !== "DONE") {
+      throw new BillingCheckoutError("REFUND_VERIFICATION_FAILED", "토스 환불 금액을 확인할 수 없습니다.");
+    }
+    return { providerRefundId: cancellation.transactionKey, refundedAmount: cancellation.cancelAmount };
   }
 
   async createCheckout({ userId, plan, successUrl }: CreateCheckoutParams) {

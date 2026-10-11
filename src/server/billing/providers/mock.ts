@@ -10,6 +10,7 @@ import type {
   CreateCheckoutParams,
   CreatePortalParams,
   HandleWebhookParams,
+  RefundPaymentParams,
 } from "../provider";
 import { completeProductOrder, createProductOrder, getProductOrderByCheckoutSession } from "../orders";
 import { isProductId } from "../products";
@@ -84,6 +85,14 @@ export class MockBillingProvider implements BillingProvider {
       await markCheckoutFailed(session.id, "MOCK_ORDER_FAILED", message);
       throw error;
     }
+  }
+
+  async refundPayment(params: RefundPaymentParams) {
+    assertMockBillingAllowed();
+    return {
+      providerRefundId: `mock_refund_${params.idempotencyKey}`,
+      refundedAmount: params.amount,
+    };
   }
 
   async createCheckout({ userId, plan, successUrl }: CreateCheckoutParams) {

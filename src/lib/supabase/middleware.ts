@@ -32,6 +32,23 @@ export async function updateSession(request: NextRequest) {
   const isProtected = matchesPrefix(pathname, PROTECTED_PREFIXES);
   const isAuthPage = matchesPrefix(pathname, AUTH_PREFIXES);
 
+  if (user) {
+    const { data: profile } = await supabase.from("profiles").select("account_status").eq("id", user.id).maybeSingle();
+    const suspended = profile?.account_status === "SUSPENDED";
+    if (suspended && pathname !== "/account-suspended") {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/account-suspended";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+    if (!suspended && pathname === "/account-suspended") {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.pathname = "/dashboard";
+      redirectUrl.search = "";
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
   if (!user && isProtected) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";

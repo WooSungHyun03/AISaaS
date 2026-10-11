@@ -73,10 +73,18 @@ export interface AdminInquiryListItem {
 
 export const ADMIN_PAGE_SIZE = 30;
 
-export async function listInquiriesForAdmin(admin: Db, options: { status?: InquiryStatus; page?: number } = {}): Promise<{ items: AdminInquiryListItem[]; total: number }> {
+export async function listInquiriesForAdmin(admin: Db, options: { status?: InquiryStatus; page?: number; search?: string } = {}): Promise<{ items: AdminInquiryListItem[]; total: number }> {
   const page = Math.max(1, options.page ?? 1);
+  let matchingUserIds: string[] | null = null;
+  if (options.search?.trim()) {
+    const { data: matches, error: matchError } = await admin.from("profiles").select("id").ilike("email", `%${options.search.trim().slice(0, 120)}%`).limit(500);
+    if (matchError) throw matchError;
+    matchingUserIds = (matches ?? []).map((row) => row.id);
+    if (matchingUserIds.length === 0) return { items: [], total: 0 };
+  }
   let query = admin.from("inquiries").select("id,category,subject,status,created_at,user_id", { count: "exact" }).order("created_at", { ascending: false }).range((page - 1) * ADMIN_PAGE_SIZE, page * ADMIN_PAGE_SIZE - 1);
   if (options.status) query = query.eq("status", options.status);
+  if (matchingUserIds) query = query.in("user_id", matchingUserIds);
   const { data, error, count } = await query;
   if (error) throw error;
   const rows = data ?? [];

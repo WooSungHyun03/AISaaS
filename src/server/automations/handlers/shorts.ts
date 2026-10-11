@@ -137,6 +137,7 @@ async function publishExistingPreview(ctx: AutomationRunContext): Promise<Automa
     topic,
     contentType: "shorts-publish",
     aiGenerationCount: 0,
+    externalApiCallCount: request.platforms.length,
   };
 }
 
@@ -601,6 +602,7 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
     topic: state.topic,
     content: content.script,
     contentType: "shorts",
+    externalApiCallCount: 1 + state.clips.length + (state.music?.audioUrl ? 1 : 0) + state.platforms.length,
   };
 }
 

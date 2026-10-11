@@ -19,6 +19,7 @@ export type ConnectionStatus = "CONNECTED" | "EXPIRED" | "ERROR" | "DISCONNECTED
 export type BillingCheckoutStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "CANCELED";
 export type BillingOrderStatus = "PENDING" | "PAID" | "CANCELED" | "REFUNDED";
 export type RefundRequestStatus = "REQUESTED" | "REVIEWING" | "APPROVED" | "REJECTED" | "REFUNDED";
+export type AccountStatus = "ACTIVE" | "SUSPENDED";
 export type CreditKind = "BLOG" | "SHORTS";
 export type CreditLedgerEvent = "GRANT" | "RESERVE" | "SETTLE" | "RELEASE" | "EXPIRE" | "REFUND";
 export type SubscriberStatus = "ACTIVE" | "UNSUBSCRIBED";
@@ -34,6 +35,9 @@ export interface Database {
           id: string;
           email: string;
           display_name: string | null;
+          account_status: AccountStatus;
+          suspended_at: string | null;
+          suspension_reason: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -41,6 +45,9 @@ export interface Database {
           id: string;
           email: string;
           display_name?: string | null;
+          account_status?: AccountStatus;
+          suspended_at?: string | null;
+          suspension_reason?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -293,6 +300,8 @@ export interface Database {
           started_at: string | null;
           completed_at: string | null;
           created_at: string;
+          ai_generation_count: number;
+          external_api_call_count: number;
         };
         Insert: {
           id?: string;
@@ -305,6 +314,8 @@ export interface Database {
           started_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
+          ai_generation_count?: number;
+          external_api_call_count?: number;
         };
         Update: Partial<Database["public"]["Tables"]["automation_runs"]["Insert"]>;
         Relationships: [];
@@ -493,6 +504,15 @@ export interface Database {
           unused_credits_snapshot: number;
           expected_refund_krw: number;
           policy_snapshot: Json;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          review_note: string | null;
+          refund_idempotency_key: string | null;
+          provider_refund_id: string | null;
+          refund_attempt_count: number;
+          refund_last_error: string | null;
+          last_refund_attempt_at: string | null;
+          refunded_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -507,6 +527,15 @@ export interface Database {
           unused_credits_snapshot: number;
           expected_refund_krw: number;
           policy_snapshot?: Json;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+          review_note?: string | null;
+          refund_idempotency_key?: string | null;
+          provider_refund_id?: string | null;
+          refund_attempt_count?: number;
+          refund_last_error?: string | null;
+          last_refund_attempt_at?: string | null;
+          refunded_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1057,6 +1086,29 @@ export interface Database {
         };
         Returns: boolean;
       };
+      complete_automation_run_credit_v2: {
+        Args: {
+          p_run_id: string;
+          p_output: Json;
+          p_completed_at?: string;
+          p_requires_credit?: boolean;
+          p_ai_generation_count?: number;
+          p_external_api_call_count?: number;
+        };
+        Returns: boolean;
+      };
+      admin_review_refund_request: {
+        Args: { p_request_id: string; p_admin_id: string; p_decision: "REVIEWING" | "APPROVED" | "REJECTED"; p_note?: string | null };
+        Returns: string;
+      };
+      admin_record_refund_failure: {
+        Args: { p_request_id: string; p_error: string };
+        Returns: number;
+      };
+      admin_finalize_refund_request: {
+        Args: { p_request_id: string; p_provider_refund_id: string; p_refunded_amount: number };
+        Returns: number;
+      };
       get_usage_history: {
         Args: {
           p_page?: number;
@@ -1096,6 +1148,17 @@ export interface Database {
           paid_users: number;
           blog_generations: number;
           shorts_generations: number;
+        }>;
+      };
+      get_admin_usage_summary: {
+        Args: { p_from: string; p_to: string; p_user_ids?: string[] | null };
+        Returns: Array<{
+          runs: number;
+          successful_runs: number;
+          ai_generations: number;
+          external_api_calls: number;
+          blog_runs: number;
+          shorts_runs: number;
         }>;
       };
       refund_order_credits: {

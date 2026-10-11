@@ -66,6 +66,31 @@ describe("TossApiClient", () => {
     );
   });
 
+  it("cancels a full payment without cancelAmount and keeps the idempotency key", async () => {
+    const payment = { paymentKey: "pay_1", orderId: "order_1", status: "CANCELED", totalAmount: 19900, cancels: [{ transactionKey: "cancel_1", cancelAmount: 19900, cancelStatus: "DONE" }] };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, payment));
+    const client = new TossApiClient("test_sk_secret", fetchMock as typeof fetch, "https://toss.test");
+
+    await client.cancelPayment({ paymentKey: "pay_1", reason: "고객 요청", idempotencyKey: "refund-request-1" });
+
+    expect(fetchMock).toHaveBeenCalledWith("https://toss.test/v1/payments/pay_1/cancel", expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({ cancelReason: "고객 요청" }),
+      headers: expect.objectContaining({ "Idempotency-Key": "refund-request-1" }),
+    }));
+  });
+
+  it("sends cancelAmount only for a partial cancellation", async () => {
+    const payment = { paymentKey: "pay_1", orderId: "order_1", status: "PARTIAL_CANCELED", totalAmount: 19900, cancels: [{ transactionKey: "cancel_2", cancelAmount: 9950, cancelStatus: "DONE" }] };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, payment));
+    const client = new TossApiClient("test_sk_secret", fetchMock as typeof fetch, "https://toss.test");
+
+    await client.cancelPayment({ paymentKey: "pay_1", reason: "부분 환불", cancelAmount: 9950, idempotencyKey: "refund-request-2" });
+
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({ cancelReason: "부분 환불", cancelAmount: 9950 });
+  });
+
   it("preserves Toss decline codes for the failure screen", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(400, { code: "REJECT_CARD_COMPANY", message: "declined" }));
     const client = new TossApiClient("test_sk_secret", fetchMock as typeof fetch, "https://toss.test");

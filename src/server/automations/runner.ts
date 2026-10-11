@@ -171,11 +171,13 @@ async function persistSuccess(admin: AdminClient, ctx: RunFinishContext, result:
 
   // Run-row locking, SETTLE and SUCCESS happen in one transaction so the
   // stale reaper and the runner cannot choose different terminal outcomes.
-  const { data: completed, error: markSuccessError } = await admin.rpc("complete_automation_run_credit", {
+  const { data: completed, error: markSuccessError } = await admin.rpc("complete_automation_run_credit_v2", {
     p_run_id: run.id,
     p_output: (result.output ?? {}) as Json,
     p_completed_at: new Date().toISOString(),
     p_requires_credit: Boolean(ctx.creditReferenceId),
+    p_ai_generation_count: result.aiGenerationCount ?? 1,
+    p_external_api_call_count: result.externalApiCallCount ?? 0,
   });
   if (markSuccessError) throw markSuccessError;
   if (!completed) throw new Error("Automation run was already closed before success could be recorded.");

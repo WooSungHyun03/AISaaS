@@ -1,12 +1,17 @@
 import Link from "next/link";
-import { ArrowLeft, LayoutDashboard, MessageCircleQuestion, ShieldCheck } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, CreditCard, LayoutDashboard, MessageCircleQuestion, RotateCcw, ShieldCheck, Users } from "lucide-react";
 import { signOut } from "@/app/(auth)/actions";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 
 const ADMIN_NAV = [
   { href: "/admin", label: "대시보드", icon: LayoutDashboard },
+  { href: "/admin/users", label: "사용자", icon: Users },
+  { href: "/admin/payments", label: "결제", icon: CreditCard },
+  { href: "/admin/refunds", label: "환불", icon: RotateCcw },
   { href: "/admin/inquiries", label: "고객 문의", icon: MessageCircleQuestion },
+  { href: "/admin/usage", label: "사용량", icon: Activity },
+  { href: "/admin/errors", label: "오류", icon: AlertTriangle },
 ] as const;
 
 export function AdminShell({ email, children }: { email: string; children: React.ReactNode }) {

@@ -75,6 +75,8 @@ export interface AutomationHandlerResult {
   content?: string;
   /** Defaults to 1; publish-only operations can report 0. */
   aiGenerationCount?: number;
+  /** Successful third-party rendering, publishing, or media calls made by this run. */
+  externalApiCallCount?: number;
 }
 
 /**

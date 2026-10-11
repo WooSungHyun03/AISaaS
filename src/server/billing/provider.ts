@@ -24,6 +24,19 @@ export interface ConfirmOrderResult {
   provider: string;
 }
 
+export interface RefundPaymentParams {
+  paymentKey: string;
+  reason: string;
+  amount: number;
+  originalAmount: number;
+  idempotencyKey: string;
+}
+
+export interface RefundPaymentResult {
+  providerRefundId: string;
+  refundedAmount: number;
+}
+
 export interface CreateCheckoutParams {
   userId: string;
   plan: Exclude<SubscriptionPlan, "FREE">;
@@ -68,6 +81,7 @@ export interface CompleteCheckoutResult {
 export interface BillingProvider {
   createOrder(params: CreateOrderParams): Promise<CheckoutSession>;
   confirmOrder(params: ConfirmOrderParams): Promise<ConfirmOrderResult>;
+  refundPayment(params: RefundPaymentParams): Promise<RefundPaymentResult>;
   /** @deprecated Legacy recurring-subscription checkout. */
   createCheckout(params: CreateCheckoutParams): Promise<CheckoutSession>;
   /** @deprecated Legacy recurring-subscription completion. */
