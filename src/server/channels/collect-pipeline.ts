@@ -1,5 +1,5 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { serverEnv } from "@/lib/env/server";
 import { logger } from "@/lib/logger";
 import { ChannelsError } from "./summary";
@@ -14,6 +14,8 @@ const RETENTION_DAYS = 200;
 /** A transient failure is retried on the next cron tick; this many in a row pauses the channel instead of hammering a broken/renamed channel forever. */
 const MAX_CONSECUTIVE_FAILURES = 5;
 const RESNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** Upper bound on rows read per tick; the time budget usually stops earlier and the rest stay due. */
+const MAX_CHANNELS_PER_TICK = 200;
 
 type TrackedChannelUpdate = Database["public"]["Tables"]["tracked_channels"]["Update"];
 
@@ -45,7 +47,8 @@ export async function snapshotChannelMetrics(channel: TrackedChannelForCollectio
 
 /** Deletes snapshots older than RETENTION_DAYS. Called once per cron tick (see the route), not from a DB-level schedule. */
 export async function cleanupOldSnapshots(now: Date = new Date()): Promise<number> {
-  const supabase = await createClient();
+  // Cron-only (no user session): the RLS-scoped client would see no rows at all.
+  const supabase = createAdminClient();
   const cutoff = new Date(now.getTime() - RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { error, count } = await supabase.from("marketing_metric_snapshots").delete({ count: "exact" }).lt("recorded_at", cutoff);
   if (error) throw new ChannelsError("DATABASE_ERROR", "오래된 채널 지표 스냅샷을 정리하지 못했습니다.", { cause: error });
@@ -68,14 +71,19 @@ export interface ProcessDueChannelsResult {
  * the due index automatically.
  */
 export async function processDueChannels(now: Date = new Date(), budgetMs = 30_000): Promise<ProcessDueChannelsResult> {
-  const supabase = await createClient();
+  // Cron-only, behind CRON_SECRET: there is no user session, so the
+  // RLS-scoped client would read zero channels and update nothing.
+  const supabase = createAdminClient();
   const deadline = Date.now() + budgetMs;
 
   const { data: due, error: dueError } = await supabase
     .from("tracked_channels")
     .select("id, business_id, platform, external_id, url, consecutive_failure_count")
     .eq("status", "ACTIVE")
-    .lte("next_snapshot_at", now.toISOString());
+    // Rows registered before next_snapshot_at was set on insert are null — treat them as due.
+    .or(`next_snapshot_at.is.null,next_snapshot_at.lte.${now.toISOString()}`)
+    .order("next_snapshot_at", { ascending: true, nullsFirst: true })
+    .limit(MAX_CHANNELS_PER_TICK);
   if (dueError) throw new ChannelsError("DATABASE_ERROR", "수집 대상 채널을 불러오지 못했습니다.", { cause: dueError });
 
   const result: ProcessDueChannelsResult = { processed: 0, failed: 0, paused: 0 };

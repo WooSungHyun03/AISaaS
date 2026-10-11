@@ -11,3 +11,6 @@ export function validateNewPassword(password: string, confirm: string): string |
   if (password !== confirm) return "새 비밀번호와 확인 값이 서로 달라요.";
   return null;
 }
+
+/** Typed by the user before account deletion so a stray click can never delete the account. */
+export const ACCOUNT_DELETE_CONFIRMATION = "탈퇴합니다";

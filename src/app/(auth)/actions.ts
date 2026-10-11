@@ -6,9 +6,10 @@ import { createClient } from "@/lib/supabase/server";
 import { clientEnv } from "@/lib/env/client";
 import { safeRedirectPath } from "@/lib/safe-redirect";
 import { describeAuthError } from "@/lib/auth-errors";
-import { isPlausibleEmail, validateNewPassword } from "@/lib/auth-validation";
+import { ACCOUNT_DELETE_CONFIRMATION, isPlausibleEmail, validateNewPassword } from "@/lib/auth-validation";
 import { RECOVERY_COOKIE, RECOVERY_PATH } from "@/lib/supabase/route-access";
 import { logger } from "@/lib/logger";
+import { deleteUserAccount } from "@/server/account/delete-account";
 
 export interface AuthActionState {
   error?: string;
@@ -150,4 +151,30 @@ export async function changePassword(_prevState: AuthActionState, formData: Form
     return { error: describeAuthError(error, "비밀번호를 바꾸지 못했어요. 잠시 후 다시 시도해주세요.") };
   }
   return { success: true };
+}
+
+export async function deleteAccount(_prevState: AuthActionState, formData: FormData): Promise<AuthActionState> {
+  const currentPassword = String(formData.get("currentPassword") ?? "");
+  const confirmation = String(formData.get("confirmation") ?? "").trim();
+  if (confirmation !== ACCOUNT_DELETE_CONFIRMATION) return { error: `확인 문구 '${ACCOUNT_DELETE_CONFIRMATION}'를 정확히 입력해주세요.` };
+  if (!currentPassword || currentPassword.length > 128) return { error: "현재 비밀번호를 입력해주세요." };
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.email) return { error: "로그인이 필요합니다." };
+
+  // Re-authenticate: a borrowed or stolen session cookie alone must not be able to delete the account.
+  const { error: verifyError } = await supabase.auth.signInWithPassword({ email: user.email, password: currentPassword });
+  if (verifyError) return { error: "현재 비밀번호가 올바르지 않아요." };
+
+  try {
+    await deleteUserAccount(user.id);
+  } catch (error) {
+    logger.error("account_delete_failed", { message: error instanceof Error ? error.message : String(error) });
+    return { error: "계정을 삭제하지 못했어요. 잠시 후 다시 시도하거나 문의해주세요." };
+  }
+
+  // The auth user is gone; clear this browser's session cookies too.
+  await supabase.auth.signOut({ scope: "local" });
+  redirect("/login?accountDeleted=1");
 }

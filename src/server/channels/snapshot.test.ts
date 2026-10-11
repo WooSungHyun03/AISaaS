@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 const { createClientMock } = vi.hoisted(() => ({ createClientMock: vi.fn() }));
-vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
+// Service-role client on purpose: 0036 has no insert/update policy, so the user client is always rejected by RLS.
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createClientMock }));
 
 const { saveMetricSnapshot } = await import("./snapshot");
 
@@ -13,7 +14,7 @@ function makeClient(result: { data: unknown; error: unknown }) {
 describe("saveMetricSnapshot", () => {
   it("upserts on (channel_id, metric, recorded_date) — same-day re-collection overwrites, not errors", async () => {
     const client = makeClient({ data: null, error: null });
-    createClientMock.mockResolvedValue(client);
+    createClientMock.mockReturnValue(client);
 
     await saveMetricSnapshot({ channelId: "channel-1", metric: "viewCount", value: 1234, source: "mock", recordedAt: new Date("2026-10-10T00:00:00.000Z") });
 
@@ -25,7 +26,7 @@ describe("saveMetricSnapshot", () => {
 
   it("throws ChannelsError when the upsert fails", async () => {
     const client = makeClient({ data: null, error: new Error("boom") });
-    createClientMock.mockResolvedValue(client);
+    createClientMock.mockReturnValue(client);
 
     await expect(saveMetricSnapshot({ channelId: "channel-1", metric: "viewCount", value: 1, source: "mock" })).rejects.toMatchObject({
       name: "ChannelsError",

@@ -16,6 +16,7 @@ export function LoginForm() {
   const redirectTo = searchParams.get("redirectTo") ?? "/dashboard";
   const checkEmail = searchParams.get("checkEmail") === "1";
   const linkError = searchParams.get("linkError") === "1";
+  const accountDeleted = searchParams.get("accountDeleted") === "1";
   const [state, formAction, isPending] = useActionState(signIn, initialState);
 
   return (
@@ -26,6 +27,11 @@ export function LoginForm() {
       {checkEmail ? (
         <FormMessage variant="info" className="mt-6">
           가입하신 이메일로 인증 링크를 보냈어요. 인증을 마친 뒤 로그인하면 사업 정보 입력으로 이어집니다.
+        </FormMessage>
+      ) : null}
+      {accountDeleted ? (
+        <FormMessage variant="success" className="mt-6">
+          회원 탈퇴가 완료됐어요. 계정과 저장된 데이터를 모두 삭제했어요. 그동안 이용해주셔서 감사합니다.
         </FormMessage>
       ) : null}
       {linkError ? (

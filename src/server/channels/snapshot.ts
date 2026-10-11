@@ -1,5 +1,5 @@
 import "server-only";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ChannelsError } from "./summary";
 import type { ChannelSnapshotSource } from "./snapshot-source";
 
@@ -13,6 +13,13 @@ import type { ChannelSnapshotSource } from "./snapshot-source";
  * `source` is typed as `ChannelSnapshotSource` ("live" | "mock") — there is
  * no code path in this signature that can write "DEMO_SEED"; that value
  * only ever reaches the table via scripts/seed-growth-demo.sql's raw SQL.
+ *
+ * Writes with the service-role client: marketing_metric_snapshots has no
+ * insert/update RLS policy on purpose (0036 — users must not be able to
+ * forge their own growth numbers), so the user-scoped client is always
+ * rejected. Callers must pass a `channelId` they already authorized — every
+ * caller reads it through the RLS-scoped client (diagnoseChannel,
+ * collectChannelNow) or runs behind CRON_SECRET (processDueChannels).
  */
 export async function saveMetricSnapshot(params: {
   channelId: string;
@@ -21,7 +28,7 @@ export async function saveMetricSnapshot(params: {
   source: ChannelSnapshotSource;
   recordedAt?: Date;
 }): Promise<void> {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const recordedAt = params.recordedAt ?? new Date();
 
   const { error } = await supabase.from("marketing_metric_snapshots").upsert(

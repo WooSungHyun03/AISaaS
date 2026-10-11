@@ -81,6 +81,9 @@ describe("registerAndDiagnoseChannel", () => {
     expect(trackedChannels.insertSpy).toHaveBeenCalledWith(
       expect.objectContaining({ business_id: "business-1", platform: "youtube", external_id: "@mychannel" }),
     );
+    // The user client can't update tracked_channels later, so the daily cron schedule is set on insert.
+    const insertedPayload = (trackedChannels.insertSpy.mock.calls[0] as unknown[])[0] as { next_snapshot_at: string };
+    expect(Date.parse(insertedPayload.next_snapshot_at)).toBeGreaterThan(Date.now() + 23 * 3_600_000);
     expect(diagnoseChannelMock).toHaveBeenCalledWith(
       { id: "channel-1", business_id: "business-1", external_id: "@mychannel", url: "https://youtube.com/@mychannel", platform: "youtube" },
       "우리동네 빵집",

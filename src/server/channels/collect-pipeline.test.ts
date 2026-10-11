@@ -9,7 +9,8 @@ const { createClientMock, serverEnvMock, saveMetricSnapshotMock, youtubeCollectM
   naverCollectMock: vi.fn(),
 }));
 
-vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
+// Cron-only paths: no user session, so they must use the service-role client.
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createClientMock }));
 vi.mock("@/lib/env/server", () => ({ serverEnv: serverEnvMock }));
 vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 vi.mock("./snapshot", () => ({ saveMetricSnapshot: saveMetricSnapshotMock }));
@@ -81,7 +82,7 @@ describe("cleanupOldSnapshots", () => {
   it("deletes snapshots older than the retention window and returns the count", async () => {
     const lt = vi.fn().mockResolvedValue({ error: null, count: 7 });
     const del = vi.fn(() => ({ lt }));
-    createClientMock.mockResolvedValue(supabaseStub({ marketing_metric_snapshots: { delete: del } }));
+    createClientMock.mockReturnValue(supabaseStub({ marketing_metric_snapshots: { delete: del } }));
 
     const result = await cleanupOldSnapshots(NOW);
     expect(result).toBe(7);
@@ -92,7 +93,7 @@ describe("cleanupOldSnapshots", () => {
 
   it("throws ChannelsError when the delete fails", async () => {
     const lt = vi.fn().mockResolvedValue({ error: new Error("boom"), count: null });
-    createClientMock.mockResolvedValue(supabaseStub({ marketing_metric_snapshots: { delete: vi.fn(() => ({ lt })) } }));
+    createClientMock.mockReturnValue(supabaseStub({ marketing_metric_snapshots: { delete: vi.fn(() => ({ lt })) } }));
     await expect(cleanupOldSnapshots(NOW)).rejects.toMatchObject({ name: "ChannelsError", code: "DATABASE_ERROR" });
   });
 });
@@ -101,8 +102,10 @@ describe("processDueChannels", () => {
   function makeDueChannelsClient(due: Array<Record<string, unknown>>) {
     const updateEq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn((_payload: Record<string, unknown>) => ({ eq: updateEq }));
-    const trackedChannelsLte = vi.fn().mockResolvedValue({ data: due, error: null });
-    const trackedChannelsEq = vi.fn(() => ({ lte: trackedChannelsLte }));
+    const trackedChannelsLimit = vi.fn().mockResolvedValue({ data: due, error: null });
+    const trackedChannelsOrder = vi.fn(() => ({ limit: trackedChannelsLimit }));
+    const trackedChannelsOr = vi.fn((_filter: string) => ({ order: trackedChannelsOrder }));
+    const trackedChannelsEq = vi.fn(() => ({ or: trackedChannelsOr }));
     const trackedChannelsSelect = vi.fn(() => ({ eq: trackedChannelsEq }));
     const businessesMaybeSingle = vi.fn().mockResolvedValue({ data: { name: "사업체" }, error: null });
     const businessesEq = vi.fn(() => ({ maybeSingle: businessesMaybeSingle }));
@@ -112,14 +115,23 @@ describe("processDueChannels", () => {
       tracked_channels: { select: trackedChannelsSelect, update },
       businesses: { select: businessesSelect },
     });
-    return { client, update, updateEq };
+    return { client, update, updateEq, trackedChannelsOr };
   }
+
+  it("treats channels with no next_snapshot_at yet as due", async () => {
+    const { client, trackedChannelsOr } = makeDueChannelsClient([]);
+    createClientMock.mockReturnValue(client);
+
+    await processDueChannels(NOW, 30_000);
+
+    expect(trackedChannelsOr).toHaveBeenCalledWith(`next_snapshot_at.is.null,next_snapshot_at.lte.${NOW.toISOString()}`);
+  });
 
   it("on success: resets consecutive_failure_count and advances next_snapshot_at", async () => {
     youtubeCollectMock.mockResolvedValue({ subscriberCount: 1, hiddenSubscriberCount: false, viewCount: 1, videoCount: 1, recentVideos: [] });
     const due = [{ id: "c1", business_id: "b1", platform: "youtube", external_id: "@x", url: "", consecutive_failure_count: 2 }];
     const { client, update } = makeDueChannelsClient(due);
-    createClientMock.mockResolvedValue(client);
+    createClientMock.mockReturnValue(client);
 
     const result = await processDueChannels(NOW, 30_000);
 
@@ -131,7 +143,7 @@ describe("processDueChannels", () => {
     youtubeCollectMock.mockRejectedValue(new Error("boom"));
     const due = [{ id: "c1", business_id: "b1", platform: "youtube", external_id: "@x", url: "", consecutive_failure_count: 1 }];
     const { client, update } = makeDueChannelsClient(due);
-    createClientMock.mockResolvedValue(client);
+    createClientMock.mockReturnValue(client);
 
     const result = await processDueChannels(NOW, 30_000);
 
@@ -144,7 +156,7 @@ describe("processDueChannels", () => {
     youtubeCollectMock.mockRejectedValue(new Error("boom"));
     const due = [{ id: "c1", business_id: "b1", platform: "youtube", external_id: "@x", url: "", consecutive_failure_count: 4 }];
     const { client, update } = makeDueChannelsClient(due);
-    createClientMock.mockResolvedValue(client);
+    createClientMock.mockReturnValue(client);
 
     const result = await processDueChannels(NOW, 30_000);
 
@@ -159,7 +171,7 @@ describe("processDueChannels", () => {
       { id: "c2", business_id: "b1", platform: "youtube", external_id: "@y", url: "", consecutive_failure_count: 0 },
     ];
     const { client } = makeDueChannelsClient(due);
-    createClientMock.mockResolvedValue(client);
+    createClientMock.mockReturnValue(client);
 
     const result = await processDueChannels(NOW, -1); // already-expired budget: process nothing
     expect(result).toEqual({ processed: 0, failed: 0, paused: 0 });
