@@ -41,7 +41,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
   1. Production DB: `npx supabase db push --linked --dry-run` then `npx supabase db push --linked` — now 0034–0066 **and 0070** (see `docs/DEPLOY_CHECKLIST_2026-10.md`). 0070 only replaces one function.
   2. Tell 팀원 2: F-010 check lives in 0070 (do not drop it when changing `admin_review_refund_request`); F-009 / F-011 are theirs to decide. Next free migration numbers: 0067–0069 are left for teammates; Claude used 0070.
 - **Next run priorities:** browser smoke test of /billing/refunds, /admin/*, /diagnosis channel delete (needs an attended session or a running dev server); F-011 decision; per-request `profiles.account_status` query in middleware (one extra DB round-trip per navigation — measure before changing); review calendar general-purpose events (0061) RLS and the Shorts reference-image pipeline cost controls.
-- **Commit:** (see git log — `fix(refunds,channels): …` on 2026-10-12)
+- **Commit:** `af41bc4` (fix(refunds,channels): block refund approval during in-flight generation; channel removal)
 
 ### 2026-10-11 (run 2)
 
