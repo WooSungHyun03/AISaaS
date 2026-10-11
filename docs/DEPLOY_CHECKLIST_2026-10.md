@@ -6,15 +6,21 @@
 ## 1. DB (본인 터미널에서)
 
 ```bash
-npx supabase db push --linked --dry-run   # 적용될 migration 0034~0063 목록 확인
+npx supabase db push --linked --dry-run   # 적용될 migration 0034~0064 목록 확인
 npx supabase db push --linked
 ```
 
 새로 들어가는 것: 채널 진단/성장(0034~0042, 0050), 이용권 원장·결제(0051~0054), 홍보 대상 유형(0060), 캘린더 일정(0061),
-문의(0062), WordPress·이메일 연결 정리(0063: 저장된 연동 비밀값·연결 행 삭제). 모두 새 테이블/컬럼 추가라 기존 데이터를 지우지 않습니다. 적용 뒤 확인:
+문의(0062), WordPress·이메일 연결 정리(0063), 사용자 환불 요청(0064).
+
+> **0063은 데이터 정리 migration입니다.** 더 이상 제공하지 않는 WordPress·이메일 연결의 Vault 비밀값과 연결 행을 삭제하고,
+> 기존 블로그 자동화를 앱 초안 모드로 바꿉니다. 적용 전에 해당 연동을 되돌릴 필요가 없는지 확인하세요. 0034~0062와 0064는
+> 기존 데이터를 삭제하지 않는 추가 변경입니다.
+
+적용 뒤 확인:
 
 ```bash
-node --env-file=.env.local scripts/check-providers.mjs   # 결제·채널 테이블, 키 상태 점검
+node --env-file=.env.local scripts/check-providers.mjs   # 결제·문의·환불·채널 테이블, 키 상태 점검
 ```
 
 ## 2. Vercel 환경변수 (직접 입력, 입력 후 재배포)
@@ -46,3 +52,4 @@ node --env-file=.env.local scripts/check-providers.mjs   # 결제·채널 테이
 3. 마케팅 진단: 홈페이지 주소 / 네이버 블로그 / 티스토리 / 유튜브 추가
 4. 설정에서 YouTube 연결 → 성장 리포트에서 Analytics(2~3일 늦게 집계됨)
 5. 캘린더에 일정 추가·반복·드래그, 문의 보내기 → 관리자 계정으로 답변
+6. 테스트 주문의 환불 요청 제출 → 같은 주문 중복 제출 차단 → 요청 상태 확인 (자동 환불은 실행되지 않음)

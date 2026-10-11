@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { INQUIRY_BODY, INQUIRY_CATEGORIES, INQUIRY_CATEGORY_LABEL, INQUIRY_SUBJECT } from "@/types/inquiries";
+import { CUSTOMER_INQUIRY_CATEGORIES, INQUIRY_BODY, INQUIRY_CATEGORY_LABEL, INQUIRY_SUBJECT } from "@/types/inquiries";
 
 const initialState: InquiryActionState = {};
 
@@ -35,7 +35,7 @@ export function InquiryForm() {
           <Label htmlFor="inquiry-category">문의 유형</Label>
           <NativeSelect id="inquiry-category" name="category" defaultValue="" required disabled={isPending}>
             <option value="" disabled>유형 선택</option>
-            {INQUIRY_CATEGORIES.map((category) => <option key={category} value={category}>{INQUIRY_CATEGORY_LABEL[category]}</option>)}
+            {CUSTOMER_INQUIRY_CATEGORIES.map((category) => <option key={category} value={category}>{INQUIRY_CATEGORY_LABEL[category]}</option>)}
           </NativeSelect>
         </div>
         <div className="space-y-2">

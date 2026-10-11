@@ -384,6 +384,60 @@ async function main() {
     assert.equal(completedOrder.status, "PAID");
     assert.ok(completedOrder.paid_at);
 
+    const refundRequest = requireData(
+      await admin.from("refund_requests").insert({
+        user_id: userId,
+        order_id: productOrder.id,
+        reason: "구매한 이용권을 사용하지 않아 테스트 환불을 요청합니다.",
+        credit_amount_snapshot: 5,
+        used_credits_snapshot: 0,
+        unused_credits_snapshot: 5,
+        expected_refund_krw: 9900,
+        policy_snapshot: { unusedCreditRefundRate: 1, validityBasis: "credit-grant-expiry", creditExpiresAt: future },
+      }).select("id,status").single(),
+      "create refund request as service role",
+    );
+    assert.equal(refundRequest.status, "REQUESTED");
+    const duplicateRefundRequest = await admin.from("refund_requests").insert({
+      user_id: userId,
+      order_id: productOrder.id,
+      reason: "같은 주문에 대한 중복 환불 요청은 저장되면 안 됩니다.",
+      credit_amount_snapshot: 5,
+      used_credits_snapshot: 0,
+      unused_credits_snapshot: 5,
+      expected_refund_krw: 9900,
+    });
+    assert.equal(duplicateRefundRequest.error?.code, "23505", "one order must accept only one refund request");
+    const ownerRefundRequests = requireData(
+      await userClient.from("refund_requests").select("id,status").eq("id", refundRequest.id),
+      "read own refund request",
+    );
+    assert.equal(ownerRefundRequests.length, 1);
+
+    const otherAuth = requireData(
+      await client(url, anonKey).auth.signInWithPassword({ email: otherCreated.user.email, password }),
+      "sign in other refund user",
+    );
+    const otherUserClient = client(url, anonKey);
+    await otherUserClient.auth.setSession({ access_token: otherAuth.session.access_token, refresh_token: otherAuth.session.refresh_token });
+    const otherRefundRequests = requireData(
+      await otherUserClient.from("refund_requests").select("id").eq("id", refundRequest.id),
+      "read refund requests as another user",
+    );
+    assert.equal(otherRefundRequests.length, 0, "another user's refund request must stay hidden");
+    const forgedRefundRequest = await userClient.from("refund_requests").insert({
+      user_id: userId,
+      order_id: productOrder.id,
+      reason: "고객이 계산 스냅샷을 직접 넣는 요청은 거부되어야 합니다.",
+      credit_amount_snapshot: 5,
+      used_credits_snapshot: 0,
+      unused_credits_snapshot: 5,
+      expected_refund_krw: 9900,
+    });
+    assert.ok(forgedRefundRequest.error, "authenticated users must not insert refund snapshots directly");
+    const forgedStatus = await userClient.from("refund_requests").update({ status: "REFUNDED" }).eq("id", refundRequest.id);
+    assert.ok(forgedStatus.error, "authenticated users must not update refund status");
+
     const order = requireData(
       await admin
         .from("billing_orders")
@@ -432,7 +486,7 @@ async function main() {
     const immutable = await admin.from("credit_ledger").update({ reference_id: "tampered" }).eq("id", ledger[0].id);
     assert.ok(immutable.error, "ledger updates must be rejected even for service role");
 
-    console.log("[credit-db] PASS: concurrent reservations, run-id idempotency, atomic run completion, one-time trial, owner-only usage history, service-role ACL, release, settle, expiry, refund, immutable ledger");
+    console.log("[credit-db] PASS: concurrent reservations, run-id idempotency, atomic run completion, one-time trial, owner-only usage/refund history, refund-request duplicate and ACL guards, service-role ACL, release, settle, expiry, refund, immutable ledger");
   } finally {
     if (otherUserId) requireSuccess(await admin.auth.admin.deleteUser(otherUserId), "delete other test user");
     requireSuccess(await admin.auth.admin.deleteUser(userId), "delete test user");

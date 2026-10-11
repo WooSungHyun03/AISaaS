@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { LegalDocument, type LegalSection } from "@/components/legal/legal-document";
 
 export const metadata: Metadata = {
@@ -59,7 +60,7 @@ const SECTIONS: LegalSection[] = [
         <p>결제는 <strong>토스페이먼츠 테스트 모드</strong>로만 동작해요. 테스트 결제에서는 실제 카드 청구나 출금이 일어나지 않아요.</p>
         <ul>
           <li>이용권의 가격·횟수·유효기간은 이용권 페이지에 표시된 내용을 따라요.</li>
-          <li>환불이나 결제 관련 문의는 로그인 후 &lsquo;문의&rsquo; 메뉴로 접수해주세요. 데모 결제이므로 실제 금전 반환은 발생하지 않으며, 이용 한도와 결제 상태를 기록에 맞게 정정해드려요.</li>
+          <li>환불 요청은 로그인 후 <Link href="/billing/refunds">&lsquo;이용권·결제 → 환불 요청&rsquo;</Link>에서 접수하고 상태를 확인할 수 있어요. 데모 결제이므로 실제 금전 반환은 발생하지 않으며, 이용 한도와 결제 상태를 기록에 맞게 정정해드려요.</li>
         </ul>
       </>
     ),

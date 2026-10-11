@@ -76,6 +76,7 @@ if (!supabaseUrl || !serviceKey) {
 } else {
   const required = {
     "결제·이용권 (0051~)": ["billing_orders", "credit_grants", "credit_ledger"],
+    "문의·환불 요청 (0062, 0064)": ["inquiries", "inquiry_messages", "refund_requests"],
     "마케팅 진단·성장 리포트 (0034~0042)": ["tracked_channels", "channel_diagnoses", "marketing_metric_snapshots"],
   };
   for (const [feature, tables] of Object.entries(required)) {

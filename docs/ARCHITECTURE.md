@@ -558,6 +558,25 @@ instead of granting credits again. Both Toss keys must start with `test_`;
 live keys are rejected before creating or confirming an order. The mock
 provider retains its production opt-in guard.
 
+### Customer refund requests
+
+`/billing/refunds` reads a customer's paid orders and their order-backed
+`credit_grants`. `refund-policy.ts` calculates the review amount from the
+unexpired remaining-credit ratio; the browser never supplies the amount or
+credit snapshot. The Server Action authenticates the customer, then
+`submitRefundRequest()` verifies order ownership, paid status, current grant
+balance, and expiry again before its service-role insert. A unique
+`refund_requests.order_id` constraint makes duplicate submissions safe under
+concurrency. Customers have owner-only `SELECT` and no direct insert/update
+permission, so they cannot forge a snapshot or move a request through
+`REQUESTED → REVIEWING → APPROVED/REJECTED → REFUNDED` themselves.
+
+Submitting a request never calls `refund_order_credits()` and never contacts
+the payment provider. Review and the eventual refund remain an explicit admin
+operation. Each request preserves the credit, amount, and policy snapshot used
+at submission time. The current product is a school-project demo using test
+payments, so the customer UI states that no real charge or cash refund occurs.
+
 ### Credit-backed execution
 
 `FREE_TRIAL_CREDITS` in `src/server/billing/products.ts` is the only signup

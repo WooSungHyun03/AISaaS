@@ -18,6 +18,7 @@ export type IntegrationProvider = "instagram" | "youtube";
 export type ConnectionStatus = "CONNECTED" | "EXPIRED" | "ERROR" | "DISCONNECTED";
 export type BillingCheckoutStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "CANCELED";
 export type BillingOrderStatus = "PENDING" | "PAID" | "CANCELED" | "REFUNDED";
+export type RefundRequestStatus = "REQUESTED" | "REVIEWING" | "APPROVED" | "REJECTED" | "REFUNDED";
 export type CreditKind = "BLOG" | "SHORTS";
 export type CreditLedgerEvent = "GRANT" | "RESERVE" | "SETTLE" | "RELEASE" | "EXPIRE" | "REFUND";
 export type SubscriberStatus = "ACTIVE" | "UNSUBSCRIBED";
@@ -440,6 +441,38 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["billing_orders"]["Insert"]>;
+        Relationships: [];
+      };
+      refund_requests: {
+        Row: {
+          id: string;
+          user_id: string;
+          order_id: string;
+          reason: string;
+          status: RefundRequestStatus;
+          credit_amount_snapshot: number;
+          used_credits_snapshot: number;
+          unused_credits_snapshot: number;
+          expected_refund_krw: number;
+          policy_snapshot: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          order_id: string;
+          reason: string;
+          status?: RefundRequestStatus;
+          credit_amount_snapshot: number;
+          used_credits_snapshot: number;
+          unused_credits_snapshot: number;
+          expected_refund_krw: number;
+          policy_snapshot?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["refund_requests"]["Insert"]>;
         Relationships: [];
       };
       credit_grants: {

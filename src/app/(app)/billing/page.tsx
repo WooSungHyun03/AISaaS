@@ -1,9 +1,11 @@
-import { CalendarClock, Check, Clapperboard, FileText, ReceiptText } from "lucide-react";
+import Link from "next/link";
+import { CalendarClock, Check, Clapperboard, FileText, ReceiptText, RotateCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env/server";
 import { ALL_PRODUCTS, getProductConfig, isProductId, type CreditKind, type ProductConfig } from "@/server/billing/products";
 import { getCreditBillingOverview } from "@/server/billing/read-model";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form-message";
 import { PageHeader } from "@/components/layout/page-header";
 import { BillingSubmitButton } from "@/components/billing/billing-submit-button";
@@ -105,9 +107,12 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
       ))}
 
       <section aria-labelledby="orders-heading" className="space-y-4">
-        <div>
-          <h2 id="orders-heading" className="flex items-center gap-2 text-lg font-extrabold tracking-[-0.03em]"><ReceiptText className="size-5" aria-hidden="true" />주문 내역</h2>
-          <p className="mt-1 text-sm text-muted-foreground">최근 주문 20건을 보여드려요.</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 id="orders-heading" className="flex items-center gap-2 text-lg font-extrabold tracking-[-0.03em]"><ReceiptText className="size-5" aria-hidden="true" />주문 내역</h2>
+            <p className="mt-1 text-sm text-muted-foreground">최근 주문 20건을 보여드려요.</p>
+          </div>
+          <Button asChild variant="outline" size="sm"><Link href="/billing/refunds"><RotateCcw aria-hidden="true" />환불 요청·상태</Link></Button>
         </div>
         {orders.length === 0 ? (
           <div className="rounded-2xl border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">아직 구매한 상품이 없어요.</div>

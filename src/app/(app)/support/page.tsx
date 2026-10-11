@@ -34,6 +34,8 @@ export default async function SupportPage() {
     <div className="mx-auto max-w-4xl space-y-10">
       <PageHeader title="문의" description="궁금한 점은 먼저 자주 묻는 질문에서 찾아보고, 없으면 바로 문의를 남겨주세요." />
 
+      <FormMessage variant="info"><strong>학교 프로젝트 데모 · 테스트 결제</strong> 환경이에요. 실제 청구나 금전 환불은 발생하지 않아요. 주문 환불을 요청하려면 <Link href="/billing/refunds" className="font-semibold text-primary underline underline-offset-2">환불 요청 화면</Link>을 이용해주세요.</FormMessage>
+
       {isAdminUser(user) ? (
         <p className="rounded-xl bg-brand-soft px-4 py-3 text-sm">관리자 계정이에요. <Link href="/admin/inquiries" className="font-semibold text-primary underline underline-offset-2">고객 문의 관리로 가기</Link></p>
       ) : null}
@@ -57,7 +59,7 @@ export default async function SupportPage() {
       <section aria-labelledby="inquiry-form-title" className="space-y-4">
         <div>
           <h2 id="inquiry-form-title" className="text-lg font-extrabold tracking-[-0.03em]">문의하기</h2>
-          <p className="mt-1 text-sm text-muted-foreground">결제·환불·오류·기능 제안 무엇이든 남겨주세요. 보통 영업일 기준 1~2일 안에 답해드려요.</p>
+          <p className="mt-1 text-sm text-muted-foreground">결제·환불·서비스 오류·기타 문의를 남겨주세요. 보통 영업일 기준 1~2일 안에 답해드려요.</p>
         </div>
         {inquiriesUnavailable ? <FormMessage variant="info">문의 기능을 준비하는 중이에요. 서비스 관리자가 데이터베이스 업데이트를 마치면 바로 쓸 수 있어요.</FormMessage> : <InquiryForm />}
       </section>

@@ -15,6 +15,7 @@ export type CalendarItem = Database["public"]["Tables"]["calendar_items"]["Row"]
 export type Subscription = Database["public"]["Tables"]["subscriptions"]["Row"];
 export type BillingCheckoutSession = Database["public"]["Tables"]["billing_checkout_sessions"]["Row"];
 export type BillingOrder = Database["public"]["Tables"]["billing_orders"]["Row"];
+export type RefundRequest = Database["public"]["Tables"]["refund_requests"]["Row"];
 export type CreditGrant = Database["public"]["Tables"]["credit_grants"]["Row"];
 export type CreditLedgerEntry = Database["public"]["Tables"]["credit_ledger"]["Row"];
 export type CreditTrialClaim = Database["public"]["Tables"]["credit_trial_claims"]["Row"];
@@ -60,6 +61,7 @@ export type {
   SubscriptionPlan,
   SubscriptionStatus,
   BillingOrderStatus,
+  RefundRequestStatus,
   CreditKind,
   CreditLedgerEvent,
   SetupRequestStatus,

@@ -2,6 +2,8 @@ import { z } from "zod";
 
 export const INQUIRY_CATEGORIES = ["PAYMENT", "REFUND", "BUG", "FEATURE", "OTHER"] as const;
 export type InquiryCategory = (typeof INQUIRY_CATEGORIES)[number];
+/** Customer-facing categories. FEATURE stays in the persisted union for existing/admin records. */
+export const CUSTOMER_INQUIRY_CATEGORIES = ["PAYMENT", "REFUND", "BUG", "OTHER"] as const satisfies readonly InquiryCategory[];
 export const INQUIRY_CATEGORY_LABEL: Record<InquiryCategory, string> = {
   PAYMENT: "결제",
   REFUND: "환불",
