@@ -32,7 +32,7 @@ export default async function MyAutomationsPage() {
     <div className="mx-auto max-w-5xl space-y-8">
       <PageHeader
         title="만들기 설정"
-        description="정해둔 때마다 블로그 글과 숏폼 콘텐츠를 만들어 줘요. 만든 결과는 제작 기록에서 확인해요."
+        description="정해둔 때마다 블로그 글과 숏폼 콘텐츠를 만들어 줘요. 만든 결과는 이용내역에서 확인해요."
         actions={<Button asChild><Link href="/automations/marketplace"><Plus aria-hidden="true" /> 새로 만들기</Link></Button>}
       />
 

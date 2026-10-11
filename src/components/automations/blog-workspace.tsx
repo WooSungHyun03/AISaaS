@@ -119,7 +119,7 @@ export function BlogWorkspace({
             <ul className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
               {MARKUP_HELP.map(([syntax, meaning]) => <li key={syntax}><code className="rounded bg-background px-1.5 py-0.5 text-[12px] text-foreground">{syntax}</code> {meaning}</li>)}
             </ul>
-            <p className="mt-2">문단 사이는 빈 줄로 나눠요. AI가 처음 만든 글은 제작 기록에 그대로 남아 있어요.</p>
+            <p className="mt-2">문단 사이는 빈 줄로 나눠요. AI가 처음 만든 글은 이용내역에 그대로 남아 있어요.</p>
           </details>
         </div>
         {error ? <FormMessage id="blog-editor-error">{error}</FormMessage> : null}

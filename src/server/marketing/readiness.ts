@@ -27,7 +27,7 @@ function isInstagramConnected(status: string | undefined): boolean {
 }
 
 /**
- * "마케팅 운영 준비 점수" — 저장된 사업 정보/연결 상태/최근 제작 기록만으로 계산한
+ * "마케팅 운영 준비 점수" — 저장된 사업 정보/연결 상태/최근 콘텐츠 제작 데이터로 계산한
  * 운영 준비도. 홈페이지 콘텐츠 자체의 품질 점수(diagnoseWebsite, /diagnosis의
  * "홈페이지로 자동 채우기")와는 다른 지표라 섞어 쓰지 않는다.
  *

@@ -39,7 +39,7 @@ export function ReadinessScoreCard({ businessName, result }: { businessName: str
 
       <section aria-labelledby="readiness-breakdown-title">
         <h2 id="readiness-breakdown-title" className="text-lg font-bold tracking-[-0.02em]">점수는 이렇게 계산했어요</h2>
-        <p className="mt-1 text-[15px] text-muted-foreground">저장된 사업 정보와 연결 상태, 최근 30일 제작 기록을 기준으로 해요.</p>
+        <p className="mt-1 text-[15px] text-muted-foreground">저장된 사업 정보와 연결 상태, 최근 30일 이용내역을 기준으로 해요.</p>
         <ul className="mt-5 divide-y divide-border border-y border-border">
           {result.rows.map((row) => (
             <li key={row.key} className="grid items-center gap-x-6 gap-y-2 py-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_auto]">

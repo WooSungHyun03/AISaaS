@@ -37,7 +37,7 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
       "구매한 블로그·숏폼 이용권만큼 제작",
       "움직이는 영상(캐릭터·상품) 지원",
       "정해둔 때마다 자동으로 만들기",
-      "제작 기록 보기",
+      "이용내역 보기",
     ],
   },
   PRO: {

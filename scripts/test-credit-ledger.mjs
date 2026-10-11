@@ -45,6 +45,7 @@ async function main() {
     "create test user",
   );
   const userId = created.user.id;
+  let otherUserId = null;
 
   try {
     requireSuccess(
@@ -189,6 +190,48 @@ async function main() {
     assert.equal(completedRun.status, "SUCCESS");
     assert.equal(completedRun.output.title, "atomic success", "a retry must not overwrite the first terminal output");
     assert.ok(completedRun.completed_at);
+    requireSuccess(
+      await admin.from("content_history").insert({
+        business_id: business.id,
+        automation_id: automation.id,
+        run_id: run.id,
+        content_type: "blog",
+        title: "Usage history result",
+        content: "Saved content",
+        external_url: "https://example.com/usage-history-result",
+      }),
+      "create usage history content result",
+    );
+
+    requireData(await admin.rpc("grant_credit", {
+      p_user_id: userId,
+      p_kind: "BLOG",
+      p_amount: 1,
+      p_expires_at: future,
+      p_reference_id: "failed-run-fixture",
+    }), "grant failed-run credit");
+    const failedRun = requireData(
+      await admin.from("automation_runs").insert({
+        automation_id: automation.id,
+        status: "RUNNING",
+        source: "MANUAL",
+      }).select("id").single(),
+      "create failed usage run",
+    );
+    requireData(await admin.rpc("reserve_credit", {
+      p_user_id: userId,
+      p_kind: "BLOG",
+      p_amount: 1,
+      p_reference_id: failedRun.id,
+    }), "reserve failed-run credit");
+    requireData(await admin.rpc("release_credit_by_reference", {
+      p_reference_id: failedRun.id,
+      p_reason: "usage-history-test",
+    }), "return failed-run credit");
+    requireSuccess(
+      await admin.from("automation_runs").update({ status: "FAILED", error_message: "fixture failure", completed_at: new Date().toISOString() }).eq("id", failedRun.id),
+      "mark usage run failed",
+    );
 
     const signedIn = requireData(await client(url, anonKey).auth.signInWithPassword({ email, password }), "sign in test user");
     const userClient = client(url, anonKey);
@@ -212,6 +255,69 @@ async function main() {
       userClient.rpc("complete_billing_order", { p_order_id: crypto.randomUUID(), p_payment_key: "forbidden" }),
     ]);
     assert.ok(forbiddenCalls.every((result) => result.error), "all credit mutation RPCs must reject authenticated users");
+
+    const successHistory = requireData(await userClient.rpc("get_usage_history", {
+      p_page: 1,
+      p_page_size: 100,
+      p_status: "SUCCESS",
+    }), "read successful usage history");
+    const successfulUsage = successHistory.find((entry) => entry.run_id === run.id);
+    assert.ok(successfulUsage, "successful run must appear in usage history");
+    assert.equal(successfulUsage.terminal_event, "SETTLE");
+    assert.equal(successfulUsage.content_title, "Usage history result");
+    assert.equal(successfulUsage.external_url, "https://example.com/usage-history-result");
+
+    const failedHistory = requireData(await userClient.rpc("get_usage_history", {
+      p_page: 1,
+      p_page_size: 100,
+      p_status: "FAILED",
+    }), "read failed usage history");
+    assert.ok(failedHistory.some((entry) => entry.run_id === failedRun.id && entry.terminal_event === "RELEASE"));
+    const returnedHistory = requireData(await userClient.rpc("get_usage_history", {
+      p_page: 1,
+      p_page_size: 100,
+      p_status: "RETURNED",
+    }), "read returned usage history");
+    assert.ok(returnedHistory.some((entry) => entry.run_id === failedRun.id), "returned credit must appear in its filter");
+    const grantedHistory = requireData(await userClient.rpc("get_usage_history", {
+      p_page: 1,
+      p_page_size: 100,
+      p_status: "GRANTED",
+    }), "read granted usage history");
+    assert.ok(grantedHistory.length > 0 && grantedHistory.every((entry) => entry.event_type === "GRANT"), "grants must appear in their filter");
+
+    const beforeOtherUser = requireData(await userClient.rpc("get_usage_history", {
+      p_page: 1,
+      p_page_size: 100,
+    }), "read owner usage history");
+    const otherCreated = requireData(
+      await admin.auth.admin.createUser({
+        email: `credit-ledger-other-${crypto.randomUUID()}@autobiz.local`,
+        password,
+        email_confirm: true,
+      }),
+      "create other usage user",
+    );
+    otherUserId = otherCreated.user.id;
+    requireSuccess(
+      await admin.from("profiles").upsert({ id: otherUserId, email: otherCreated.user.email, display_name: "Other usage user" }),
+      "upsert other usage profile",
+    );
+    requireData(await admin.rpc("grant_credit", {
+      p_user_id: otherUserId,
+      p_kind: "BLOG",
+      p_amount: 1,
+      p_expires_at: future,
+      p_reference_id: "other-user-only",
+    }), "grant other-user credit");
+    const afterOtherUser = requireData(await userClient.rpc("get_usage_history", {
+      p_page: 1,
+      p_page_size: 100,
+    }), "re-read owner usage history");
+    assert.equal(afterOtherUser.length, beforeOtherUser.length, "another user's ledger rows must stay hidden");
+
+    const anonymousHistory = await client(url, anonKey).rpc("get_usage_history", { p_page: 1, p_page_size: 20 });
+    assert.ok(anonymousHistory.error, "anonymous users must not execute usage history RPC");
 
     const shortExpiry = new Date(Date.now() + 2_000).toISOString();
     requireData(
@@ -326,8 +432,9 @@ async function main() {
     const immutable = await admin.from("credit_ledger").update({ reference_id: "tampered" }).eq("id", ledger[0].id);
     assert.ok(immutable.error, "ledger updates must be rejected even for service role");
 
-    console.log("[credit-db] PASS: concurrent reservations, run-id idempotency, atomic run completion, one-time trial, service-role ACL, release, settle, expiry, refund, immutable ledger");
+    console.log("[credit-db] PASS: concurrent reservations, run-id idempotency, atomic run completion, one-time trial, owner-only usage history, service-role ACL, release, settle, expiry, refund, immutable ledger");
   } finally {
+    if (otherUserId) requireSuccess(await admin.auth.admin.deleteUser(otherUserId), "delete other test user");
     requireSuccess(await admin.auth.admin.deleteUser(userId), "delete test user");
   }
 }

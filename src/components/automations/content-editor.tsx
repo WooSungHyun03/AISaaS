@@ -67,7 +67,7 @@ export function ContentEditor({
         <div className="space-y-2">
           <Label htmlFor="content-body">본문</Label>
           <Textarea id="content-body" name="content" defaultValue={saved.content} rows={16} maxLength={30_000} required disabled={pending} className="leading-7" />
-          <p className="text-[13px] text-muted-foreground">문단 사이는 빈 줄로 나눠주세요. AI가 처음 만든 글은 제작 기록에 그대로 남아 있어요.</p>
+          <p className="text-[13px] text-muted-foreground">문단 사이는 빈 줄로 나눠주세요. AI가 처음 만든 글은 이용내역에 그대로 남아 있어요.</p>
         </div>
         {error ? <FormMessage id="content-editor-error">{error}</FormMessage> : null}
         <div className="flex flex-wrap gap-2">

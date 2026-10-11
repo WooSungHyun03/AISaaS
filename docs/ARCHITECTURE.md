@@ -580,6 +580,18 @@ rendered Shorts preview is a publish-only operation (`aiGenerationCount: 0`)
 and consumes no additional credit. Monthly Blog/Shorts/run limits no longer
 authorize execution; the legacy `usage` table remains analytics only.
 
+### Customer usage history
+
+`/usage` reads the immutable `credit_ledger` through the security-invoker
+`get_usage_history()` RPC. `GRANT`, `RESERVE`, `EXPIRE`, and `REFUND` are the
+canonical paginated rows. A generation's terminal `SETTLE` or `RELEASE` is
+folded into its `RESERVE` row, so one run appears once while still showing
+whether a credit was charged or returned. The run id in `reference_id` joins
+to `automation_runs`, `automations`, and `content_history` for status and safe
+result links. The RPC scopes every query to `auth.uid()` and existing RLS;
+there is no duplicated usage-history table. `/automations/history` preserves
+old bookmarks by redirecting to `/usage` with its query string.
+
 ### Legacy subscription flow
 
 The following billing-key flow remains only for users and links created before

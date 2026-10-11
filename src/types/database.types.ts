@@ -892,6 +892,33 @@ export interface Database {
         };
         Returns: boolean;
       };
+      get_usage_history: {
+        Args: {
+          p_page?: number;
+          p_page_size?: number;
+          p_kind?: CreditKind | null;
+          p_status?: string | null;
+          p_from?: string | null;
+          p_to?: string | null;
+        };
+        Returns: Array<{
+          ledger_id: string;
+          event_type: CreditLedgerEvent;
+          kind: CreditKind;
+          delta: number;
+          created_at: string;
+          terminal_event: "SETTLE" | "RELEASE" | null;
+          terminal_delta: number | null;
+          run_id: string | null;
+          run_status: AutomationRunStatus | null;
+          automation_id: string | null;
+          automation_name: string | null;
+          content_history_id: string | null;
+          content_title: string | null;
+          external_url: string | null;
+          total_count: number;
+        }>;
+      };
       expire_credits: {
         Args: { p_now?: string };
         Returns: number;

@@ -193,7 +193,7 @@ export function CalendarItemDialog({
             <p className="flex items-start gap-2 rounded-lg bg-warning-soft p-3 text-sm leading-6 text-warning"><CalendarClock className="mt-1 size-4 shrink-0" aria-hidden="true" />{reason}</p>
           ) : null}
           {item.status === "GENERATED" ? (
-            <p className="flex items-start gap-2 rounded-lg bg-success-soft p-3 text-sm leading-6 text-success"><CheckCircle2 className="mt-1 size-4 shrink-0" aria-hidden="true" />만든 결과가 제작 기록에 저장돼 있어요.</p>
+            <p className="flex items-start gap-2 rounded-lg bg-success-soft p-3 text-sm leading-6 text-success"><CheckCircle2 className="mt-1 size-4 shrink-0" aria-hidden="true" />만든 결과가 이용내역에 저장돼 있어요.</p>
           ) : null}
           {item.status === "SKIPPED" ? (
             <p className="flex items-start gap-2 rounded-lg bg-muted p-3 text-sm leading-6 text-muted-foreground"><SkipForward className="mt-1 size-4 shrink-0" aria-hidden="true" />이 계획을 건너뛰었어요. 되돌리기를 누르면 다시 계획으로 돌아가요.</p>
@@ -209,7 +209,7 @@ export function CalendarItemDialog({
               </Button>
             }
             title="이 계획을 삭제할까요?"
-            description="삭제하면 되돌릴 수 없어요. 이미 만든 콘텐츠(제작 기록)는 그대로 남아있어요."
+            description="삭제하면 되돌릴 수 없어요. 이미 만든 콘텐츠와 이용내역은 그대로 남아있어요."
             confirmLabel="삭제"
             pendingLabel="삭제하는 중…"
             destructive

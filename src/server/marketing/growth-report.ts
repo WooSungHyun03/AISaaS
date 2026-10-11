@@ -233,7 +233,7 @@ export function buildSuggestions(report: GrowthReport): string[] {
     suggestions.push(`캘린더 수행률이 ${calendarCompletion.current}%예요(${calendarCompletion.currentOf}건 중 ${Math.round((calendarCompletion.current / 100) * calendarCompletion.currentOf)}건). 계획 수를 줄이거나 건너뛸 항목을 정리해 보세요.`);
   }
   if (successRate && successRate.currentOf >= 3 && successRate.current < 80) {
-    suggestions.push(`제작 성공률이 ${successRate.current}%예요. 제작 기록에서 실패한 항목의 이유를 확인해 보세요.`);
+    suggestions.push(`제작 성공률이 ${successRate.current}%예요. 이용내역에서 실패한 항목의 이유를 확인해 보세요.`);
   }
   if (calendar.open > 0) suggestions.push(`아직 만들지 않은 계획이 ${calendar.open}건 남아 있어요. 가까운 날짜부터 만들어 보세요.`);
   const hasBlog = byType.some((entry) => entry.type === "blog-marketing" && entry.current > 0);

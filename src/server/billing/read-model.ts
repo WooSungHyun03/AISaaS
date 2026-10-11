@@ -2,7 +2,9 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { getPeriodKey } from "@/lib/utils/date";
+import type { AutomationRunStatus, CreditLedgerEvent } from "@/types/domain";
 import { ensureTrialCredits } from "./credits";
+import type { CreditKind } from "./products";
 
 export async function getBillingOverview(userId: string) {
   const supabase = await createClient();
@@ -82,33 +84,66 @@ export async function getCreditBillingOverview(userId: string) {
   };
 }
 
-export interface CreditLedgerEntry {
-  id: string;
-  kind: "BLOG" | "SHORTS";
-  eventType: "GRANT" | "RESERVE" | "RELEASE" | "EXPIRE" | "REFUND";
-  delta: number;
-  createdAt: string;
+export type UsageHistoryStatusFilter = "SUCCESS" | "FAILED" | "RUNNING" | "GRANTED" | "RETURNED" | "EXPIRED" | "REFUNDED";
+
+export interface UsageHistoryFilters {
+  kind: CreditKind | null;
+  status: UsageHistoryStatusFilter | null;
+  from: string | null;
+  to: string | null;
 }
 
+export interface UsageHistoryItem {
+  id: string;
+  kind: CreditKind;
+  eventType: CreditLedgerEvent;
+  delta: number;
+  createdAt: string;
+  terminalEvent: "SETTLE" | "RELEASE" | null;
+  terminalDelta: number | null;
+  runId: string | null;
+  runStatus: AutomationRunStatus | null;
+  automationId: string | null;
+  automationName: string | null;
+  contentHistoryId: string | null;
+  contentTitle: string | null;
+  externalUrl: string | null;
+}
+
+const USAGE_PAGE_SIZE = 20;
+
 /**
- * The owner's credit movements, newest first. SETTLE rows carry no change
- * (the credit was already taken at RESERVE), so they are left out.
+ * Returns one customer-facing row per ledger activity. A generation's
+ * RESERVE and terminal SETTLE/RELEASE stay together, preventing duplicate
+ * history rows while keeping the immutable ledger as the source of truth.
  */
-export async function getCreditLedger(userId: string, limit = 30): Promise<CreditLedgerEntry[]> {
+export async function getUsageHistory(filters: UsageHistoryFilters, page: number) {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("credit_ledger")
-    .select("id,kind,event_type,delta,created_at")
-    .eq("user_id", userId)
-    .neq("event_type", "SETTLE")
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return (data ?? []).map((row) => ({
-    id: row.id,
-    kind: row.kind as CreditLedgerEntry["kind"],
-    eventType: row.event_type as CreditLedgerEntry["eventType"],
+  const { data, error } = await supabase.rpc("get_usage_history", {
+    p_page: Math.max(1, page),
+    p_page_size: USAGE_PAGE_SIZE,
+    p_kind: filters.kind,
+    p_status: filters.status,
+    p_from: filters.from,
+    p_to: filters.to,
+  });
+  if (error) throw new Error("이용내역을 불러오지 못했습니다.", { cause: error });
+
+  const items: UsageHistoryItem[] = (data ?? []).map((row) => ({
+    id: row.ledger_id,
+    kind: row.kind,
+    eventType: row.event_type,
     delta: row.delta,
     createdAt: row.created_at,
+    terminalEvent: row.terminal_event,
+    terminalDelta: row.terminal_delta,
+    runId: row.run_id,
+    runStatus: row.run_status,
+    automationId: row.automation_id,
+    automationName: row.automation_name,
+    contentHistoryId: row.content_history_id,
+    contentTitle: row.content_title,
+    externalUrl: row.external_url,
   }));
+  return { items, total: Number(data?.[0]?.total_count ?? 0), pageSize: USAGE_PAGE_SIZE };
 }

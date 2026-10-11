@@ -168,14 +168,14 @@ export default async function DashboardPage() {
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1.7fr)_minmax(260px,1fr)]">
         <section aria-labelledby="recent-title">
           <div className="flex items-end justify-between gap-3 border-b border-border pb-3">
-            <h2 id="recent-title" className="text-lg font-bold tracking-[-0.02em]">최근 제작 기록</h2>
+            <h2 id="recent-title" className="text-lg font-bold tracking-[-0.02em]">최근 이용내역</h2>
             <Link href="/usage" className="text-sm font-semibold text-primary hover:underline">전체 보기</Link>
           </div>
           {recentRuns.length === 0 ? (
             <EmptyState
               className="mt-5"
               mascot={null}
-              title="아직 제작 기록이 없어요"
+              title="아직 이용내역이 없어요"
               description="블로그 글이나 숏폼 영상을 만들면 여기에서 바로 확인할 수 있어요."
               action={<Button asChild size="sm"><Link href="/calendar">캘린더에서 만들기</Link></Button>}
             />

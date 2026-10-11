@@ -56,7 +56,7 @@ export function AutomationStatusActions({ automationId, status, primary = false,
       <ConfirmationDialog
         trigger={<Button type="button" variant="ghost" className="text-destructive hover:text-destructive">삭제</Button>}
         title="이 설정을 삭제할까요?"
-        description="설정과 제작 기록이 함께 삭제돼요. 되돌릴 수 없어요."
+        description="설정과 만들어진 콘텐츠 결과가 함께 삭제돼요. 되돌릴 수 없어요."
         confirmLabel="삭제하기"
         pendingLabel="삭제하는 중…"
         destructive

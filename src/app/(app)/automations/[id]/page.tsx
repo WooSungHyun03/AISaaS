@@ -141,7 +141,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
       )}
 
       <section aria-labelledby="runs-heading" className="space-y-3">
-        <h2 id="runs-heading" className="text-lg font-extrabold tracking-[-0.03em]">제작 기록</h2>
+        <h2 id="runs-heading" className="text-lg font-extrabold tracking-[-0.03em]">이용내역</h2>
         {runs.length === 0 ? (
           <p className="rounded-2xl bg-muted px-5 py-6 text-[15px] text-muted-foreground">아직 만든 기록이 없어요. ‘지금 만들기’를 눌러 먼저 한 번 만들어보세요.</p>
         ) : (
