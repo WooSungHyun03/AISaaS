@@ -40,6 +40,7 @@
 - 화면 티켓은 내가 브라우저로 확인할 체크리스트를 같이 준다.
 
 ## 진행 현황
-- 완료: 1-1, 1-2, 1-3, 1-4, 1-6, 1-5, 1-7, 1-8
-- 남음: 1-9, 1-10
-- 참고 문서: docs/person1/ 아래 PLAN_1-5.md, PLAN_1-7.md, PLAN_1-8.md, CHANNEL_DASHBOARD_API.md, MIGRATION_NUMBERING_NOTES.md 등
+- 완료: 1-1, 1-2, 1-3, 1-4, 1-6, 1-5, 1-7, 1-8, 1-9
+- 남음: 1-10
+- 1-9 비고: 4-a(로딩/오류 화면), 4-b(태블릿 반응형 기준), 5(생성→완료 반영)는 코드상 정상으로 확인됐으나 브라우저 확인은 사람1 지시로 생략함 — PLAN_1-9.md 참고
+- 참고 문서: docs/person1/ 아래 PLAN_1-5.md, PLAN_1-7.md, PLAN_1-8.md, PLAN_1-9.md, CHANNEL_DASHBOARD_API.md, MIGRATION_NUMBERING_NOTES.md 등
