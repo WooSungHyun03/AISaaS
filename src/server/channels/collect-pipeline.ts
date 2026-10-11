@@ -7,6 +7,7 @@ import { saveMetricSnapshot } from "./snapshot";
 import { collectRawChannelMetrics, toSnapshotMetricsRecord } from "./raw-metrics";
 import type { TrackedChannelForCollection } from "./raw-metrics";
 import { channelPlatformSchema } from "./platform";
+import { collectYouTubeAnalyticsIfConnected } from "./youtube-analytics-pipeline";
 import type { Database } from "@/types/database.types";
 
 /** Current-period + previous-period comparison (see getGrowthSummary) needs up to ~180 days; this adds a buffer so that comparison never silently loses its older half. Not literally "90일" per the ticket text — see docs/person1/MIGRATION_NUMBERING_NOTES.md-style note below. */
@@ -91,10 +92,19 @@ export async function processDueChannels(now: Date = new Date(), budgetMs = 30_0
   for (const channel of due ?? []) {
     if (Date.now() > deadline) break;
 
-    const { data: business } = await supabase.from("businesses").select("name").eq("id", channel.business_id).maybeSingle();
+    const { data: business } = await supabase.from("businesses").select("name, owner_id").eq("id", channel.business_id).maybeSingle();
 
     try {
-      await snapshotChannelMetrics({ ...channel, platform: channelPlatformSchema.parse(channel.platform) }, business?.name, now);
+      const typedChannel = { ...channel, platform: channelPlatformSchema.parse(channel.platform) };
+      await snapshotChannelMetrics(typedChannel, business?.name, now);
+      // Ticket 1-10: best-effort, additive. collectYouTubeAnalyticsIfConnected
+      // already never throws on its own, but it's deliberately kept outside
+      // the failure-tracking try/catch below too — public-metrics collection
+      // (just saved above) must never be marked "failed" over an Analytics
+      // problem, now or if that function's contract ever changes.
+      await collectYouTubeAnalyticsIfConnected(typedChannel, business?.owner_id, now).catch((cause) =>
+        logger.warn("youtube_analytics_collection_failed_unexpectedly", { channelId: channel.id, message: cause instanceof Error ? cause.message : String(cause) }),
+      );
       const update: TrackedChannelUpdate = { next_snapshot_at: new Date(now.getTime() + RESNAPSHOT_INTERVAL_MS).toISOString() };
       if (channel.consecutive_failure_count > 0) update.consecutive_failure_count = 0;
       await supabase.from("tracked_channels").update(update).eq("id", channel.id);

@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, snapshotChannelMetricsMock } = vi.hoisted(() => ({
+const { createClientMock, snapshotChannelMetricsMock, collectYouTubeAnalyticsIfConnectedMock, loggerWarnMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   snapshotChannelMetricsMock: vi.fn().mockResolvedValue(undefined),
+  collectYouTubeAnalyticsIfConnectedMock: vi.fn().mockResolvedValue(undefined),
+  loggerWarnMock: vi.fn(),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
 vi.mock("./collect-pipeline", () => ({ snapshotChannelMetrics: snapshotChannelMetricsMock }));
+vi.mock("./youtube-analytics-pipeline", () => ({ collectYouTubeAnalyticsIfConnected: collectYouTubeAnalyticsIfConnectedMock }));
+vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: loggerWarnMock, error: vi.fn() } }));
 
 const { collectChannelNow } = await import("./collect-now");
 
@@ -47,6 +51,7 @@ function makeClient({
 
 afterEach(() => {
   vi.clearAllMocks();
+  collectYouTubeAnalyticsIfConnectedMock.mockResolvedValue(undefined);
 });
 
 describe("collectChannelNow", () => {
@@ -87,5 +92,17 @@ describe("collectChannelNow", () => {
     const client = makeClient({ snapshotCheckError: new Error("boom") });
     createClientMock.mockResolvedValue(client);
     await expect(collectChannelNow("channel-1", NOW)).rejects.toMatchObject({ code: "DATABASE_ERROR" });
+  });
+
+  it("ticket 1-10: a YouTube Analytics failure never blocks '지금 수집' from reporting success", async () => {
+    const client = makeClient();
+    createClientMock.mockResolvedValue(client);
+    collectYouTubeAnalyticsIfConnectedMock.mockRejectedValue(new Error("boom"));
+
+    const result = await collectChannelNow("channel-1", NOW);
+
+    expect(result).toEqual({ status: "collected" });
+    expect(snapshotChannelMetricsMock).toHaveBeenCalledTimes(1);
+    expect(loggerWarnMock).toHaveBeenCalledWith("youtube_analytics_collection_failed_unexpectedly", expect.objectContaining({ channelId: "channel-1" }));
   });
 });

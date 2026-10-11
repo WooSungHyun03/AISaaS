@@ -1,7 +1,9 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { logger } from "@/lib/logger";
 import { ChannelsError } from "./summary";
 import { snapshotChannelMetrics } from "./collect-pipeline";
+import { collectYouTubeAnalyticsIfConnected } from "./youtube-analytics-pipeline";
 import { channelPlatformSchema } from "./platform";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
@@ -43,7 +45,14 @@ export async function collectChannelNow(channelId: string, now: Date = new Date(
 
   if (await hasSnapshotToday(supabase, channel.id, now)) return { status: "already_collected_today" };
 
-  const { data: business } = await supabase.from("businesses").select("name").eq("id", channel.business_id).maybeSingle();
-  await snapshotChannelMetrics({ ...channel, platform: channelPlatformSchema.parse(channel.platform) }, business?.name, now);
+  const { data: business } = await supabase.from("businesses").select("name, owner_id").eq("id", channel.business_id).maybeSingle();
+  const typedChannel = { ...channel, platform: channelPlatformSchema.parse(channel.platform) };
+  await snapshotChannelMetrics(typedChannel, business?.name, now);
+  // Ticket 1-10: best-effort, additive — must never block "collected" or
+  // undo the public-metrics snapshot just saved above, even if this
+  // function's own never-throw contract were ever broken by a future change.
+  await collectYouTubeAnalyticsIfConnected(typedChannel, business?.owner_id, now).catch((cause) =>
+    logger.warn("youtube_analytics_collection_failed_unexpectedly", { channelId: channel.id, message: cause instanceof Error ? cause.message : String(cause) }),
+  );
   return { status: "collected" };
 }

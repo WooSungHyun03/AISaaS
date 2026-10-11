@@ -1,24 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, serverEnvMock, saveMetricSnapshotMock, youtubeCollectMock, tistoryCollectMock, naverCollectMock } = vi.hoisted(() => ({
+const { createClientMock, serverEnvMock, saveMetricSnapshotMock, youtubeCollectMock, tistoryCollectMock, naverCollectMock, loggerWarnMock, collectYouTubeAnalyticsIfConnectedMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   serverEnvMock: { CHANNEL_DATA_PROVIDER: "mock" as string },
   saveMetricSnapshotMock: vi.fn().mockResolvedValue(undefined),
   youtubeCollectMock: vi.fn(),
   tistoryCollectMock: vi.fn(),
   naverCollectMock: vi.fn(),
+  loggerWarnMock: vi.fn(),
+  collectYouTubeAnalyticsIfConnectedMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Cron-only paths: no user session, so they must use the service-role client.
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createClientMock }));
 vi.mock("@/lib/env/server", () => ({ serverEnv: serverEnvMock }));
-vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: loggerWarnMock, error: vi.fn() } }));
 vi.mock("./snapshot", () => ({ saveMetricSnapshot: saveMetricSnapshotMock }));
 vi.mock("./providers", () => ({
   getYouTubeDataProvider: () => ({ collect: youtubeCollectMock }),
   getTistoryCollector: () => tistoryCollectMock,
   getNaverBlogCollector: () => naverCollectMock,
 }));
+vi.mock("./youtube-analytics-pipeline", () => ({ collectYouTubeAnalyticsIfConnected: collectYouTubeAnalyticsIfConnectedMock }));
 
 const { snapshotChannelMetrics, cleanupOldSnapshots, processDueChannels } = await import("./collect-pipeline");
 
@@ -26,6 +29,7 @@ const NOW = new Date("2026-10-10T00:00:00.000Z");
 
 beforeEach(() => {
   serverEnvMock.CHANNEL_DATA_PROVIDER = "mock";
+  collectYouTubeAnalyticsIfConnectedMock.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -175,5 +179,20 @@ describe("processDueChannels", () => {
 
     const result = await processDueChannels(NOW, -1); // already-expired budget: process nothing
     expect(result).toEqual({ processed: 0, failed: 0, paused: 0 });
+  });
+
+  it("ticket 1-10: a YouTube Analytics failure never fails the public-metrics collection it's attached to", async () => {
+    youtubeCollectMock.mockResolvedValue({ subscriberCount: 1, hiddenSubscriberCount: false, viewCount: 1, videoCount: 1, recentVideos: [] });
+    collectYouTubeAnalyticsIfConnectedMock.mockRejectedValue(new Error("boom"));
+    const due = [{ id: "c1", business_id: "b1", platform: "youtube", external_id: "@x", url: "", consecutive_failure_count: 0 }];
+    const { client, update } = makeDueChannelsClient(due);
+    createClientMock.mockReturnValue(client);
+
+    const result = await processDueChannels(NOW, 30_000);
+
+    expect(result).toEqual({ processed: 1, failed: 0, paused: 0 });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ next_snapshot_at: expect.any(String) }));
+    expect(update.mock.calls[0][0]).not.toHaveProperty("status");
+    expect(loggerWarnMock).toHaveBeenCalledWith("youtube_analytics_collection_failed_unexpectedly", expect.objectContaining({ channelId: "c1" }));
   });
 });
