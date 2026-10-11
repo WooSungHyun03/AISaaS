@@ -92,6 +92,54 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["businesses"]["Insert"]>;
         Relationships: [];
       };
+      inquiries: {
+        Row: {
+          id: string;
+          user_id: string;
+          category: "PAYMENT" | "REFUND" | "BUG" | "FEATURE" | "OTHER";
+          subject: string;
+          body: string;
+          status: "RECEIVED" | "IN_REVIEW" | "ANSWERED" | "CLOSED";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          category: "PAYMENT" | "REFUND" | "BUG" | "FEATURE" | "OTHER";
+          subject: string;
+          body: string;
+          status?: "RECEIVED" | "IN_REVIEW" | "ANSWERED" | "CLOSED";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["inquiries"]["Insert"]>;
+        Relationships: [];
+      };
+      inquiry_messages: {
+        Row: {
+          id: string;
+          inquiry_id: string;
+          kind: "REPLY" | "STATUS_CHANGE";
+          body: string | null;
+          from_status: "RECEIVED" | "IN_REVIEW" | "ANSWERED" | "CLOSED" | null;
+          to_status: "RECEIVED" | "IN_REVIEW" | "ANSWERED" | "CLOSED" | null;
+          actor_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          inquiry_id: string;
+          kind: "REPLY" | "STATUS_CHANGE";
+          body?: string | null;
+          from_status?: "RECEIVED" | "IN_REVIEW" | "ANSWERED" | "CLOSED" | null;
+          to_status?: "RECEIVED" | "IN_REVIEW" | "ANSWERED" | "CLOSED" | null;
+          actor_id?: string | null;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["inquiry_messages"]["Insert"]>;
+        Relationships: [];
+      };
       calendar_events: {
         Row: {
           id: string;

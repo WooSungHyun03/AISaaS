@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
 import { ensureTrialCredits } from "@/server/billing/credits";
 import { getCreditBalances } from "@/server/billing/run-credits";
+import { isAdminUser } from "@/server/admin/access";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -29,7 +30,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <div className="flex min-h-screen min-w-0">
       <AppSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <AppHeader email={user.email ?? ""} credits={credits ? { blog: credits.BLOG.remaining, shorts: credits.SHORTS.remaining } : null} />
+        <AppHeader email={user.email ?? ""} isAdmin={isAdminUser(user)} credits={credits ? { blog: credits.BLOG.remaining, shorts: credits.SHORTS.remaining } : null} />
         <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 bg-background px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">{children}</main>
       </div>
     </div>

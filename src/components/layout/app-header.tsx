@@ -16,7 +16,7 @@ import {
 import { signOut } from "@/app/(auth)/actions";
 import { APP_NAV, getActiveNavItem } from "./nav-config";
 
-export function AppHeader({ email, credits }: { email: string; credits: { blog: number; shorts: number } | null }) {
+export function AppHeader({ email, credits, isAdmin = false }: { email: string; credits: { blog: number; shorts: number } | null; isAdmin?: boolean }) {
   const pathname = usePathname();
   const activeItem = getActiveNavItem(pathname);
   const initial = (email.trim()[0] ?? "?").toUpperCase();
@@ -92,6 +92,7 @@ export function AppHeader({ email, credits }: { email: string; credits: { blog: 
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild><Link href="/settings">설정</Link></DropdownMenuItem>
             <DropdownMenuItem asChild><Link href="/billing">이용권·결제</Link></DropdownMenuItem>
+            {isAdmin ? <DropdownMenuItem asChild><Link href="/admin/inquiries">고객 문의 관리 (관리자)</Link></DropdownMenuItem> : null}
             <DropdownMenuSeparator />
             <form action={signOut}>
               <DropdownMenuItem asChild>

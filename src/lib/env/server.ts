@@ -13,6 +13,9 @@ import { z } from "zod";
 const serverSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   CRON_SECRET: z.string().min(1).optional(),
+  // Comma-separated emails of the service team: they can answer customer inquiries at /admin/inquiries.
+  // Empty/unset = nobody is an admin (the admin screens answer "not found").
+  ADMIN_EMAILS: z.string().optional(),
 
   AI_PROVIDER: z.enum(["mock", "openai", "gemini", "anthropic"]).default("mock"),
   OPENAI_API_KEY: z.string().optional(),
