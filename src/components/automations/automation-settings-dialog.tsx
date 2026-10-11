@@ -12,10 +12,11 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { ScheduleFields, ScheduleHiddenInputs, scheduleToValue } from "@/components/automations/schedule-fields";
 import { FormMessage } from "@/components/ui/form-message";
 import { Textarea } from "@/components/ui/textarea";
-import { BLOG_DELIVERY_LABEL, type BlogAutomationConfig } from "@/types/blog-automation";
+import { BLOG_DELIVERY_LABEL, BLOG_NOTES_MAX_LENGTH, blogPlatforms, type BlogAutomationConfig } from "@/types/blog-automation";
+import { BLOG_PLATFORM_LABEL } from "@/server/blog/post";
 import type { AutomationSchedule } from "@/types/automation";
 
-type BlogSettings = Pick<BlogAutomationConfig, "objective" | "keywords" | "tone" | "deliveryMode"> & {
+type BlogSettings = Pick<BlogAutomationConfig, "objective" | "keywords" | "tone" | "deliveryMode" | "platform" | "notes"> & {
   wordpressSiteUrl?: string;
   wordpressUsername?: string;
   hasStoredWordPress: boolean;
@@ -90,6 +91,12 @@ export function AutomationSettingsDialog({
             <div className="space-y-2"><Label htmlFor="edit-objective">글의 목적</Label><Textarea id="edit-objective" name="objective" defaultValue={blogSettings.objective} maxLength={300} rows={3} required /></div>
             <div className="space-y-2"><Label htmlFor="edit-keywords">키워드 (쉼표 또는 줄바꿈으로 구분)</Label><Textarea id="edit-keywords" name="keywords" defaultValue={blogSettings.keywords.join(", ")} rows={2} required /></div>
             <div className="space-y-2"><Label htmlFor="edit-tone">글의 말투</Label><Input id="edit-tone" name="tone" defaultValue={blogSettings.tone} maxLength={100} required /></div>
+            <div className="space-y-2"><Label htmlFor="edit-platform">올릴 곳</Label>
+              <NativeSelect id="edit-platform" name="platform" defaultValue={blogSettings.platform ?? "naver"}>
+                {blogPlatforms.map((key) => <option key={key} value={key}>{BLOG_PLATFORM_LABEL[key]}</option>)}
+              </NativeSelect>
+            </div>
+            <div className="space-y-2"><Label htmlFor="edit-notes">꼭 넣고 싶은 내용 (선택)</Label><Textarea id="edit-notes" name="notes" defaultValue={blogSettings.notes ?? ""} maxLength={BLOG_NOTES_MAX_LENGTH} rows={3} placeholder="메뉴, 가격, 영업시간, 이벤트처럼 글에 그대로 써도 되는 사실만 적어주세요." /></div>
             <div className="space-y-2"><Label htmlFor="edit-delivery">글 저장 위치</Label>
               <NativeSelect id="edit-delivery" name="deliveryMode" value={deliveryMode} onChange={(event) => setDeliveryMode(event.target.value as BlogAutomationConfig["deliveryMode"])}>
                 {(Object.keys(BLOG_DELIVERY_LABEL) as BlogAutomationConfig["deliveryMode"][]).map((mode) => <option key={mode} value={mode}>{BLOG_DELIVERY_LABEL[mode]}</option>)}

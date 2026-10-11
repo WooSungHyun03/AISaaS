@@ -20,6 +20,8 @@ const serverSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   // Overrides the selected provider's default model id (e.g. claude-sonnet-5-5) without a deploy of new code.
   AI_MODEL: z.string().min(1).optional(),
+  // Stronger model for long-form writing (blog posts); unset = same as AI_MODEL / the provider default.
+  AI_QUALITY_MODEL: z.string().min(1).optional(),
   // Bounded request timeout + retry count for real AI providers. Retries are
   // only ever applied to transient failures (timeout/429/5xx/network) — never
   // to auth or validation errors, and never unbounded.
@@ -57,6 +59,10 @@ const serverSchema = z.object({
   ANIMATION_PROVIDER: z.enum(["mock", "fal"]).default("mock"),
   FAL_KEY: z.string().optional(),
   ANIMATION_MODEL: z.string().min(1).optional(),
+  // Stronger (pricier) image-to-video endpoint used for plans whose animation quality is "premium".
+  ANIMATION_MODEL_PREMIUM: z.string().min(1).optional(),
+  // Instrumental background-music endpoint (default fal-ai/lyria2, about US$0.10 per 30 s track).
+  MUSIC_MODEL: z.string().min(1).optional(),
 
   // Which backend collects channel diagnosis/growth metrics (src/server/channels).
   // "mock" must never run in production — see instrumentation.ts, which

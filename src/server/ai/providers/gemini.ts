@@ -11,7 +11,10 @@ const PROVIDER_NAME = "gemini";
 export class GeminiProvider implements AIProvider {
   readonly name = PROVIDER_NAME;
 
-  async generateText({ system, prompt, maxTokens = 1000, temperature = 0.7 }: GenerateTextParams): Promise<GenerateTextResult> {
+  async generateText({ system, prompt, maxTokens = 1000, temperature = 0.7, images }: GenerateTextParams): Promise<GenerateTextResult> {
+    if (images && images.length > 0) {
+      throw new AIProviderError("UNSUPPORTED_INPUT", PROVIDER_NAME, "Image input is not supported by this provider; use AI_PROVIDER=anthropic.");
+    }
     const apiKey = serverEnv.GEMINI_API_KEY;
     if (!apiKey) {
       throw new AIProviderError("MISSING_API_KEY", PROVIDER_NAME, "GEMINI_API_KEY is not set (see .env.example).");

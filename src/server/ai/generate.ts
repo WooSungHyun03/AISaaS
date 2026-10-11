@@ -2,7 +2,7 @@ import "server-only";
 import type { ZodType } from "zod";
 import { AIProviderError } from "./errors";
 import { getAIProvider } from "./index";
-import type { GenerateTextParams } from "./provider";
+import type { AIImageInput, GenerateTextParams } from "./provider";
 
 export async function generateText(params: GenerateTextParams): Promise<string> {
   const { text } = await getAIProvider().generateText(params);
@@ -19,6 +19,9 @@ export interface GenerateStructuredParams<T> {
   prompt: string;
   schema: ZodType<T>;
   maxTokens?: number;
+  temperature?: number;
+  tier?: GenerateTextParams["tier"];
+  images?: AIImageInput[];
 }
 
 /**
@@ -32,6 +35,9 @@ export async function generateStructured<T>({
   prompt,
   schema,
   maxTokens,
+  temperature,
+  tier,
+  images,
 }: GenerateStructuredParams<T>): Promise<T> {
   const jsonInstruction =
     "Respond with ONLY valid JSON matching the requested shape. No markdown fences, no commentary.";
@@ -42,6 +48,9 @@ export async function generateStructured<T>({
       system: system ? `${system}\n\n${jsonInstruction}` : jsonInstruction,
       prompt: attempt === 0 ? prompt : `${prompt}\n\nYour previous response was not valid JSON. Try again.`,
       maxTokens,
+      ...(temperature !== undefined ? { temperature } : {}),
+      ...(tier ? { tier } : {}),
+      ...(images ? { images } : {}),
     });
 
     try {

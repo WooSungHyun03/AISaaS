@@ -2,8 +2,8 @@ import type { VideoMotion, VideoRenderScene, VideoSpeaker } from "./types";
 
 /**
  * Builds the full JSON2Video movie for "character" Shorts: every scene shows a
- * reference image (the character) that moves with a simple tween, a speech
- * bubble, and its own voice-over line. Unlike the template flow, scene length
+ * reference image (the character) that moves with a simple tween (or its animated
+ * clip) and its own voice-over line. There are no captions or speech bubbles. Unlike the template flow, scene length
  * is whatever the voice needs (`duration: -1`), so the picture can never drift
  * from the audio.
  *
@@ -14,15 +14,10 @@ import type { VideoMotion, VideoRenderScene, VideoSpeaker } from "./types";
 
 const WIDTH = 1080;
 const HEIGHT = 1920;
-const FONT_FAMILY = "Noto Sans KR";
 const SCENE_BACKGROUNDS = ["#1E3A8A", "#312E81", "#0F766E", "#7C2D12", "#4C1D95", "#164E63"];
 const VOICES: Record<VideoSpeaker, string> = {
   main: "ko-KR-SunHiNeural",
   partner: "ko-KR-InJoonNeural",
-};
-const BUBBLES: Record<VideoSpeaker, { background: string; color: string }> = {
-  main: { background: "#FFFFFF", color: "#0F172A" },
-  partner: { background: "#FACC15", color: "#1C1917" },
 };
 
 interface Frame {
@@ -99,70 +94,6 @@ function plain(text: string): string {
   return text.replace(/\{\{|\}\}/g, "").trim();
 }
 
-/** Rough on-screen width of one character in a 66px bold Korean line (Hangul = 1). */
-function glyphWidth(char: string): number {
-  if (char === " ") return 0.35;
-  if (/[가-힣ㄱ-ㅎㅏ-ㅣ一-鿿]/.test(char)) return 1;
-  if (/[A-Za-z0-9]/.test(char)) return 0.62;
-  return 0.45;
-}
-
-const BUBBLE_LINE_UNITS = 12.5;
-
-/**
- * JSON2Video wraps text at any character, which splits Korean words
- * ("올/렸죠"). Break at spaces ourselves; the text element honours "\n".
- */
-export function wrapForBubble(text: string, maxUnits = BUBBLE_LINE_UNITS): string {
-  const words = plain(text).split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let line = "";
-  let width = 0;
-  for (const word of words) {
-    const wordWidth = [...word].reduce((total, char) => total + glyphWidth(char), 0);
-    if (line && width + glyphWidth(" ") + wordWidth > maxUnits) {
-      lines.push(line);
-      line = word;
-      width = wordWidth;
-    } else {
-      line = line ? `${line} ${word}` : word;
-      width = line === word ? wordWidth : width + glyphWidth(" ") + wordWidth;
-    }
-  }
-  if (line) lines.push(line);
-  return lines.join("\n");
-}
-
-function bubbleElement(text: string, speaker: VideoSpeaker): Record<string, unknown> {
-  const colors = BUBBLES[speaker];
-  return {
-    type: "text",
-    text: wrapForBubble(text),
-    duration: -2,
-    // The text box defaults to the full frame, vertically centred — pin it to the top so the
-    // bubble never covers the character.
-    position: "custom",
-    x: "7%",
-    y: 140,
-    width: "86%",
-    height: 520,
-    "vertical-position": "top",
-    "horizontal-position": "center",
-    "fade-in": 0.15,
-    settings: {
-      "font-family": FONT_FAMILY,
-      "font-size": "66px",
-      "font-weight": "800",
-      "line-height": "1.3",
-      "text-align": "center",
-      color: colors.color,
-      "background-color": colors.background,
-      padding: "44px 40px",
-      "border-radius": "56px",
-    },
-  };
-}
-
 /**
  * A clip from the image-to-video service already contains the character's own
  * movement, so it fills the frame; it loops (and is cut to the voice) so a line
@@ -215,7 +146,6 @@ export function buildCharacterScene(scene: VideoRenderScene, index: number, fall
         "extra-time": 0.35,
       },
       scene.videoUrl ? animatedClipElement(scene.videoUrl) : tweenedImageElement(scene.imageUrl ?? fallbackImageUrl, speaker, motion),
-      bubbleElement(scene.text, speaker),
     ],
   };
 }

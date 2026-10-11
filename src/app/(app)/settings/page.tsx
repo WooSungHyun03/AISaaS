@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { IntegrationSettings, type SafeConnection } from "@/components/settings/integration-settings";
 import { ProfileForm } from "@/components/settings/profile-form";
 import { PasswordForm } from "@/components/settings/password-form";
+import { DeleteAccountForm } from "@/components/settings/delete-account-form";
 import { EmptyState } from "@/components/ui/page-state";
 
 const INSTAGRAM_MESSAGE: Record<string, { variant: "success" | "info" | "error"; text: string }> = {
@@ -52,7 +53,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="mx-auto max-w-5xl space-y-10">
-      <PageHeader title="설정" description="프로필과 외부 서비스 연결을 관리해요." />
+      <PageHeader title="설정" description="프로필, 비밀번호, 외부 서비스 연결과 계정을 관리해요." />
 
       {instagramMessage && <FormMessage variant={instagramMessage.variant}>{instagramMessage.text}</FormMessage>}
       {youtubeMessage && <FormMessage variant={youtubeMessage.variant}>{youtubeMessage.text}</FormMessage>}
@@ -78,6 +79,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <div><h2 id="password-heading" className="text-lg font-extrabold tracking-[-0.03em]">비밀번호 변경</h2><p className="mt-1 text-sm text-muted-foreground">현재 비밀번호를 확인한 뒤 바꿔요. 기억나지 않으면 로그아웃 후 &lsquo;비밀번호를 잊으셨나요?&rsquo;를 이용해주세요.</p></div>
         <div className="rounded-2xl border bg-card px-5 py-6 sm:px-6">
           <PasswordForm />
+        </div>
+      </section>
+
+      <section aria-labelledby="delete-account-heading" className="space-y-4">
+        <div><h2 id="delete-account-heading" className="text-lg font-extrabold tracking-[-0.03em]">회원 탈퇴</h2><p className="mt-1 text-sm text-muted-foreground">계정과 저장된 모든 데이터를 바로 삭제해요.</p></div>
+        <div className="rounded-2xl border border-destructive/30 bg-card px-5 py-6 sm:px-6">
+          <DeleteAccountForm />
         </div>
       </section>
     </div>

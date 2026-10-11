@@ -10,6 +10,14 @@ const { createClientMock, serverEnvMock, collectMock, tistoryCollectMock, naverC
 }));
 
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
+// Snapshots are written with the service-role client (0036 has no insert policy); route it to the same stub.
+let currentClient: { from: (name: string) => unknown } | undefined;
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: (name: string) => currentClient!.from(name) }) }));
+function useClient<T extends { from: (name: string) => unknown }>(client: T): T {
+  currentClient = client;
+  createClientMock.mockResolvedValue(client);
+  return client;
+}
 vi.mock("@/lib/env/server", () => ({ serverEnv: serverEnvMock }));
 vi.mock("./providers", () => ({
   getYouTubeDataProvider: () => ({ collect: collectMock }),
@@ -84,7 +92,7 @@ describe("diagnoseChannel: youtube", () => {
       created_at: new Date(NOW.getTime() - 10 * 60 * 1000).toISOString(), // 10 minutes ago
     };
     const client = makeClient({ selectResult: { data: cachedRow, error: null } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
 
     const result = await diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW });
 
@@ -110,7 +118,7 @@ describe("diagnoseChannel: youtube", () => {
       created_at: NOW.toISOString(),
     };
     const client = makeClient({ selectResult: { data: null, error: null }, insertResult: { data: insertedRow, error: null } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
 
     const result = await diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW });
 
@@ -145,7 +153,7 @@ describe("diagnoseChannel: youtube", () => {
     };
     const insertedRow = { ...staleRow, overall_score: 73, created_at: NOW.toISOString() };
     const client = makeClient({ selectResult: { data: staleRow, error: null }, insertResult: { data: insertedRow, error: null } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
 
     await diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW });
     expect(collectMock).toHaveBeenCalledTimes(1);
@@ -167,7 +175,7 @@ describe("diagnoseChannel: youtube", () => {
     serverEnvMock.CHANNEL_DATA_PROVIDER = "mock";
     const insertedRow = { ...cachedFromLive, data_source: "mock", created_at: NOW.toISOString() };
     const client = makeClient({ selectResult: { data: cachedFromLive, error: null }, insertResult: { data: insertedRow, error: null } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
 
     await diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW });
     expect(collectMock).toHaveBeenCalledTimes(1);
@@ -175,21 +183,21 @@ describe("diagnoseChannel: youtube", () => {
 
   it("throws ChannelsError when the cache lookup query fails", async () => {
     const client = makeClient({ selectResult: { data: null, error: new Error("boom") } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
 
     await expect(diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW })).rejects.toMatchObject({ name: "ChannelsError", code: "DATABASE_ERROR" });
   });
 
   it("throws ChannelsError when persisting the new diagnosis fails", async () => {
     const client = makeClient({ selectResult: { data: null, error: null }, insertResult: { data: null, error: new Error("boom") } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
 
     await expect(diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW })).rejects.toMatchObject({ name: "ChannelsError", code: "DATABASE_ERROR" });
   });
 
   it("propagates the provider's error (e.g. quota exceeded) without inserting a row", async () => {
     const client = makeClient({ selectResult: { data: null, error: null } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
     collectMock.mockRejectedValueOnce(Object.assign(new Error("quota"), { name: "YouTubeCollectorError", code: "QUOTA_EXCEEDED" }));
 
     await expect(diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW })).rejects.toMatchObject({ code: "QUOTA_EXCEEDED" });
@@ -198,7 +206,7 @@ describe("diagnoseChannel: youtube", () => {
 
   it("propagates the hourly rate limit error without calling the provider or inserting a row", async () => {
     const client = makeClient({ selectResult: { data: null, error: null } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
     recordDiagnosisAttemptMock.mockRejectedValueOnce(Object.assign(new Error("limit"), { name: "DiagnosisRateLimitError" }));
 
     await expect(diagnoseChannel(TRACKED_CHANNEL, undefined, { now: NOW })).rejects.toMatchObject({ name: "DiagnosisRateLimitError" });
@@ -232,7 +240,7 @@ describe("diagnoseChannel: tistory (ticket 1-5 platform generalization)", () => 
       created_at: NOW.toISOString(),
     };
     const client = makeClient({ selectResult: { data: null, error: null }, insertResult: { data: insertedRow, error: null } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
 
     const result = await diagnoseChannel(TISTORY_CHANNEL, undefined, { now: NOW });
 
@@ -263,7 +271,7 @@ describe("diagnoseChannel: naver_blog (ticket 1-5 platform generalization)", () 
       created_at: NOW.toISOString(),
     };
     const client = makeClient({ selectResult: { data: null, error: null }, insertResult: { data: insertedRow, error: null } });
-    createClientMock.mockResolvedValue(client);
+    useClient(client);
 
     const result = await diagnoseChannel(NAVER_CHANNEL, "우리동네 빵집", { now: NOW });
 

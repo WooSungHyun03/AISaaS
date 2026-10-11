@@ -18,6 +18,8 @@ const TRACKED_CHANNEL_COLUMNS = "id, external_id, url, platform";
 /** Postgres unique_violation — see tracked_channels' `unique (business_id, platform, external_id)` (0034). */
 const UNIQUE_VIOLATION = "23505";
 
+const NEXT_SNAPSHOT_DELAY_MS = 24 * 60 * 60 * 1000;
+
 /**
  * "같은 business+platform+external_id면 중복 생성 안 함" (0034's unique
  * constraint) without relying on an UPDATE-capable upsert — tracked_channels
@@ -44,7 +46,15 @@ async function findOrCreateTrackedChannel(
 
   const { data: inserted, error: insertError } = await supabase
     .from("tracked_channels")
-    .insert({ business_id: businessId, platform: parsed.platform, external_id: parsed.externalId, url: parsed.normalizedUrl })
+    // The diagnosis right after this saves today's snapshot, so the daily cron starts tomorrow.
+    // Set here because tracked_channels has no update policy for the user client.
+    .insert({
+      business_id: businessId,
+      platform: parsed.platform,
+      external_id: parsed.externalId,
+      url: parsed.normalizedUrl,
+      next_snapshot_at: new Date(Date.now() + NEXT_SNAPSHOT_DELAY_MS).toISOString(),
+    })
     .select(TRACKED_CHANNEL_COLUMNS)
     .single();
   if (!insertError) return inserted as TrackedChannelRow;

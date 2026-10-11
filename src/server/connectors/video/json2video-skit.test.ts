@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCharacterMovie, buildCharacterScene, motionKeyframes, wrapForBubble } from "./json2video-skit";
+import { buildCharacterMovie, buildCharacterScene, motionKeyframes } from "./json2video-skit";
 import { VIDEO_MOTIONS, videoRenderSceneSchema, type VideoRenderScene } from "./types";
 
 const base = "https://be-celeb.org/shorts-mascot";
@@ -14,7 +14,7 @@ type Element = Record<string, unknown> & { type: string };
 const elementsOf = (scene: Record<string, unknown>) => scene.elements as Element[];
 
 describe("character movie builder", () => {
-  it("builds one voice, one image and one bubble per scene at 9:16 with no template", () => {
+  it("builds one voice and one image per scene at 9:16 with no template and no captions", () => {
     const movie = buildCharacterMovie(scenes) as { width: number; height: number; template?: string; scenes: Array<Record<string, unknown>> };
 
     expect(movie).toMatchObject({ width: 1080, height: 1920 });
@@ -22,7 +22,7 @@ describe("character movie builder", () => {
     expect(movie.scenes).toHaveLength(scenes.length);
     for (const [index, scene] of movie.scenes.entries()) {
       expect(scene).not.toHaveProperty("duration"); // scene length follows the voice
-      expect(elementsOf(scene).map((element) => element.type)).toEqual(["voice", "image", "text"]);
+      expect(elementsOf(scene).map((element) => element.type)).toEqual(["voice", "image"]);
       expect(elementsOf(scene)[1]).toMatchObject({ src: scenes[index].imageUrl, duration: -2 });
     }
   });
@@ -36,20 +36,17 @@ describe("character movie builder", () => {
     expect(voices[1]).toBe("ko-KR-SunHiNeural");
   });
 
-  it("speaks the plain line but wraps the bubble at word boundaries", () => {
+  it("speaks the plain line and shows no text on screen", () => {
     const scene = buildCharacterScene(scenes[1], 1, `${base}/wave.png`);
-    const [voice, , bubble] = elementsOf(scene);
+    const [voice] = elementsOf(scene);
     expect(voice.text).toBe(scenes[1].text);
-    expect(String(bubble.text)).toContain("\n");
-    expect(String(bubble.text).replace(/\n/g, " ")).toBe(scenes[1].text);
-    expect(bubble).toMatchObject({ "vertical-position": "top", y: 140 });
+    expect(elementsOf(scene).some((element) => element.type === "text")).toBe(false);
   });
 
   it("never lets scene text open a template placeholder", () => {
     const scene = buildCharacterScene({ ...scenes[0], text: "{{voice_script}} 안녕하세요" }, 0, `${base}/wave.png`);
-    const [voice, , bubble] = elementsOf(scene);
+    const [voice] = elementsOf(scene);
     expect(String(voice.text)).not.toMatch(/\{\{|\}\}/);
-    expect(String(bubble.text)).not.toMatch(/\{\{|\}\}/);
   });
 
   it("falls back to the first reference image and default motions when a scene has none", () => {
@@ -78,32 +75,13 @@ describe("character movie builder", () => {
   it("builds an animated-clip scene (video instead of image) that loops and is muted", () => {
     const clip = "https://v3.fal.media/clip.mp4";
     const scene = buildCharacterScene({ ...scenes[1], imageUrl: undefined, videoUrl: clip }, 1, "");
-    const [voice, media, bubble] = elementsOf(scene);
-    expect(elementsOf(scene).map((element) => element.type)).toEqual(["voice", "video", "text"]);
+    const [voice, media] = elementsOf(scene);
+    expect(elementsOf(scene).map((element) => element.type)).toEqual(["voice", "video"]);
     expect(media).toMatchObject({ src: clip, loop: -1, muted: true, duration: -2, resize: "cover", width: 1080, height: 1920 });
     expect(voice.text).toBe(scenes[1].text);
-    expect(bubble).toMatchObject({ "vertical-position": "top" });
   });
 
   it("is accepted by the shared scene schema", () => {
     expect(scenes.every((scene) => videoRenderSceneSchema.safeParse(scene).success)).toBe(true);
-  });
-});
-
-describe("wrapForBubble", () => {
-  it("keeps short lines whole", () => {
-    expect(wrapForBubble("지금 시작해요!")).toBe("지금 시작해요!");
-  });
-
-  it("breaks long lines only at spaces and keeps every word", () => {
-    const text = "블로그 글 숏폼 영상 캘린더까지 한 번에 뚝딱 만들어 드려요";
-    const wrapped = wrapForBubble(text);
-    expect(wrapped.split("\n").length).toBeGreaterThan(1);
-    expect(wrapped.replace(/\n/g, " ")).toBe(text);
-  });
-
-  it("leaves a single over-long word alone instead of dropping it", () => {
-    const word = "가".repeat(30);
-    expect(wrapForBubble(word)).toBe(word);
   });
 });

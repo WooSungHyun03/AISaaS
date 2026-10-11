@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { describeAutomationRunError } from "@/server/shared/errors";
 import { canCreateAutomation, canExecuteAutomation } from "@/server/billing/entitlements";
-import { runAutomationNow } from "@/server/automations/runner";
+import { advanceDeferredRun, runAutomationNow } from "@/server/automations/runner";
 import { computeNextRunAt } from "@/server/automations/scheduler";
 import { parseScheduleFromForm } from "@/server/automations/schedule-input";
 import { WordPressConnector, normalizeWordPressSiteUrl } from "@/server/connectors/wordpress";
@@ -66,6 +66,8 @@ export async function createAutomation(
       keywords: String(formData.get("keywords") ?? "").split(/[,\n]/).map((keyword) => keyword.trim()).filter(Boolean),
       tone: String(formData.get("tone") ?? ""),
       deliveryMode: String(formData.get("deliveryMode") ?? ""),
+      platform: String(formData.get("platform") ?? "") || undefined,
+      notes: String(formData.get("notes") ?? "").trim() || undefined,
     });
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "블로그 설정을 확인해주세요." };
 
@@ -205,6 +207,8 @@ export async function updateAutomation(automationId: string, formData: FormData)
       keywords: String(formData.get("keywords") ?? "").split(/[,\n]/).map((keyword) => keyword.trim()).filter(Boolean),
       tone: String(formData.get("tone") ?? ""),
       deliveryMode: String(formData.get("deliveryMode") ?? ""),
+      platform: String(formData.get("platform") ?? "") || undefined,
+      notes: String(formData.get("notes") ?? "").trim() || undefined,
     });
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "블로그 설정을 확인해주세요." };
     const blogConfig: BlogAutomationConfig = parsed.data;
@@ -263,6 +267,9 @@ export interface RunNowState {
   success?: boolean;
   runId?: string;
   contentHistoryId?: string;
+  /** The content is still being written in the background (long posts take several steps). */
+  pending?: boolean;
+  progress?: string;
 }
 
 export async function triggerRunNow(automationId: string, calendarItemId?: string): Promise<RunNowState> {
@@ -347,6 +354,13 @@ export async function triggerRunNow(automationId: string, calendarItemId?: strin
     return { error: describeAutomationRunError(result.errorMessage) };
   }
 
+  if (result.status === "RUNNING") {
+    // The runner links a calendar item to its content when the deferred run finishes.
+    revalidatePath(`/automations/${automationId}`);
+    revalidatePath("/blog");
+    return { success: true, runId: result.runId, pending: true, progress: result.progress };
+  }
+
   if (calendarItem) {
     if (!result.contentHistoryId) {
       return { error: "콘텐츠는 실행되었지만 생성 결과를 저장하지 못했습니다. 실행 내역을 확인해주세요." };
@@ -373,4 +387,35 @@ export async function triggerRunNow(automationId: string, calendarItemId?: strin
   revalidatePath("/calendar");
   revalidatePath("/marketing/calendar");
   return { success: true, runId: result.runId, contentHistoryId: result.contentHistoryId };
+}
+
+/**
+ * Moves an in-flight (deferred) run of the caller's automation forward by one quick step. The page that shows
+ * the run calls this every few seconds; the cron tick does the same when nobody is looking, and a lease inside
+ * advanceDeferredRun keeps the two from stepping on each other.
+ */
+export async function advanceAutomationRun(automationId: string): Promise<RunNowState> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+  const { data: automation } = await supabase.from("automations").select("id").eq("id", automationId).eq("user_id", user.id).maybeSingle();
+  if (!automation) return { error: "자동화를 찾을 수 없습니다." };
+  const { data: run } = await supabase.from("automation_runs").select("id")
+    .eq("automation_id", automationId).eq("status", "RUNNING").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (!run) return { success: true, pending: false };
+  try {
+    const step = await advanceDeferredRun(run.id);
+    if (step.status === "SUCCESS" || step.status === "FAILED") {
+      revalidatePath(`/automations/${automationId}`);
+      revalidatePath("/blog");
+      revalidatePath("/dashboard");
+      revalidatePath("/calendar");
+      revalidatePath("/marketing/calendar");
+    }
+    if (step.status === "FAILED") return { error: describeAutomationRunError(step.errorMessage), runId: run.id, pending: false };
+    return { success: true, runId: run.id, pending: step.status === "RUNNING" || step.status === "BUSY", progress: step.progress };
+  } catch {
+    // A transient problem while stepping is retried by the next poll or cron tick.
+    return { success: true, runId: run.id, pending: true };
+  }
 }

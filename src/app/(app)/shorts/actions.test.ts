@@ -14,6 +14,8 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => adminMock }));
 const { runAutomationNowMock, advanceDeferredRunMock } = vi.hoisted(() => ({ runAutomationNowMock: vi.fn(), advanceDeferredRunMock: vi.fn() }));
 vi.mock("@/server/automations/runner", () => ({ runAutomationNow: runAutomationNowMock, advanceDeferredRun: advanceDeferredRunMock }));
 vi.mock("@/server/billing/entitlements", () => ({ canCreateAutomation: vi.fn() }));
+const { analyzeMock } = vi.hoisted(() => ({ analyzeMock: vi.fn() }));
+vi.mock("@/server/shorts/reference-analysis", () => ({ analyzeReferenceImage: analyzeMock }));
 vi.mock("@/server/shorts/reference-images", () => ({
   detectImageType: (bytes: Uint8Array) => (bytes[0] === 0x89 ? "png" : bytes[0] === 0xff ? "jpeg" : null),
   referenceStoragePath: (userId: string, automationId: string, id: string, type: string) => `${userId}/${automationId}/${id}.${type === "png" ? "png" : "jpg"}`,
@@ -22,7 +24,7 @@ vi.mock("@/server/shorts/reference-images", () => ({
   deleteReferenceImage: deleteMock,
 }));
 
-const { uploadShortsReference, addMascotReferences, removeShortsReference, saveShortsCreativeSettings, generateShortsPreview, saveShortsSchedule, advanceShortsJob } = await import("./actions");
+const { uploadShortsReference, addMascotReferences, removeShortsReference, saveShortsCreativeSettings, generateShortsPreview, saveShortsSchedule, advanceShortsJob, setReferenceSubject } = await import("./actions");
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 
@@ -62,6 +64,7 @@ const savedConfig = (updates: unknown[]) => (updates[0] as { config: Record<stri
 beforeEach(() => {
   vi.resetAllMocks();
   uploadMock.mockResolvedValue(undefined);
+  analyzeMock.mockResolvedValue({ subject: "product", summary: "갓 구운 소금빵 클로즈업" });
 });
 
 describe("uploadShortsReference", () => {
@@ -74,7 +77,8 @@ describe("uploadShortsReference", () => {
     expect(uploadMock).toHaveBeenCalledWith(adminMock, expect.stringMatching(/^user-1\/auto-1\/.+\.png$/), expect.any(Uint8Array), "png");
     const config = savedConfig(updates);
     expect(config.platforms).toEqual(["youtube"]);
-    expect(config.references).toEqual([expect.objectContaining({ kind: "upload", label: "놀란 고양이" })]);
+    expect(config.references).toEqual([expect.objectContaining({ kind: "upload", label: "놀란 고양이", subject: "product", summary: "갓 구운 소금빵 클로즈업" })]);
+    expect(analyzeMock).toHaveBeenCalledWith(expect.any(Uint8Array), "놀란 고양이");
   });
 
   it("rejects non-image content even when it is named like an image", async () => {
@@ -151,6 +155,7 @@ describe("mascot, removal and creative settings", () => {
     const config = savedConfig(updates);
     expect((config.references as unknown[]).length).toBe(8);
     expect(String(config.shortsBrief)).toContain("이지 마케팅");
+    expect((config.references as Array<{ subject: string }>).every((item) => item.subject === "character")).toBe(true);
 
     const second = setup({ shortsBrief: "내 요청", references: [{ id: "mascot-wave", kind: "mascot", source: "wave", label: "인사" }] });
     await addMascotReferences("auto-1");
@@ -184,10 +189,10 @@ describe("mascot, removal and creative settings", () => {
 });
 
 describe("character requirement and background progress", () => {
-  it("will not start a video or save a schedule without a character image", async () => {
+  it("will not start a video or save a schedule without a reference image", async () => {
     setup({ references: [] });
-    expect((await generateShortsPreview("auto-1")).error).toContain("캐릭터 이미지를 먼저");
-    expect((await saveShortsSchedule("auto-1", new FormData())).error).toContain("캐릭터 이미지를 먼저");
+    expect((await generateShortsPreview("auto-1")).error).toContain("참고 이미지를 먼저");
+    expect((await saveShortsSchedule("auto-1", new FormData())).error).toContain("참고 이미지를 먼저");
     expect(runAutomationNowMock).not.toHaveBeenCalled();
   });
 
@@ -207,5 +212,20 @@ describe("character requirement and background progress", () => {
     expect((await advanceShortsJob("auto-1")).error).toBeTruthy();
     advanceDeferredRunMock.mockRejectedValueOnce(new Error("transient"));
     expect(await advanceShortsJob("auto-1")).toMatchObject({ success: true, pending: true });
+  });
+});
+
+describe("correcting what an image shows", () => {
+  it("lets the owner change an uploaded image's kind, but not a mascot pose, and rejects unknown kinds", async () => {
+    const { updates } = setup({ references: [
+      { id: "u1", kind: "upload", source: "user-1/auto-1/u1.png", label: "", subject: "other" },
+      { id: "mascot-wave", kind: "mascot", source: "wave", label: "인사", subject: "character" },
+    ] });
+    expect(await setReferenceSubject("auto-1", "u1", "product")).toEqual({ success: true });
+    expect((savedConfig(updates).references as Array<{ id: string; subject: string }>).find((item) => item.id === "u1")?.subject).toBe("product");
+
+    expect((await setReferenceSubject("auto-1", "mascot-wave", "product")).error).toBeTruthy();
+    expect((await setReferenceSubject("auto-1", "u1", "banana")).error).toBeTruthy();
+    expect((await setReferenceSubject("auto-1", "missing", "product")).error).toBeTruthy();
   });
 });

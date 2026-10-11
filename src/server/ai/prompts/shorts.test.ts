@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Business } from "@/types/domain";
-import { buildShortsPlanPrompt, buildShortsTopicPrompt, shortsContentSchema, shortsPlanSchema } from "./shorts";
+import { buildShortsPlanPrompt, buildShortsTopicPrompt, makeShortsPlanSchema, shortsContentSchema } from "./shorts";
 
 const validContent = {
   hook: "아침마다 빵을 기다리고 계신가요?",
@@ -44,6 +44,7 @@ describe("shortsContentSchema", () => {
 });
 
 const characterPlan = {
+  format: "character",
   hook: "사장님, 큰일 났어요!",
   scenes: [
     { text: "사장님, 큰일 났어요!", speaker: "partner", imageIndex: 2, action: "The character panics and shakes.", motion: "shake", durationSec: 2 },
@@ -56,34 +57,83 @@ const characterPlan = {
   privacy: "private",
 };
 
-describe("shortsPlanSchema", () => {
-  it("accepts a plan and fills in defaults for a missing action and visual note", () => {
-    const plan = shortsPlanSchema.parse(characterPlan);
+const promoPlan = {
+  format: "promo",
+  hook: "아직도 모르세요?",
+  scenes: [
+    { text: "아직도 모르세요?", imageIndex: 1, camera: "push-in", animate: true, motionPrompt: "Slow push-in; steam rises.", durationSec: 3 },
+    { text: "직접 구운 소금빵을 만나보세요", imageIndex: 2, camera: "pan-left", animate: false, durationSec: 5 },
+    { text: "겉은 바삭 속은 촉촉해요", imageIndex: 1, camera: "pull-out", animate: true, motionPrompt: "Gentle pull-back; light glints.", durationSec: 5 },
+    { text: "오늘 바로 들러 보세요", imageIndex: 3, camera: "tilt-up", animate: false, durationSec: 5 },
+  ],
+  caption: "동네 빵집 소개 #동네빵집 #소금빵 #숏폼",
+  privacy: "private",
+};
+
+const both = makeShortsPlanSchema(["character", "promo"]);
+
+describe("makeShortsPlanSchema", () => {
+  it("accepts a character plan and fills in defaults for a missing action and visual note", () => {
+    const plan = both.parse(characterPlan);
+    expect(plan.format).toBe("character");
+    if (plan.format !== "character") return;
     expect(plan.scenes[2].action).toBeTruthy();
     expect(plan.scenes[0].visualPrompt).toBeTruthy();
   });
 
-  it("keeps lines short enough for one 5 second clip", () => {
-    const long = { ...characterPlan, scenes: characterPlan.scenes.map((scene, index) => (index === 3 ? { ...scene, text: "가".repeat(29) } : scene)) };
-    expect(shortsPlanSchema.safeParse(long).success).toBe(false);
-    const wordy = { ...characterPlan, scenes: [...characterPlan.scenes, characterPlan.scenes[3]].map((scene) => ({ ...scene, text: "가".repeat(28) })) };
-    expect(shortsPlanSchema.safeParse(wordy).success).toBe(false); // > 150 characters in total
+  it("accepts a promo plan with defaults for the animation fields", () => {
+    const plan = both.parse(promoPlan);
+    expect(plan.format).toBe("promo");
+    if (plan.format !== "promo") return;
+    expect(plan.scenes[1].motionPrompt).toBe("");
+    expect(plan.scenes[1].animate).toBe(false);
   });
 
-  it("rejects a slow hook, no main speaker, more than 6 scenes, unknown motions and a hashtag-less caption", () => {
+  it("refuses a format the images or style do not allow", () => {
+    expect(makeShortsPlanSchema(["promo"]).safeParse(characterPlan).success).toBe(false);
+    expect(makeShortsPlanSchema(["character"]).safeParse(promoPlan).success).toBe(false);
+  });
+
+  it("keeps character lines short enough for one 5 second clip", () => {
+    const long = { ...characterPlan, scenes: characterPlan.scenes.map((scene, index) => (index === 3 ? { ...scene, text: "가".repeat(29) } : scene)) };
+    expect(both.safeParse(long).success).toBe(false);
+    const wordy = { ...characterPlan, scenes: [...characterPlan.scenes, characterPlan.scenes[3]].map((scene) => ({ ...scene, text: "가".repeat(28) })) };
+    expect(both.safeParse(wordy).success).toBe(false); // > 150 characters in total
+  });
+
+  it("rejects a slow hook, no main speaker, too many scenes, unknown motions and a hashtag-less caption", () => {
     const slowHook = { ...characterPlan, scenes: characterPlan.scenes.map((scene, index) => (index === 0 ? { ...scene, durationSec: 5 } : scene)) };
-    expect(shortsPlanSchema.safeParse(slowHook).success).toBe(false);
+    expect(both.safeParse(slowHook).success).toBe(false);
     const noMain = { ...characterPlan, scenes: characterPlan.scenes.map((scene) => ({ ...scene, speaker: "partner" })) };
-    expect(shortsPlanSchema.safeParse(noMain).success).toBe(false);
+    expect(both.safeParse(noMain).success).toBe(false);
     const tooMany = { ...characterPlan, scenes: [...characterPlan.scenes, ...characterPlan.scenes.slice(0, 2)] };
-    expect(shortsPlanSchema.safeParse(tooMany).success).toBe(false);
+    expect(both.safeParse(tooMany).success).toBe(false);
     const badMotion = { ...characterPlan, scenes: characterPlan.scenes.map((scene) => ({ ...scene, motion: "spin" })) };
-    expect(shortsPlanSchema.safeParse(badMotion).success).toBe(false);
-    expect(shortsPlanSchema.safeParse({ ...characterPlan, caption: "해시태그 없음" }).success).toBe(false);
+    expect(both.safeParse(badMotion).success).toBe(false);
+    expect(both.safeParse({ ...characterPlan, caption: "해시태그 없음" }).success).toBe(false);
+  });
+
+  it("limits promo narration and animated scenes and requires a motion direction for them", () => {
+    const longNarration = { ...promoPlan, scenes: promoPlan.scenes.map((scene) => ({ ...scene, text: "가".repeat(43) })) };
+    expect(both.safeParse(longNarration).success).toBe(false);
+    const noDirection = { ...promoPlan, scenes: promoPlan.scenes.map((scene) => (scene.animate ? { ...scene, motionPrompt: "" } : scene)) };
+    expect(both.safeParse(noDirection).success).toBe(false);
+    const fiveAnimated = {
+      ...promoPlan,
+      scenes: [...promoPlan.scenes, { ...promoPlan.scenes[0], durationSec: 4 }].map((scene) => ({ ...scene, animate: true, motionPrompt: "Slow push-in." })),
+    };
+    expect(both.safeParse(fiveAnimated).success).toBe(false);
+    expect(both.safeParse({ ...promoPlan, scenes: promoPlan.scenes.map((scene) => ({ ...scene, camera: "orbit" })) }).success).toBe(false);
+  });
+
+  it("carries a music direction, with a sensible default when the AI omits it", () => {
+    expect(both.parse(promoPlan).music).toContain("instrumental");
+    expect(both.parse({ ...characterPlan, music: "Playful ukulele." }).music).toBe("Playful ukulele.");
+    expect(both.safeParse({ ...promoPlan, music: "가".repeat(301) }).success).toBe(false);
   });
 
   it("is also a valid classic content shape once the script is added (publishing re-reads it)", () => {
-    const plan = shortsPlanSchema.parse(characterPlan);
+    const plan = both.parse(promoPlan);
     const content = { hook: plan.hook, script: plan.scenes.map((scene) => scene.text).join(" "), scenes: plan.scenes, caption: plan.caption, privacy: plan.privacy };
     expect(shortsContentSchema.safeParse(content).success).toBe(true);
   });
@@ -95,28 +145,46 @@ const business = {
 } as unknown as Business;
 
 describe("buildShortsPlanPrompt", () => {
-  it("lists the character images by number with the request, limits and fallback motions", () => {
+  it("lists the tagged images, the request and both formats when both are allowed", () => {
     const { prompt, system } = buildShortsPlanPrompt(business, "인스타 글 대신 써주는 로봇", {
-      references: ["손을 흔드는 마스코트", "놀란 마스코트"],
-      style: "skit",
+      references: ["[character] 손을 흔드는 마스코트", "[product] 소금빵 클로즈업"],
+      allowedFormats: ["character", "promo"],
+      style: "auto",
       mascot: true,
       brief: "마스코트가 나와서 웃기게",
     });
-    expect(prompt).toContain("1. 손을 흔드는 마스코트");
-    expect(prompt).toContain("2. 놀란 마스코트");
+    expect(prompt).toContain("1. [character] 손을 흔드는 마스코트");
+    expect(prompt).toContain("2. [product] 소금빵 클로즈업");
     expect(prompt).toContain("마스코트가 나와서 웃기게");
-    expect(prompt).toContain("at most 28 Korean characters");
+    expect(prompt).toContain('format "character"');
+    expect(prompt).toContain('format "promo"');
+    expect(prompt).toContain("Choose \"format\" yourself");
     expect(prompt).toMatch(/pop, bounce, wobble, shake, slide, zoom/);
-    expect(prompt).toContain('"action"');
-    expect(system).toContain("funny character skit");
+    expect(prompt).toMatch(/push-in, pull-out, pan-left, pan-right, tilt-up, tilt-down/);
     expect(system).toContain("이지 마케팅");
+    expect(system).toContain("stop the scroll");
+    expect(system).toContain("there are no captions");
+    expect(prompt).toContain('"music"');
   });
 
-  it("only mentions the service mascot facts when the mascot is among the images", () => {
-    const user = buildShortsPlanPrompt(business, "주제", { references: ["우리 고양이"], style: "explainer", mascot: false });
-    expect(user.system).not.toContain("blue cape");
-    expect(user.system).toContain("friendly explainer");
-    expect(user.prompt).not.toContain("Comedy techniques");
+  it("pins the format and drops the other format's rules when only one is allowed", () => {
+    const character = buildShortsPlanPrompt(business, "주제", { references: ["[character] 우리 고양이"], allowedFormats: ["character"], style: "skit", mascot: false });
+    expect(character.prompt).toContain('Use format "character".');
+    expect(character.prompt).not.toContain('format "promo":');
+    expect(character.system).not.toContain("blue cape");
+    expect(character.prompt).toContain("Comedy techniques");
+
+    const promo = buildShortsPlanPrompt(business, "주제", { references: ["[product] 소금빵", "[person] 사장님"], allowedFormats: ["promo"], style: "promo", mascot: false });
+    expect(promo.prompt).toContain('Use format "promo".');
+    expect(promo.prompt).not.toContain('format "character":');
+    expect(promo.prompt).toContain("NEVER for a [person] photo");
+    expect(promo.prompt).toContain("never use unprovable claims");
+    expect(promo.prompt).toContain("Never ask the animator to change");
+  });
+
+  it("does not add comedy rules for the explainer style", () => {
+    const { prompt } = buildShortsPlanPrompt(business, "주제", { references: ["[character] 로봇"], allowedFormats: ["character"], style: "explainer", mascot: false });
+    expect(prompt).not.toContain("Comedy techniques");
   });
 
   it("passes the owner's direction into topic selection", () => {

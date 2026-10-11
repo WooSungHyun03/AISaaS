@@ -3,6 +3,8 @@
 import { useActionState, useState } from "react";
 import { createAutomation, type AutomationActionState } from "@/app/(app)/automations/actions";
 import type { AutomationTemplate, Business } from "@/types/domain";
+import { BLOG_NOTES_MAX_LENGTH, blogPlatforms } from "@/types/blog-automation";
+import { BLOG_PLATFORM_LABEL } from "@/server/blog/post";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Progress } from "@/components/ui/progress";
@@ -30,6 +32,8 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
   const [objective, setObjective] = useState("");
   const [keywords, setKeywords] = useState("");
   const [tone, setTone] = useState("친근하고 전문적인");
+  const [platform, setPlatform] = useState<(typeof blogPlatforms)[number]>("naver");
+  const [notes, setNotes] = useState("");
   const [schedule, setSchedule] = useState(() => scheduleToValue(null));
 
   function validate(currentStep: number): string {
@@ -76,6 +80,8 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
         <input type="hidden" name="objective" value={objective} />
         <input type="hidden" name="keywords" value={keywords} />
         <input type="hidden" name="tone" value={tone} />
+        <input type="hidden" name="platform" value={platform} />
+        <input type="hidden" name="notes" value={notes} />
         <ScheduleHiddenInputs value={schedule} />
         {/* New blog automations are generation-only — app_draft is the only mode createAutomation accepts, see src/app/(app)/automations/actions.ts */}
         <input type="hidden" name="deliveryMode" value="app_draft" />
@@ -101,6 +107,16 @@ export function BlogSetupWizard({ businesses, template }: { businesses: Business
           <div className="space-y-2"><Label htmlFor="blog-tone">글의 말투 <span className="text-destructive" aria-hidden="true">*</span></Label>
             <Input id="blog-tone" value={tone} onChange={(event) => setTone(event.target.value)} maxLength={100} disabled={isPending} placeholder="예: 친근하고 전문적인" />
             <p className="text-[13px] text-muted-foreground">사업체 기본 말투보다 여기서 적은 말투를 먼저 따라요.</p>
+          </div>
+          <div className="space-y-2"><Label htmlFor="blog-platform">어디에 올릴 글인가요?</Label>
+            <NativeSelect id="blog-platform" value={platform} onChange={(event) => setPlatform(event.target.value as typeof platform)} disabled={isPending}>
+              {blogPlatforms.map((key) => <option key={key} value={key}>{BLOG_PLATFORM_LABEL[key]}</option>)}
+            </NativeSelect>
+            <p className="text-[13px] text-muted-foreground">네이버는 사진·이모티콘이 많은 친근한 글, 티스토리는 검색(구글)에 맞춘 정보형 글로 써요. 분량은 공백 제외 약 2,000자예요.</p>
+          </div>
+          <div className="space-y-2"><Label htmlFor="blog-notes">꼭 넣고 싶은 내용 <span className="font-normal text-muted-foreground">(선택)</span></Label>
+            <Textarea id="blog-notes" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={BLOG_NOTES_MAX_LENGTH} rows={3} disabled={isPending} placeholder="예: 시그니처는 12시간 저온 숙성한 소금빵이에요. 주차는 건물 지하에 2시간 무료예요." />
+            <p className="text-[13px] text-muted-foreground">여기에 적은 구체적인 사실(메뉴, 가격, 영업시간, 이벤트 등)만 글에 그대로 쓰여요. 적지 않은 사실은 AI가 지어내지 않아요.</p>
           </div>
         </div>}
 

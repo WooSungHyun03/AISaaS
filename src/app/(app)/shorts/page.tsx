@@ -77,6 +77,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     caption: previewRun.safe.caption,
     script: previewRun.safe.script,
     scenes: previewRun.safe.scenes,
+    format: previewRun.safe.format,
     animationMode: previewRun.safe.animationMode,
     animationNote: previewRun.safe.animationNote,
   } : null;
@@ -90,7 +91,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const referenceSettings = parseShortsReferenceSettings(automation.config);
   const referenceViews = await referenceViewsFor(referenceSettings.references, user.id, automation.id);
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} hasCharacter={referenceViews.length > 0} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} hasImages={referenceViews.length > 0} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
 }
 
 function PageHeading() {
@@ -116,6 +117,8 @@ async function referenceViewsFor(
     id: item.id,
     kind: item.kind,
     label: item.label,
+    subject: item.subject ?? "other",
+    summary: item.summary ?? "",
     previewUrl: item.kind === "mascot" ? `/shorts-mascot/${item.source}.png` : signed.get(item.source) ?? null,
   }));
 }

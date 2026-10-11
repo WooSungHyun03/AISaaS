@@ -16,6 +16,7 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     monthlyBlogLimit: 1,
     monthlyShortsLimit: 0,
     monthlyAnimatedShortsLimit: 0,
+    animationQuality: "standard",
     allowedTemplateSlugs: ["blog-marketing"],
     features: [
       "마케팅 진단 · 마케팅 캘린더",
@@ -32,10 +33,11 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     monthlyBlogLimit: 8,
     monthlyShortsLimit: 4,
     monthlyAnimatedShortsLimit: 2,
+    animationQuality: "standard",
     allowedTemplateSlugs: null,
     features: [
       "블로그 글 월 8건 · 숏폼 영상 월 4건",
-      "움직이는 캐릭터 영상 월 2건 포함",
+      "움직이는 영상(캐릭터·상품) 월 2건 포함",
       "정해둔 때마다 자동으로 만들기",
       "제작 기록 보기",
     ],
@@ -49,10 +51,11 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     monthlyBlogLimit: 30,
     monthlyShortsLimit: 12,
     monthlyAnimatedShortsLimit: 6,
+    animationQuality: "premium",
     allowedTemplateSlugs: null,
     features: [
       "블로그 글 월 30건 · 숏폼 영상 월 12건",
-      "움직이는 캐릭터 영상 월 6건 포함",
+      "움직이는 영상(캐릭터·상품) 월 6건 포함 · 고화질 모델",
       "정해둔 때마다 자동으로 만들기",
       "우선 처리",
     ],

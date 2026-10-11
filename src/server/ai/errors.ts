@@ -11,7 +11,8 @@ export type AIErrorCode =
   | "RATE_LIMITED"
   | "PROVIDER_UNAVAILABLE"
   | "INVALID_STRUCTURED_RESPONSE"
-  | "NETWORK_FAILURE";
+  | "NETWORK_FAILURE"
+  | "UNSUPPORTED_INPUT";
 
 const RETRYABLE_CODES: ReadonlySet<AIErrorCode> = new Set([
   "TIMEOUT",

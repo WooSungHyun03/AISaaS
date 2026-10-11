@@ -4,19 +4,25 @@ import { classifyHttpStatus, ConnectorError } from "@/server/shared/errors";
 import {
   ANIMATION_CLIP_SECONDS,
   type AnimationClipHandle,
+  type AnimationClipOptions,
   type AnimationClipRequest,
   type AnimationClipStatus,
   type AnimationProvider,
+  type MusicRequest,
+  type MusicStatus,
 } from "./types";
 
 /**
- * fal.ai queue API (one key, many image-to-video models). Default model is
- * Kling 2.5 Turbo Pro; set ANIMATION_MODEL to switch (the body below is the
- * common `image_url` + `prompt` shape plus `duration`).
+ * fal.ai queue API (one key, many models). Image-to-video defaults to Kling 2.5 Turbo Pro
+ * (ANIMATION_MODEL) with Kling 3.0 Pro for premium plans (ANIMATION_MODEL_PREMIUM); background
+ * music defaults to Lyria 2 (MUSIC_MODEL). Each model family takes slightly different input names,
+ * mapped in `clipBody` / `musicBody`.
  *
  * https://fal.ai/docs/documentation/model-apis/inference/queue
  */
 export const DEFAULT_ANIMATION_MODEL = "fal-ai/kling-video/v2.5-turbo/pro/image-to-video";
+export const DEFAULT_PREMIUM_ANIMATION_MODEL = "fal-ai/kling-video/v3/pro/image-to-video";
+export const DEFAULT_MUSIC_MODEL = "fal-ai/lyria2";
 const QUEUE_BASE = "https://queue.fal.run/";
 const REQUEST_TIMEOUT_MS = 15_000;
 /** The handle is stored in our database; only ever follow URLs that stay on fal's queue host. */
@@ -25,6 +31,8 @@ const TRUSTED_URL_PREFIX = QUEUE_BASE;
 interface FalOptions {
   apiKey?: string;
   model?: string;
+  premiumModel?: string;
+  musicModel?: string;
   fetchFn?: typeof fetch;
 }
 
@@ -42,6 +50,7 @@ interface FalStatusResponse {
 
 interface FalResultResponse {
   video?: { url?: string };
+  audio?: { url?: string };
   detail?: unknown;
   error?: string;
 }
@@ -51,15 +60,33 @@ function describeFailure(body: { detail?: unknown; error?: string } | null, fall
   return (raw || fallback).replace(/\s+/g, " ").trim().slice(0, 300);
 }
 
+const trimSlashes = (value: string) => value.replace(/^\/+|\/+$/g, "");
+
+/** Input names differ between model families: Kling 3 takes `start_image_url`, earlier models `image_url`. */
+export function clipBody(model: string, request: AnimationClipRequest): Record<string, unknown> {
+  const common = { prompt: request.prompt, duration: String(ANIMATION_CLIP_SECONDS) };
+  if (/\/v3\//.test(model)) return { ...common, start_image_url: request.imageUrl, generate_audio: false };
+  return { ...common, image_url: request.imageUrl };
+}
+
+export function musicBody(model: string, request: MusicRequest): Record<string, unknown> {
+  if (model.includes("minimax-music")) return { prompt: request.prompt, is_instrumental: true };
+  return { prompt: request.prompt, negative_prompt: "vocals, singing, lyrics, speech, voice, spoken words" };
+}
+
 export class FalAnimationProvider implements AnimationProvider {
   readonly name = "fal" as const;
   private readonly apiKey: string | undefined;
   private readonly model: string;
+  private readonly premiumModel: string;
+  private readonly musicModel: string;
   private readonly fetchFn: typeof fetch;
 
   constructor(options: FalOptions = {}) {
     this.apiKey = options.apiKey ?? serverEnv.FAL_KEY;
-    this.model = (options.model ?? serverEnv.ANIMATION_MODEL ?? DEFAULT_ANIMATION_MODEL).replace(/^\/+|\/+$/g, "");
+    this.model = trimSlashes(options.model ?? serverEnv.ANIMATION_MODEL ?? DEFAULT_ANIMATION_MODEL);
+    this.premiumModel = trimSlashes(options.premiumModel ?? serverEnv.ANIMATION_MODEL_PREMIUM ?? DEFAULT_PREMIUM_ANIMATION_MODEL);
+    this.musicModel = trimSlashes(options.musicModel ?? serverEnv.MUSIC_MODEL ?? DEFAULT_MUSIC_MODEL);
     this.fetchFn = options.fetchFn ?? fetch;
   }
 
@@ -90,50 +117,59 @@ export class FalAnimationProvider implements AnimationProvider {
     }
   }
 
-  async startClip(request: AnimationClipRequest): Promise<AnimationClipHandle> {
-    const response = await this.request(
-      `${QUEUE_BASE}${this.model}`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          image_url: request.imageUrl,
-          prompt: request.prompt,
-          duration: String(ANIMATION_CLIP_SECONDS),
-        }),
-      },
-      "캐릭터 움직임 생성을 시작하지 못했습니다.",
-    );
+  private async submit(model: string, body: Record<string, unknown>, failureMessage: string): Promise<AnimationClipHandle> {
+    const response = await this.request(`${QUEUE_BASE}${model}`, { method: "POST", body: JSON.stringify(body) }, failureMessage);
     if (!response.ok) {
-      throw new ConnectorError("fal", classifyHttpStatus(response.status), `캐릭터 움직임 생성을 시작하지 못했습니다. (HTTP ${response.status})`);
+      throw new ConnectorError("fal", classifyHttpStatus(response.status), `${failureMessage} (HTTP ${response.status})`);
     }
-    const body = (await response.json().catch(() => null)) as FalSubmitResponse | null;
-    if (!body?.request_id || !body.status_url || !body.response_url) {
-      throw new ConnectorError("fal", "UPSTREAM_SERVER_ERROR", "움직임 생성 서비스가 작업 번호를 반환하지 않았습니다.");
+    const parsed = (await response.json().catch(() => null)) as FalSubmitResponse | null;
+    if (!parsed?.request_id || !parsed.status_url || !parsed.response_url) {
+      throw new ConnectorError("fal", "UPSTREAM_SERVER_ERROR", "AI 생성 서비스가 작업 번호를 반환하지 않았습니다.");
     }
-    return { requestId: body.request_id, statusUrl: body.status_url, responseUrl: body.response_url };
+    return { requestId: parsed.request_id, statusUrl: parsed.status_url, responseUrl: parsed.response_url };
   }
 
-  async getClip(handle: AnimationClipHandle): Promise<AnimationClipStatus> {
-    const statusResponse = await this.request(handle.statusUrl, { method: "GET" }, "캐릭터 움직임 상태를 확인하지 못했습니다.");
+  async startClip(request: AnimationClipRequest, options: AnimationClipOptions = {}): Promise<AnimationClipHandle> {
+    const model = options.quality === "premium" ? this.premiumModel : this.model;
+    return this.submit(model, clipBody(model, request), "캐릭터 움직임 생성을 시작하지 못했습니다.");
+  }
+
+  async startMusic(request: MusicRequest): Promise<AnimationClipHandle> {
+    return this.submit(this.musicModel, musicBody(this.musicModel, request), "배경음악 생성을 시작하지 못했습니다.");
+  }
+
+  /** Shared queue polling: pending, failed with a reason, or the finished result body. */
+  private async poll(handle: AnimationClipHandle, noun: string): Promise<{ state: "pending" } | { state: "failed"; message: string } | { state: "done"; result: FalResultResponse }> {
+    const statusResponse = await this.request(handle.statusUrl, { method: "GET" }, `${noun} 상태를 확인하지 못했습니다.`);
     if (!statusResponse.ok) {
-      throw new ConnectorError("fal", classifyHttpStatus(statusResponse.status), `캐릭터 움직임 상태를 확인하지 못했습니다. (HTTP ${statusResponse.status})`);
+      throw new ConnectorError("fal", classifyHttpStatus(statusResponse.status), `${noun} 상태를 확인하지 못했습니다. (HTTP ${statusResponse.status})`);
     }
     const status = (await statusResponse.json().catch(() => null)) as FalStatusResponse | null;
     if (!status?.status) {
-      throw new ConnectorError("fal", "UPSTREAM_SERVER_ERROR", "움직임 생성 서비스가 상태를 반환하지 않았습니다.");
+      throw new ConnectorError("fal", "UPSTREAM_SERVER_ERROR", "AI 생성 서비스가 상태를 반환하지 않았습니다.");
     }
     if (status.status === "IN_QUEUE" || status.status === "IN_PROGRESS") return { state: "pending" };
-    if (status.status !== "COMPLETED") {
-      return { state: "failed", message: describeFailure(status, `알 수 없는 상태입니다: ${status.status}`) };
-    }
-    if (status.error) return { state: "failed", message: describeFailure(status, "움직임 생성에 실패했습니다.") };
+    if (status.status !== "COMPLETED") return { state: "failed", message: describeFailure(status, `알 수 없는 상태입니다: ${status.status}`) };
+    if (status.error) return { state: "failed", message: describeFailure(status, `${noun}에 실패했습니다.`) };
 
-    const resultResponse = await this.request(handle.responseUrl, { method: "GET" }, "캐릭터 움직임 결과를 가져오지 못했습니다.");
+    const resultResponse = await this.request(handle.responseUrl, { method: "GET" }, `${noun} 결과를 가져오지 못했습니다.`);
     const result = (await resultResponse.json().catch(() => null)) as FalResultResponse | null;
-    if (!resultResponse.ok) {
-      return { state: "failed", message: describeFailure(result, `움직임 생성에 실패했습니다. (HTTP ${resultResponse.status})`) };
-    }
-    const videoUrl = result?.video?.url;
+    if (!resultResponse.ok) return { state: "failed", message: describeFailure(result, `${noun}에 실패했습니다. (HTTP ${resultResponse.status})`) };
+    return { state: "done", result: result ?? {} };
+  }
+
+  async getMusic(handle: AnimationClipHandle): Promise<MusicStatus> {
+    const polled = await this.poll(handle, "배경음악");
+    if (polled.state !== "done") return polled;
+    const audioUrl = polled.result.audio?.url;
+    if (!audioUrl || !/^https:\/\//i.test(audioUrl)) return { state: "failed", message: "배경음악 주소를 받지 못했습니다." };
+    return { state: "done", audioUrl };
+  }
+
+  async getClip(handle: AnimationClipHandle): Promise<AnimationClipStatus> {
+    const polled = await this.poll(handle, "캐릭터 움직임");
+    if (polled.state !== "done") return polled;
+    const videoUrl = polled.result.video?.url;
     if (!videoUrl || !/^https:\/\//i.test(videoUrl)) {
       return { state: "failed", message: "움직임 생성 서비스가 영상 주소를 반환하지 않았습니다." };
     }

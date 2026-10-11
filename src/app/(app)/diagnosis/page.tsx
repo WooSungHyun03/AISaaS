@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { getReadinessScore } from "@/server/marketing/readiness";
 import { ReadinessScoreCard } from "@/components/marketing/readiness-score-card";
-import { buildChannelNarrative, getLatestChannelDiagnosisSummary } from "@/server/channels";
+import { getChannelNarrative, getLatestChannelDiagnosisSummary } from "@/server/channels";
 import { ChannelDiagnosisCard } from "@/components/channels/channel-diagnosis-card";
 import { AddChannelForm } from "@/components/channels/add-channel-form";
 
@@ -53,7 +53,7 @@ export default async function DiagnosisPage({
     getLatestChannelDiagnosisSummary(selectedBusiness.id),
   ]);
 
-  const narratives = await Promise.all(channelSummary.channels.map((item) => buildChannelNarrative(item, selectedBusiness)));
+  const narratives = await Promise.all(channelSummary.channels.map((item) => getChannelNarrative(item, selectedBusiness)));
 
   return (
     <div className="mx-auto max-w-5xl space-y-10">

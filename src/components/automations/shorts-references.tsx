@@ -8,18 +8,23 @@ import {
   addMascotReferences,
   removeShortsReference,
   saveShortsCreativeSettings,
+  setReferenceSubject,
   uploadShortsReference,
 } from "@/app/(app)/shorts/actions";
 import { downsizeImage } from "@/components/automations/downsize-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   MAX_SHORTS_REFERENCES,
   REFERENCE_LABEL_MAX_LENGTH,
+  REFERENCE_SUBJECTS,
   SHORTS_BRIEF_MAX_LENGTH,
   SHORTS_STYLES,
+  isReferenceSubject,
+  type ReferenceSubject,
   type ShortsStyle,
 } from "@/types/shorts-reference";
 
@@ -27,6 +32,9 @@ export interface ReferenceView {
   id: string;
   kind: "upload" | "mascot";
   label: string;
+  /** What the AI saw in the image (the owner can correct it). */
+  subject: ReferenceSubject;
+  summary: string;
   /** Signed URL for uploads, `/shorts-mascot/...` for the mascot. Null when it could not be created. */
   previewUrl: string | null;
 }
@@ -97,9 +105,9 @@ export function ShortsReferencesCard({
     <section aria-labelledby="reference-heading" className="rounded-2xl border bg-card p-5 sm:p-7">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 id="reference-heading" className="text-lg font-extrabold tracking-[-0.03em]">캐릭터 영상 만들기</h2>
+          <h2 id="reference-heading" className="text-lg font-extrabold tracking-[-0.03em]">참고 이미지로 영상 만들기</h2>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
-            홍보에 쓸 캐릭터 이미지를 1장~{MAX_SHORTS_REFERENCES}장 올리거나 이지 마케팅 마스코트를 불러오세요. AI가 그 캐릭터를 실제로 움직여서 대사를 하며 홍보하는 영상을 만들어요. 표정이나 동작이 다른 이미지를 여러 장 올리면 장면마다 알맞은 이미지를 골라 써요.
+            홍보에 쓸 이미지를 {MAX_SHORTS_REFERENCES}장까지 올리세요. AI가 이미지를 보고 알아서 종류를 구분해요: <strong>캐릭터</strong>는 실제로 움직이며 대사를 하는 영상으로, <strong>상품·메뉴·매장 사진</strong>은 후킹 → 장점 → 행동 유도 구조의 광고 영상으로 만들어요. 아래에 원하는 내용을 적으면 그대로 따라요.
           </p>
         </div>
         <Button type="button" variant="outline" size="sm" disabled={busy || full} onClick={() => startTransition(async () => finish((await addMascotReferences(automationId)).error, "이지 마케팅 마스코트를 불러왔어요."))}>
@@ -117,7 +125,19 @@ export function ShortsReferencesCard({
                   <img src={reference.previewUrl} alt={reference.label || `참고 이미지 ${index + 1}`} className="size-full object-contain" loading="lazy" />
                 ) : <span className="text-xs text-muted-foreground">미리보기 없음</span>}
               </div>
-              <p className="truncate px-2.5 py-2 text-xs font-semibold" title={reference.label}>{index + 1}. {reference.label || "참고 이미지"}</p>
+              <p className="truncate px-2.5 pt-2 text-xs font-semibold" title={reference.summary || reference.label}>{index + 1}. {reference.label || reference.summary || "참고 이미지"}</p>
+              {reference.kind === "mascot" ? (
+                <p className="px-2.5 pb-2 text-[11px] text-muted-foreground">{REFERENCE_SUBJECTS.character}</p>
+              ) : (
+                <div className="px-1.5 pb-1.5 pt-0.5">
+                  <NativeSelect aria-label={`이미지 ${index + 1} 종류`} value={reference.subject} disabled={busy} className="h-8 text-xs" onChange={(event) => {
+                    const next = event.target.value;
+                    if (isReferenceSubject(next)) startTransition(async () => finish((await setReferenceSubject(automationId, reference.id, next)).error, "이미지 종류를 바꿨어요."));
+                  }}>
+                    {(Object.keys(REFERENCE_SUBJECTS) as ReferenceSubject[]).map((key) => <option key={key} value={key}>{REFERENCE_SUBJECTS[key]}</option>)}
+                  </NativeSelect>
+                </div>
+              )}
               
               <button
                 type="button"
@@ -133,8 +153,8 @@ export function ShortsReferencesCard({
 
       <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
         <div className="space-y-1.5">
-          <label htmlFor="reference-label" className="text-sm font-semibold">이미지 설명 <span className="font-normal text-muted-foreground">(선택 · 표정·동작을 적으면 알맞은 장면에 써요)</span></label>
-          <Input id="reference-label" value={label} maxLength={REFERENCE_LABEL_MAX_LENGTH} disabled={busy || full} onChange={(event) => setLabel(event.target.value)} placeholder="예: 깜짝 놀란 고양이 / 엄지를 세우고 웃는 곰돌이" />
+          <label htmlFor="reference-label" className="text-sm font-semibold">이미지 설명 <span className="font-normal text-muted-foreground">(선택 · 상품 이름이나 캐릭터의 표정·동작을 적으면 더 정확해요)</span></label>
+          <Input id="reference-label" value={label} maxLength={REFERENCE_LABEL_MAX_LENGTH} disabled={busy || full} onChange={(event) => setLabel(event.target.value)} placeholder="예: 시그니처 소금빵 / 엄지를 세우고 웃는 곰돌이 / 매장 입구" />
         </div>
         <div>
           <input ref={fileInput} id="reference-file" type="file" accept="image/*" multiple className="sr-only" disabled={busy || full} onChange={(event) => void upload(event.target.files)} />
@@ -147,7 +167,7 @@ export function ShortsReferencesCard({
 
       <div className="mt-6 space-y-4 border-t pt-5">
         <fieldset className="space-y-2" disabled={busy}>
-          <legend className="text-sm font-semibold">영상 분위기</legend>
+          <legend className="text-sm font-semibold">영상 방식</legend>
           <div className="grid gap-2 sm:grid-cols-2">
             {(Object.keys(SHORTS_STYLES) as ShortsStyle[]).map((key) => (
               <label key={key} className={cn("flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 hover:bg-muted/50", style === key && "border-primary bg-brand-soft/40")}>
@@ -159,7 +179,7 @@ export function ShortsReferencesCard({
         </fieldset>
         <div className="space-y-1.5">
           <label htmlFor="shorts-brief" className="text-sm font-semibold">어떤 영상을 원하세요? <span className="font-normal text-muted-foreground">(선택)</span></label>
-          <Textarea id="shorts-brief" rows={3} maxLength={SHORTS_BRIEF_MAX_LENGTH} disabled={busy} value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="예: 마스코트가 바쁜 사장님을 도와주는 이야기로 서비스를 소개해줘요 / 신메뉴 출시를 알리는 영상" />
+          <Textarea id="shorts-brief" rows={3} maxLength={SHORTS_BRIEF_MAX_LENGTH} disabled={busy} value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="예: 신메뉴 소금빵을 맛있어 보이게 홍보해줘요 / 마스코트가 바쁜 사장님을 도와주는 이야기로 서비스를 소개해줘요" />
           <p className="text-right text-xs text-muted-foreground">{brief.length}/{SHORTS_BRIEF_MAX_LENGTH}</p>
         </div>
         <Button type="button" variant="outline" disabled={busy} onClick={() => startTransition(async () => finish((await saveShortsCreativeSettings(automationId, { style, brief })).error, "스타일과 요청 사항을 저장했어요."))}>
@@ -168,7 +188,7 @@ export function ShortsReferencesCard({
       </div>
 
       <p className="mt-5 rounded-xl bg-muted px-4 py-3 text-xs leading-5 text-muted-foreground">
-        캐릭터는 AI 영상 서비스로 실제로 움직여요. 요금제별로 움직이는 영상 월 한도가 있고, 한도를 넘으면 이미지가 통통 튀는 기본 효과로 만들어요. 영상 하나에 몇 분 걸려요. 업로드한 이미지는 나만 볼 수 있게 저장되고 영상을 만들 때만 사용돼요. 저작권이나 초상권 문제가 없는 이미지만 올려주세요.
+        AI가 이미지를 보고 종류를 정해요(틀리면 위 이미지 아래 목록에서 바꿔주세요). 캐릭터와 상품·매장 사진은 AI 영상 서비스로 실제로 움직일 수 있고(요금제별 월 한도, 넘으면 사진을 천천히 움직이는 기본 효과), 사람 사진은 움직이지 않고 그대로만 써요. 상품 사진은 모양·글자를 바꾸지 않아요. 영상 하나에 몇 분 걸려요. 업로드한 이미지는 나만 볼 수 있게 저장되고 영상을 만들 때만 사용돼요. 저작권이나 초상권 문제가 없는 이미지만 올려주세요.
       </p>
     </section>
   );

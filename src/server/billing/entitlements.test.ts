@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { canExecuteAutomation, incrementUsage } = await import("./entitlements");
+const { canExecuteAutomation, canUseAnimatedShorts, incrementUsage } = await import("./entitlements");
 
 /**
  * Minimal per-table chainable Supabase stand-in. `from(table)` pops the next
@@ -197,5 +197,43 @@ describe("canExecuteAutomation — free plan enforcement lives on the server", (
       const result = await canExecuteAutomation(supabase as never, "user-1", "shorts");
       expect(result.allowed).toBe(false);
     }
+  });
+});
+
+describe("canUseAnimatedShorts", () => {
+  const supabase = (plan: "FREE" | "STARTER" | "PRO", used: number) =>
+    makeSupabase({
+      subscriptions: [{ data: { plan, status: "ACTIVE" } }],
+      automation_templates: [{ data: SHORTS_TEMPLATE_ID }],
+      automations: [{ data: [{ id: "auto-1" }] }],
+      automation_runs: [{ data: null, count: used }],
+    });
+
+  it("reports the plan's model quality: standard for Starter, premium for Pro", async () => {
+    expect(await canUseAnimatedShorts(supabase("STARTER", 0) as never, "user-1")).toEqual({ allowed: true, animationQuality: "standard" });
+    expect(await canUseAnimatedShorts(supabase("PRO", 0) as never, "user-1")).toEqual({ allowed: true, animationQuality: "premium" });
+  });
+
+  it("refuses once this month's animated videos reach the allowance, but still names the quality", async () => {
+    const result = await canUseAnimatedShorts(supabase("STARTER", 2) as never, "user-1");
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("한도(2건)");
+    expect(result.animationQuality).toBe("standard");
+    expect((await canUseAnimatedShorts(supabase("STARTER", 1) as never, "user-1")).allowed).toBe(true);
+  });
+
+  it("refuses the Free plan without querying usage", async () => {
+    const client = makeSupabase({ subscriptions: [{ data: { plan: "FREE", status: "ACTIVE" } }] });
+    const result = await canUseAnimatedShorts(client as never, "user-1");
+    expect(result.allowed).toBe(false);
+    expect(client.from).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts only finished runs that were really animated", async () => {
+    const client = supabase("PRO", 0);
+    await canUseAnimatedShorts(client as never, "user-1");
+    const runsBuilder = client.from.mock.results[3].value as { eq: ReturnType<typeof vi.fn> };
+    expect(runsBuilder.eq).toHaveBeenCalledWith("status", "SUCCESS");
+    expect(runsBuilder.eq).toHaveBeenCalledWith("output->>animationMode", "video");
   });
 });

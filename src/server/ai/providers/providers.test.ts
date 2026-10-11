@@ -124,26 +124,54 @@ describe("MockAIProvider", () => {
   });
 });
 
-describe("MockAIProvider character plan", () => {
-  it("plans a schema-valid skit whose image numbers stay inside the listed images", async () => {
-    const [{ MockAIProvider }, { shortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+describe("MockAIProvider reference-image plans", () => {
+  const listing = (tags: string[]) => tags.map((tag, index) => `${index + 1}. [${tag}] 이미지 ${index + 1}`).join("\n");
+
+  it("plans a character skit that only uses the listed character images", async () => {
+    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+    const { text } = await new MockAIProvider().generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "character".\n${listing(["product", "character", "character"])}\nRules:` });
+    const plan = makeShortsPlanSchema(["character"]).parse(JSON.parse(text));
+    expect(plan.format).toBe("character");
+    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
+  });
+
+  it("plans a promo from the non-character images and never animates a person", async () => {
+    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
+    const { text } = await new MockAIProvider().generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "promo".\n${listing(["character", "person", "product"])}\nRules:` });
+    const plan = makeShortsPlanSchema(["promo"]).parse(JSON.parse(text));
+    expect(plan.format).toBe("promo");
+    if (plan.format !== "promo") return;
+    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
+    expect(plan.scenes.filter((scene) => scene.imageIndex === 2).every((scene) => !scene.animate)).toBe(true);
+  });
+
+  it("follows the request when both formats are allowed", async () => {
+    const { MockAIProvider } = await import("./mock");
     const provider = new MockAIProvider();
-    for (const count of [1, 2, 8]) {
-      const images = Array.from({ length: count }, (_, index) => `${index + 1}. 캐릭터 이미지 ${index + 1}`).join("\n");
-      const { text } = await provider.generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\n${images}\nRules:` });
-      const plan = shortsPlanSchema.parse(JSON.parse(text));
-      expect(plan.scenes.every((scene) => scene.imageIndex >= 1 && scene.imageIndex <= count)).toBe(true);
-    }
+    const both = (request: string) => `AUTOBIZ_SHORTS_PLAN_V1\nThe owner's request (follow it): ${request}\n${listing(["character", "product"])}\nRules:`;
+    expect((JSON.parse((await provider.generateText({ prompt: both("마스코트가 나와서 소개해줘") })).text) as { format: string }).format).toBe("character");
+    expect((JSON.parse((await provider.generateText({ prompt: both("신메뉴를 홍보해줘") })).text) as { format: string }).format).toBe("promo");
+  });
+
+  it("recognises what an image shows from the owner's label", async () => {
+    const [{ MockAIProvider }, { referenceAnalysisSchema }] = await Promise.all([import("./mock"), import("@/server/shorts/reference-analysis")]);
+    const provider = new MockAIProvider();
+    const analyse = async (label: string) =>
+      referenceAnalysisSchema.parse(JSON.parse((await provider.generateText({ prompt: `AUTOBIZ_REFERENCE_ANALYSIS_V1\nThe owner's label for this image (may be empty): "${label}"\nDecide…` })).text)).subject;
+    expect(await analyse("귀여운 곰 마스코트")).toBe("character");
+    expect(await analyse("매장 내부")).toBe("place");
+    expect(await analyse("사장님 사진")).toBe("person");
+    expect(await analyse("시그니처 소금빵")).toBe("product");
+    expect(await analyse("")).toBe("product");
   });
 });
 
 describe("MockAIProvider (local dev / CI) produces schema-valid output for every pipeline", () => {
-  it("covers the website narrative, blog topic + body and passes the blog quality gate", async () => {
-    const [{ MockAIProvider }, { websiteDiagnosisNarrativeSchema }, { blogTopicSchema, blogBodySchema }, { assessBlogBody }] = await Promise.all([
+  it("covers the website narrative and the blog topic, outline and section stages", async () => {
+    const [{ MockAIProvider }, { websiteDiagnosisNarrativeSchema }, { blogTopicSchema, blogOutlineSchema, blogSectionOutputSchema }] = await Promise.all([
       import("./mock"),
       import("@/server/marketing/diagnosis"),
       import("../prompts/blog"),
-      import("../blog-quality"),
     ]);
     const provider = new MockAIProvider();
 
@@ -155,9 +183,10 @@ describe("MockAIProvider (local dev / CI) produces schema-valid output for every
     const planned = await provider.generateText({ prompt: 'Use exactly this planned topic without replacing it: "봄맞이 메뉴". Create one title.' });
     expect(JSON.parse(planned.text).topic).toBe("봄맞이 메뉴");
 
-    const body = await provider.generateText({ prompt: 'Write the full marketing blog post body for the topic "봄맞이 메뉴" with the title "t".' });
-    const parsed = blogBodySchema.parse(JSON.parse(body.text));
-    expect(assessBlogBody({ bodyHtml: parsed.bodyHtml, keywords: parsed.keywords })).toEqual([]);
+    const outline = await provider.generateText({ system: "상호: 우리 빵집", prompt: 'AUTOBIZ_BLOG_OUTLINE_V1\nPlan one marketing blog post about "봄맞이 메뉴" (working title: "t").' });
+    expect(blogOutlineSchema.parse(JSON.parse(outline.text)).sections.length).toBeGreaterThanOrEqual(5);
+    const section = await provider.generateText({ system: "상호: 우리 빵집", prompt: "AUTOBIZ_BLOG_SECTION_V1\nKIND=intro" });
+    expect(blogSectionOutputSchema.parse(JSON.parse(section.text)).blocks.length).toBeGreaterThan(1);
   });
 });
 
@@ -201,6 +230,49 @@ describe("AnthropicProvider", () => {
       messages: [{ role: "user", content: "질문" }],
     });
     expect(ANTHROPIC_DEFAULT_MODEL).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("uses AI_QUALITY_MODEL only for the quality tier and falls back to AI_MODEL", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.AI_MODEL = "claude-haiku-4-5-20251001";
+    process.env.AI_QUALITY_MODEL = "claude-sonnet-5-5";
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const { AnthropicProvider } = await import("./anthropic");
+    const provider = new AnthropicProvider();
+
+    await provider.generateText({ prompt: "fast" });
+    await provider.generateText({ prompt: "slow", tier: "quality" });
+    delete process.env.AI_QUALITY_MODEL;
+    vi.resetModules();
+    const { AnthropicProvider: Fresh } = await import("./anthropic");
+    await new Fresh().generateText({ prompt: "slow", tier: "quality" });
+
+    const models = fetchMock.mock.calls.map((call) => (JSON.parse(call[1].body as string) as { model: string }).model);
+    expect(models).toEqual(["claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-haiku-4-5-20251001"]);
+    delete process.env.AI_MODEL;
+  });
+
+  it("sends images as base64 blocks before the prompt text", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    delete process.env.AI_MODEL;
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ type: "text", text: "{}" }] }), { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const { AnthropicProvider } = await import("./anthropic");
+
+    await new AnthropicProvider().generateText({ prompt: "이 이미지를 설명해줘", images: [{ mediaType: "image/png", base64: "QUJD" }] });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { messages: Array<{ content: unknown }> };
+    expect(body.messages[0].content).toEqual([
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
+      { type: "text", text: "이 이미지를 설명해줘" },
+    ]);
   });
 
   it("uses AI_MODEL when set, and omits the system field when none is given", async () => {
@@ -255,5 +327,18 @@ describe("getAIProvider", () => {
     process.env.AI_PROVIDER = "anthropic";
     const { getAIProvider } = await import("../index");
     expect(getAIProvider().name).toBe("anthropic");
+  });
+});
+
+describe("providers without vision", () => {
+  it("refuse image input instead of silently dropping it", async () => {
+    process.env.OPENAI_API_KEY = "k";
+    process.env.GEMINI_API_KEY = "k";
+    vi.stubGlobal("fetch", vi.fn());
+    vi.resetModules();
+    const [{ OpenAIProvider }, { GeminiProvider }] = await Promise.all([import("./openai"), import("./gemini")]);
+    const images = [{ mediaType: "image/png" as const, base64: "QUJD" }];
+    await expect(new OpenAIProvider().generateText({ prompt: "x", images })).rejects.toMatchObject({ code: "UNSUPPORTED_INPUT" });
+    await expect(new GeminiProvider().generateText({ prompt: "x", images })).rejects.toMatchObject({ code: "UNSUPPORTED_INPUT" });
   });
 });

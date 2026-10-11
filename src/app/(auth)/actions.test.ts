@@ -11,8 +11,10 @@ const { createClientMock, redirectMock, cookieStore } = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({ redirect: redirectMock }));
 vi.mock("next/headers", () => ({ cookies: async () => cookieStore }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
+const { deleteUserAccountMock } = vi.hoisted(() => ({ deleteUserAccountMock: vi.fn() }));
+vi.mock("@/server/account/delete-account", () => ({ deleteUserAccount: deleteUserAccountMock }));
 
-const { signUp, requestPasswordReset, completePasswordReset, changePassword } = await import("./actions");
+const { signUp, requestPasswordReset, completePasswordReset, changePassword, deleteAccount } = await import("./actions");
 
 function formData(fields: Record<string, string>) {
   const data = new FormData();
@@ -27,6 +29,7 @@ function makeAuth(overrides: Record<string, unknown> = {}) {
     signInWithPassword: vi.fn().mockResolvedValue({ error: null }),
     updateUser: vi.fn().mockResolvedValue({ error: null }),
     resetPasswordForEmail: vi.fn().mockResolvedValue({ error: null }),
+    signOut: vi.fn().mockResolvedValue({ error: null }),
     ...overrides,
   };
   createClientMock.mockResolvedValue({ auth });
@@ -129,5 +132,40 @@ describe("changePassword", () => {
     makeAuth();
     const result = await changePassword({}, formData({ ...fields, password: "old-password", confirmPassword: "old-password" }));
     expect(result.error).toContain("다른 비밀번호");
+  });
+});
+
+describe("deleteAccount", () => {
+  const fields = { currentPassword: "password123", confirmation: "탈퇴합니다" };
+
+  it("requires the exact confirmation phrase before touching anything", async () => {
+    const auth = makeAuth();
+    const result = await deleteAccount({}, formData({ ...fields, confirmation: "탈퇴" }));
+    expect(result.error).toContain("탈퇴합니다");
+    expect(auth.signInWithPassword).not.toHaveBeenCalled();
+    expect(deleteUserAccountMock).not.toHaveBeenCalled();
+  });
+
+  it("re-checks the current password, so a session cookie alone cannot delete the account", async () => {
+    makeAuth({ signInWithPassword: vi.fn().mockResolvedValue({ error: { code: "invalid_credentials" } }) });
+    expect(await deleteAccount({}, formData(fields))).toEqual({ error: "현재 비밀번호가 올바르지 않아요." });
+    expect(deleteUserAccountMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes the signed-in user only, signs out, and lands on the login page", async () => {
+    const auth = makeAuth();
+    deleteUserAccountMock.mockResolvedValue(undefined);
+    await expect(deleteAccount({}, formData(fields))).rejects.toThrow("REDIRECT:/login?accountDeleted=1");
+    expect(auth.signInWithPassword).toHaveBeenCalledWith({ email: "owner@example.com", password: "password123" });
+    expect(deleteUserAccountMock).toHaveBeenCalledWith("user-1");
+    expect(auth.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+
+  it("keeps the session and shows a message when deletion fails", async () => {
+    const auth = makeAuth();
+    deleteUserAccountMock.mockRejectedValue(new Error("boom"));
+    const result = await deleteAccount({}, formData(fields));
+    expect(result.error).toContain("계정을 삭제하지 못했어요");
+    expect(auth.signOut).not.toHaveBeenCalled();
   });
 });

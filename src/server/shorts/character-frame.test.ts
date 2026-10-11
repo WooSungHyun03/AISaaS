@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { FRAME_HEIGHT, FRAME_WIDTH, prepareCharacterFrame } from "./character-frame";
+import { FRAME_HEIGHT, FRAME_WIDTH, PHOTO_FRAME_HEIGHT, PHOTO_FRAME_WIDTH, prepareCharacterFrame, preparePhotoFrame } from "./character-frame";
 
 const mascot = () => readFile(path.join(process.cwd(), "public/shorts-mascot/wave.png"));
 
@@ -42,5 +42,34 @@ describe("prepareCharacterFrame", () => {
 
   it("rejects bytes that are not an image", async () => {
     await expect(prepareCharacterFrame(new TextEncoder().encode("not an image"), 0)).rejects.toThrow();
+  });
+});
+
+describe("preparePhotoFrame", () => {
+  const solid = (width: number, height: number, color: { r: number; g: number; b: number }) =>
+    sharp({ create: { width, height, channels: 3, background: color } }).png().toBuffer();
+
+  it("always returns an opaque 1080x1920 JPEG", async () => {
+    for (const [w, h] of [[900, 1500], [1600, 900], [800, 800], [300, 1800]] as const) {
+      const meta = await sharp(await preparePhotoFrame(await solid(w, h, { r: 200, g: 120, b: 40 }))).metadata();
+      expect([meta.width, meta.height, meta.format, meta.hasAlpha]).toEqual([PHOTO_FRAME_WIDTH, PHOTO_FRAME_HEIGHT, "jpeg", false]);
+    }
+  });
+
+  it("shows a landscape photo whole over a blurred copy instead of cropping it", async () => {
+    // left half red, right half blue: a crop to 9:16 would lose one colour entirely
+    const left = await sharp({ create: { width: 800, height: 900, channels: 3, background: { r: 220, g: 0, b: 0 } } }).png().toBuffer();
+    const right = await sharp({ create: { width: 800, height: 900, channels: 3, background: { r: 0, g: 0, b: 220 } } }).png().toBuffer();
+    const landscape = await sharp({ create: { width: 1600, height: 900, channels: 3, background: "#000000" } }).composite([{ input: left, left: 0, top: 0 }, { input: right, left: 800, top: 0 }]).png().toBuffer();
+    const frame = await preparePhotoFrame(landscape);
+    const pixel = async (x: number, y: number) => [...(await sharp(await sharp(frame).extract({ left: x, top: y, width: 1, height: 1 }).toBuffer()).raw().toBuffer())];
+    const [r1, , b1] = await pixel(100, 960);
+    const [r2, , b2] = await pixel(980, 960);
+    expect(r1).toBeGreaterThan(150); expect(b1).toBeLessThan(60); // left side still red
+    expect(b2).toBeGreaterThan(150); expect(r2).toBeLessThan(60); // right side still blue
+  });
+
+  it("rejects bytes that are not an image", async () => {
+    await expect(preparePhotoFrame(new TextEncoder().encode("nope"))).rejects.toThrow();
   });
 });

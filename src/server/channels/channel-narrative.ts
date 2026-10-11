@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 import { generateText } from "@/server/ai/generate";
 import { stripUnverifiedNumbers } from "@/server/shared/ai-number-guard";
 import { PLATFORM_LABEL } from "./platform";
@@ -88,4 +89,38 @@ export async function buildChannelNarrative(diagnosis: ChannelDiagnosis, busines
   }
 
   return { narrative: verified ?? ruleBased, aiUsed: verified !== null };
+}
+
+/** Carries a fallback result out of the cache scope so it is returned but never stored. */
+class UncachedNarrative extends Error {
+  constructor(readonly result: ChannelNarrativeResult) {
+    super("channel narrative fell back to the rule-based summary");
+  }
+}
+
+const NARRATIVE_CACHE_SECONDS = 24 * 60 * 60;
+
+/** The cache key is every argument (the diagnosis — including its collectedAt — plus the business name/industry), so a new diagnosis gets a new narrative and nothing is shared between businesses. */
+async function cacheableChannelNarrative(diagnosis: ChannelDiagnosis, business: Pick<Business, "name" | "industry">): Promise<ChannelNarrativeResult> {
+  const result = await buildChannelNarrative(diagnosis, business);
+  if (!result.aiUsed) throw new UncachedNarrative(result);
+  return result;
+}
+
+/**
+ * What the /diagnosis page renders: the same narrative as
+ * buildChannelNarrative, but generated once per diagnosis instead of on
+ * every page load (each load used to call the AI once per channel). A
+ * rule-based fallback (AI failed or fully stripped) is not cached, so the
+ * next load tries the AI again.
+ */
+export async function getChannelNarrative(diagnosis: ChannelDiagnosis, business: Pick<Business, "name" | "industry">): Promise<ChannelNarrativeResult> {
+  try {
+    // Built per call (not at module load) so importing the channels barrel never touches Next's cache.
+    const cached = unstable_cache(cacheableChannelNarrative, ["channel-narrative-v1"], { revalidate: NARRATIVE_CACHE_SECONDS });
+    return await cached(diagnosis, { name: business.name, industry: business.industry });
+  } catch (error) {
+    if (error instanceof UncachedNarrative) return error.result;
+    throw error;
+  }
 }
