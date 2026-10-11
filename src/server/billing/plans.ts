@@ -17,7 +17,7 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     features: [
       "마케팅 진단 · 마케팅 캘린더",
       "사업체 프로필 등록",
-      "가입 시 블로그·숏폼 체험 크레딧",
+      "가입 시 블로그·숏폼 체험 이용권",
     ],
   },
   STARTER: {
@@ -28,7 +28,7 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     animationQuality: "standard",
     allowedTemplateSlugs: null,
     features: [
-      "구매한 블로그·숏폼 크레딧만큼 제작",
+      "구매한 블로그·숏폼 이용권만큼 제작",
       "움직이는 영상(캐릭터·상품) 지원",
       "정해둔 때마다 자동으로 만들기",
       "제작 기록 보기",
@@ -42,7 +42,7 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     animationQuality: "premium",
     allowedTemplateSlugs: null,
     features: [
-      "구매한 블로그·숏폼 크레딧만큼 제작",
+      "구매한 블로그·숏폼 이용권만큼 제작",
       "움직이는 영상(캐릭터·상품) · 고화질 모델",
       "정해둔 때마다 자동으로 만들기",
       "우선 처리",

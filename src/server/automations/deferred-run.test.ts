@@ -7,7 +7,7 @@ vi.mock("@/server/billing/entitlements", () => ({
   canExecuteAutomation: vi.fn(),
   incrementUsage: vi.fn(),
   getAutomationCreditKind: (slug: string) => slug === "blog-marketing" ? "BLOG" : slug === "shorts" ? "SHORTS" : null,
-  CREDIT_EXHAUSTED_MESSAGE: "크레딧이 부족해요. 구매하러 가기",
+  CREDIT_EXHAUSTED_MESSAGE: "이용권이 없거나 모두 만료됐어요. 이용권을 구매하면 바로 만들 수 있어요.",
 }));
 vi.mock("@/server/billing/credits", () => ({
   ensureTrialCredits: vi.fn(),

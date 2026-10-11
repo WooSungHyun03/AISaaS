@@ -86,7 +86,7 @@ export function describeAutomationRunError(message: string | null | undefined): 
   // see runner.ts#recordRefusedRun) are already a complete, secret-free
   // Korean sentence meant for direct display; passing them through beats
   // flattening them into the generic fallback below.
-  if (/일시정지 상태|오류 상태|요금제에서는|요금제의 이번 달|요금제는 |크레딧이 부족해요/.test(message)) {
+  if (/일시정지 상태|오류 상태|요금제에서는|요금제의 이번 달|요금제는 |이용권이 없거나/.test(message)) {
     return message;
   }
 

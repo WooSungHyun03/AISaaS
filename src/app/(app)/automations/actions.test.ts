@@ -127,11 +127,11 @@ describe("triggerRunNow without a calendar item (plain re-generate — what RunN
   it("still enforces the billing limit before calling the runner", async () => {
     const { client } = makeClient();
     createClientMock.mockResolvedValue(client);
-    canExecuteAutomationMock.mockResolvedValue({ allowed: false, reason: "크레딧이 부족해요. 구매하러 가기" });
+    canExecuteAutomationMock.mockResolvedValue({ allowed: false, reason: "이용권이 없거나 모두 만료됐어요. 이용권을 구매하면 바로 만들 수 있어요." });
 
     const result = await triggerRunNow("automation-1");
 
-    expect(result).toEqual({ error: "크레딧이 부족해요. 구매하러 가기" });
+    expect(result).toEqual({ error: "이용권이 없거나 모두 만료됐어요. 이용권을 구매하면 바로 만들 수 있어요." });
     expect(runAutomationNowMock).not.toHaveBeenCalled();
   });
 

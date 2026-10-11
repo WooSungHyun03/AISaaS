@@ -63,7 +63,7 @@ describe("describeAutomationRunError — video, YouTube and plan limits", () => 
   });
 
   it("passes the credit purchase message through unchanged", () => {
-    const message = "크레딧이 부족해요. 구매하러 가기";
+    const message = "이용권이 없거나 모두 만료됐어요. 이용권을 구매하면 바로 만들 수 있어요.";
     expect(describeAutomationRunError(message)).toBe(message);
   });
 });

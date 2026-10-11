@@ -9,7 +9,7 @@ import type { CreditKind } from "./products";
 
 type DbClient = SupabaseClient<Database>;
 
-export const CREDIT_EXHAUSTED_MESSAGE = "크레딧이 부족해요. 구매하러 가기";
+export const CREDIT_EXHAUSTED_MESSAGE = "이용권이 없거나 모두 만료됐어요. 이용권을 구매하면 바로 만들 수 있어요.";
 
 const CREDIT_KIND_BY_TEMPLATE: Readonly<Record<string, CreditKind | undefined>> = {
   "blog-marketing": "BLOG",
