@@ -120,3 +120,73 @@ export async function triggerCalendarItemNow(calendarItemId: string): Promise<Ru
 
   return triggerRunNow(resolved.automationId, item.id);
 }
+
+export interface CalendarItemActionState {
+  error?: string;
+}
+
+/**
+ * "건너뛰기" (ticket 1-9) — marks a still-PLANNED item SKIPPED without
+ * generating anything. Reversible via unskipCalendarItem below; no new
+ * migration needed since calendar_items_status_check (0030) already
+ * allows 'SKIPPED', and the existing calendar_items_update_own RLS policy
+ * (verified directly against the live DB: a non-owner's UPDATE affects 0
+ * rows) already scopes this to the caller's own businesses.
+ */
+export async function skipCalendarItem(calendarItemId: string): Promise<CalendarItemActionState> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+
+  const { data: updated, error } = await supabase
+    .from("calendar_items")
+    .update({ status: "SKIPPED" })
+    .eq("id", calendarItemId)
+    .eq("status", "PLANNED")
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: "건너뛰기 처리를 하지 못했습니다. 잠시 후 다시 시도해주세요." };
+  if (!updated) return { error: "이미 처리된 캘린더 항목입니다." };
+  return {};
+}
+
+/** Undoes skipCalendarItem — back to PLANNED, so a skipped item can be restored to the plan. */
+export async function unskipCalendarItem(calendarItemId: string): Promise<CalendarItemActionState> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+
+  const { data: updated, error } = await supabase
+    .from("calendar_items")
+    .update({ status: "PLANNED" })
+    .eq("id", calendarItemId)
+    .eq("status", "SKIPPED")
+    .select("id")
+    .maybeSingle();
+  if (error) return { error: "되돌리기를 하지 못했습니다. 잠시 후 다시 시도해주세요." };
+  if (!updated) return { error: "건너뛴 항목이 아니에요." };
+  return {};
+}
+
+/**
+ * "삭제" (ticket 1-9) — permanently removes a calendar item. The caller's
+ * UI confirms with the user first (ConfirmationDialog); this action itself
+ * performs no confirmation of its own. Allowed regardless of status: a
+ * calendar_items row only schedules a plan, it's never the source of
+ * truth for already-generated content (content_history/automation_runs
+ * rows are untouched — calendar_items.content_history_id references them,
+ * not the other way around).
+ */
+export async function deleteCalendarItem(calendarItemId: string): Promise<CalendarItemActionState> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+
+  const { error, count } = await supabase
+    .from("calendar_items")
+    .delete({ count: "exact" })
+    .eq("id", calendarItemId);
+  if (error) return { error: "삭제하지 못했습니다. 잠시 후 다시 시도해주세요." };
+  if (!count) return { error: "캘린더 항목을 찾을 수 없습니다." };
+  return {};
+}

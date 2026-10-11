@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, CheckCircle2, Loader2, Play, WandSparkles } from "lucide-react";
+import { CalendarClock, CheckCircle2, Loader2, Play, RotateCcw, SkipForward, Trash2, WandSparkles } from "lucide-react";
 import { toast } from "sonner";
-import { triggerCalendarItemNow } from "@/app/(app)/calendar/actions";
+import { deleteCalendarItem, skipCalendarItem, triggerCalendarItemNow, unskipCalendarItem } from "@/app/(app)/calendar/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import {
   Dialog,
   DialogClose,
@@ -67,25 +68,53 @@ export function CalendarItemDialog({
   const [isPending, startTransition] = useTransition();
   const reason = disabledReason(item);
 
-  function handleGenerate() {
+  /** Shared by generate/skip/unskip below — same success/error/refresh shape, only the call and the success toast differ. */
+  function runAction(action: () => Promise<{ error?: string }>, successMessage: string, failureMessage: string) {
     setError("");
     startTransition(async () => {
       try {
-        const result = await triggerCalendarItemNow(item.id);
+        const result = await action();
         if (result.error) {
           setError(result.error);
           toast.error(result.error);
           return;
         }
-        toast.success(item.platform === "youtube_shorts" ? "숏폼 영상을 만들고 캘린더에 연결했어요. 숏폼 스튜디오에서 확인하세요." : "콘텐츠를 만들고 캘린더에 연결했어요.");
+        toast.success(successMessage);
         setOpen(false);
         router.refresh();
       } catch {
-        const message = "콘텐츠를 만들지 못했어요. 잠시 후 다시 시도해주세요.";
-        setError(message);
-        toast.error(message);
+        setError(failureMessage);
+        toast.error(failureMessage);
       }
     });
+  }
+
+  function handleGenerate() {
+    runAction(
+      () => triggerCalendarItemNow(item.id),
+      item.platform === "youtube_shorts" ? "숏폼 영상을 만들고 캘린더에 연결했어요. 숏폼 스튜디오에서 확인하세요." : "콘텐츠를 만들고 캘린더에 연결했어요.",
+      "콘텐츠를 만들지 못했어요. 잠시 후 다시 시도해주세요.",
+    );
+  }
+
+  function handleSkip() {
+    runAction(() => skipCalendarItem(item.id), "이 계획을 건너뛰었어요. 되돌릴 수 있어요.", "건너뛰기를 하지 못했어요. 잠시 후 다시 시도해주세요.");
+  }
+
+  function handleUnskip() {
+    runAction(() => unskipCalendarItem(item.id), "다시 계획 상태로 되돌렸어요.", "되돌리기를 하지 못했어요. 잠시 후 다시 시도해주세요.");
+  }
+
+  /** ConfirmationDialog awaits this and keeps its own dialog open on throw — toast + rethrow matches DeleteBusinessButton's pattern. */
+  async function handleDelete() {
+    const result = await deleteCalendarItem(item.id);
+    if (result.error) {
+      toast.error(result.error);
+      throw new Error(result.error);
+    }
+    toast.success("캘린더 항목을 삭제했어요.");
+    setOpen(false);
+    router.refresh();
   }
 
   return (
@@ -133,13 +162,42 @@ export function CalendarItemDialog({
           {item.status === "GENERATED" ? (
             <p className="flex items-start gap-2 rounded-lg bg-success-soft p-3 text-sm leading-6 text-success"><CheckCircle2 className="mt-1 size-4 shrink-0" aria-hidden="true" />만든 결과가 제작 기록에 저장돼 있어요.</p>
           ) : null}
+          {item.status === "SKIPPED" ? (
+            <p className="flex items-start gap-2 rounded-lg bg-muted p-3 text-sm leading-6 text-muted-foreground"><SkipForward className="mt-1 size-4 shrink-0" aria-hidden="true" />이 계획을 건너뛰었어요. 되돌리기를 누르면 다시 계획으로 돌아가요.</p>
+          ) : null}
           {error ? <p role="alert" className="text-sm font-medium text-destructive">{error}</p> : null}
         </div>
 
         <DialogFooter>
+          <ConfirmationDialog
+            trigger={
+              <Button type="button" variant="ghost" className="text-destructive hover:text-destructive sm:mr-auto" disabled={isPending}>
+                <Trash2 aria-hidden="true" /> 삭제
+              </Button>
+            }
+            title="이 계획을 삭제할까요?"
+            description="삭제하면 되돌릴 수 없어요. 이미 만든 콘텐츠(제작 기록)는 그대로 남아있어요."
+            confirmLabel="삭제"
+            pendingLabel="삭제하는 중…"
+            destructive
+            disabled={isPending}
+            onConfirm={handleDelete}
+          />
           <DialogClose asChild><Button type="button" variant="outline" disabled={isPending}>닫기</Button></DialogClose>
           {item.status === "GENERATED" && item.automation_id ? (
             <Button asChild variant="outline"><Link href={`/automations/${item.automation_id}`}><WandSparkles aria-hidden="true" /> 만든 결과 보기</Link></Button>
+          ) : null}
+          {item.status === "SKIPPED" ? (
+            <Button type="button" variant="outline" onClick={handleUnskip} disabled={isPending}>
+              {isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <RotateCcw aria-hidden="true" />}
+              되돌리기
+            </Button>
+          ) : null}
+          {item.status === "PLANNED" ? (
+            <Button type="button" variant="outline" onClick={handleSkip} disabled={isPending}>
+              {isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <SkipForward aria-hidden="true" />}
+              건너뛰기
+            </Button>
           ) : null}
           {item.status === "PLANNED" ? (
             <Button type="button" onClick={handleGenerate} disabled={Boolean(reason) || isPending}>

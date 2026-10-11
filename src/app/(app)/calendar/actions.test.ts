@@ -10,7 +10,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
 vi.mock("@/app/(app)/automations/actions", () => ({ triggerRunNow: triggerRunNowMock }));
 vi.mock("@/server/billing/entitlements", () => ({ canCreateAutomation: canCreateAutomationMock }));
 
-const { triggerCalendarItemNow } = await import("./actions");
+const { triggerCalendarItemNow, skipCalendarItem, unskipCalendarItem, deleteCalendarItem } = await import("./actions");
 
 const inserted: unknown[] = [];
 
@@ -132,5 +132,144 @@ describe("triggerCalendarItemNow", () => {
     expect(result.error).toContain("1개까지");
     expect(inserted).toHaveLength(0);
     expect(triggerRunNowMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Ticket 1-9: skip/unskip/delete rely entirely on calendar_items'
+ * existing update/delete RLS policies (0030) — verified directly against
+ * the live local DB (a non-owner's UPDATE/DELETE both affect 0 rows,
+ * the owner's succeed), so these actions add no new migration and no
+ * extra ownership check beyond what the mocked Supabase client already
+ * models here (RLS itself can't be exercised by a unit test, only by a
+ * real Postgres session).
+ */
+function makeMutationClient({
+  userId = "user-1",
+  updateResult,
+  deleteResult,
+}: {
+  userId?: string | null;
+  updateResult?: { data: unknown; error: unknown };
+  deleteResult?: { error: unknown; count: number | null };
+}) {
+  const updateBuilder = {
+    eq: vi.fn(() => updateBuilder),
+    select: vi.fn(() => updateBuilder),
+    maybeSingle: vi.fn().mockResolvedValue(updateResult),
+  };
+  const deleteBuilder: Record<string, unknown> = { eq: vi.fn(() => deleteBuilder) };
+  deleteBuilder.then = (resolve: (value: unknown) => unknown) => resolve(deleteResult);
+  const update = vi.fn(() => updateBuilder);
+  const deleteFn = vi.fn(() => deleteBuilder);
+  const from = vi.fn(() => ({ update, delete: deleteFn }));
+  return {
+    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: userId ? { id: userId } : null } }) },
+    from,
+    update,
+    deleteFn,
+  };
+}
+
+const ITEM_ID = "33333333-3333-4333-8333-333333333333";
+
+describe("skipCalendarItem", () => {
+  it("marks a PLANNED item SKIPPED", async () => {
+    const client = makeMutationClient({ updateResult: { data: { id: ITEM_ID }, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await skipCalendarItem(ITEM_ID);
+
+    expect(result).toEqual({});
+    expect(client.update).toHaveBeenCalledWith({ status: "SKIPPED" });
+  });
+
+  it("requires login", async () => {
+    const client = makeMutationClient({ userId: null, updateResult: { data: null, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await skipCalendarItem(ITEM_ID);
+
+    expect(result.error).toContain("로그인");
+    expect(client.update).not.toHaveBeenCalled();
+  });
+
+  it("errors when the item is no longer PLANNED (already generated/skipped, or not owned)", async () => {
+    const client = makeMutationClient({ updateResult: { data: null, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await skipCalendarItem(ITEM_ID);
+
+    expect(result.error).toContain("이미 처리된");
+  });
+
+  it("surfaces a database error", async () => {
+    const client = makeMutationClient({ updateResult: { data: null, error: new Error("boom") } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await skipCalendarItem(ITEM_ID);
+
+    expect(result.error).toBeTruthy();
+  });
+});
+
+describe("unskipCalendarItem", () => {
+  it("restores a SKIPPED item back to PLANNED", async () => {
+    const client = makeMutationClient({ updateResult: { data: { id: ITEM_ID }, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await unskipCalendarItem(ITEM_ID);
+
+    expect(result).toEqual({});
+    expect(client.update).toHaveBeenCalledWith({ status: "PLANNED" });
+  });
+
+  it("errors when the item isn't currently SKIPPED", async () => {
+    const client = makeMutationClient({ updateResult: { data: null, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await unskipCalendarItem(ITEM_ID);
+
+    expect(result.error).toContain("건너뛴 항목이 아니");
+  });
+});
+
+describe("deleteCalendarItem", () => {
+  it("deletes the item", async () => {
+    const client = makeMutationClient({ deleteResult: { error: null, count: 1 } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await deleteCalendarItem(ITEM_ID);
+
+    expect(result).toEqual({});
+    expect(client.deleteFn).toHaveBeenCalledWith({ count: "exact" });
+  });
+
+  it("errors when nothing was deleted (not found, or not owned per RLS)", async () => {
+    const client = makeMutationClient({ deleteResult: { error: null, count: 0 } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await deleteCalendarItem(ITEM_ID);
+
+    expect(result.error).toContain("찾을 수 없습니다");
+  });
+
+  it("requires login", async () => {
+    const client = makeMutationClient({ userId: null, deleteResult: { error: null, count: 0 } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await deleteCalendarItem(ITEM_ID);
+
+    expect(result.error).toContain("로그인");
+    expect(client.deleteFn).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a database error", async () => {
+    const client = makeMutationClient({ deleteResult: { error: new Error("boom"), count: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await deleteCalendarItem(ITEM_ID);
+
+    expect(result.error).toBeTruthy();
   });
 });
