@@ -92,7 +92,23 @@ async function resolveAutomationId(
   return { automationId: created.id };
 }
 
-export async function triggerCalendarItemNow(calendarItemId: string): Promise<RunNowState> {
+/**
+ * Ticket 1-9: adds `automationId` to whatever `triggerRunNow` (not
+ * modified) returns. A deferred run (`pending: true` — the blog handler's
+ * outline-then-sections-then-fixes pipeline always defers after its first
+ * step) only keeps moving via a cron tick or via <RunProgress> polling on
+ * `/automations/{automationId}` while that page is open — and nothing
+ * about triggering from the calendar dialog ever sent the user there.
+ * `automationId` is what CalendarItemDialog needs to link to that page;
+ * `triggerRunNow` itself has no reason to know it was called from a
+ * calendar item, so this wraps its result here instead of changing its
+ * return shape.
+ */
+export interface TriggerCalendarItemResult extends RunNowState {
+  automationId?: string;
+}
+
+export async function triggerCalendarItemNow(calendarItemId: string): Promise<TriggerCalendarItemResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "로그인이 필요합니다." };
@@ -118,7 +134,8 @@ export async function triggerCalendarItemNow(calendarItemId: string): Promise<Ru
   const resolved = await resolveAutomationId(supabase, user.id, item, templateSlug);
   if ("error" in resolved) return { error: resolved.error };
 
-  return triggerRunNow(resolved.automationId, item.id);
+  const result = await triggerRunNow(resolved.automationId, item.id);
+  return { ...result, automationId: resolved.automationId };
 }
 
 export interface CalendarItemActionState {

@@ -78,6 +78,24 @@ describe("triggerCalendarItemNow", () => {
     expect(triggerRunNowMock).toHaveBeenCalledWith("automation-1", "11111111-1111-4111-8111-111111111111");
   });
 
+  it("includes the resolved automationId alongside a pending (deferred) result, so the caller can link to the run's own page (ticket 1-9)", async () => {
+    createClientMock.mockResolvedValue(makeClient());
+    triggerRunNowMock.mockResolvedValue({ success: true, runId: "run-1", pending: true, progress: "글 구성을 마쳤어요. 쓰는 중이에요 (0/3)" });
+
+    const result = await triggerCalendarItemNow("11111111-1111-4111-8111-111111111111");
+
+    expect(result).toMatchObject({ success: true, pending: true, automationId: "automation-1" });
+  });
+
+  it("includes automationId on an immediately-finished result too", async () => {
+    createClientMock.mockResolvedValue(makeClient());
+    triggerRunNowMock.mockResolvedValue({ success: true, runId: "run-1", contentHistoryId: "content-1" });
+
+    const result = await triggerCalendarItemNow("11111111-1111-4111-8111-111111111111");
+
+    expect(result).toMatchObject({ automationId: "automation-1" });
+  });
+
   it("does not run Instagram items through an unrelated handler", async () => {
     createClientMock.mockResolvedValue(makeClient({ platform: "instagram_reels" }));
 

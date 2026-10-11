@@ -68,7 +68,7 @@ export function CalendarItemDialog({
   const [isPending, startTransition] = useTransition();
   const reason = disabledReason(item);
 
-  /** Shared by generate/skip/unskip below — same success/error/refresh shape, only the call and the success toast differ. */
+  /** Shared by skip/unskip below — same success/error/refresh shape, only the call and the success toast differ. handleGenerate below has its own body since its success handling branches on `pending`. */
   function runAction(action: () => Promise<{ error?: string }>, successMessage: string, failureMessage: string) {
     setError("");
     startTransition(async () => {
@@ -89,12 +89,45 @@ export function CalendarItemDialog({
     });
   }
 
+  /**
+   * ticket 1-9: a blog generation always defers after its first step (see
+   * triggerCalendarItemNow's doc comment) — `result.pending` is how the
+   * caller finds out. Closing the dialog with the old unconditional
+   * "만들었어요" toast was misleading for that case: nothing was linked
+   * yet. The toast's action button sends the user to the automation's own
+   * result page, where <RunProgress> (already built for exactly this) polls
+   * until the run actually finishes — same mechanism the cron tick uses
+   * when nobody's watching, just started immediately instead of waiting
+   * for the next tick.
+   */
   function handleGenerate() {
-    runAction(
-      () => triggerCalendarItemNow(item.id),
-      item.platform === "youtube_shorts" ? "숏폼 영상을 만들고 캘린더에 연결했어요. 숏폼 스튜디오에서 확인하세요." : "콘텐츠를 만들고 캘린더에 연결했어요.",
-      "콘텐츠를 만들지 못했어요. 잠시 후 다시 시도해주세요.",
-    );
+    setError("");
+    startTransition(async () => {
+      try {
+        const result = await triggerCalendarItemNow(item.id);
+        if (result.error) {
+          setError(result.error);
+          toast.error(result.error);
+          return;
+        }
+        if (result.pending) {
+          toast.success(
+            item.platform === "youtube_shorts"
+              ? "숏폼 영상을 만들기 시작했어요. 완료되면 캘린더에 자동으로 연결돼요."
+              : "글을 쓰기 시작했어요. 몇 단계로 나눠서 진행되고, 완료되면 캘린더에 자동으로 연결돼요.",
+            result.automationId ? { action: { label: "진행 상황 보기", onClick: () => router.push(`/automations/${result.automationId}`) } } : undefined,
+          );
+        } else {
+          toast.success(item.platform === "youtube_shorts" ? "숏폼 영상을 만들고 캘린더에 연결했어요. 숏폼 스튜디오에서 확인하세요." : "콘텐츠를 만들고 캘린더에 연결했어요.");
+        }
+        setOpen(false);
+        router.refresh();
+      } catch {
+        const message = "콘텐츠를 만들지 못했어요. 잠시 후 다시 시도해주세요.";
+        setError(message);
+        toast.error(message);
+      }
+    });
   }
 
   function handleSkip() {
