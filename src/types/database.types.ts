@@ -827,6 +827,10 @@ export interface Database {
         };
         Returns: string;
       };
+      complete_billing_order: {
+        Args: { p_order_id: string; p_payment_key: string };
+        Returns: string;
+      };
       reserve_credit: {
         Args: { p_user_id: string; p_kind: CreditKind; p_amount?: number; p_reference_id?: string | null };
         Returns: string;

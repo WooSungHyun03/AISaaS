@@ -1,4 +1,3 @@
-import { PLAN_LABEL, planFeatures } from "@/components/billing/plan-copy";
 import Link from "next/link";
 import { ArrowRight, Check, TrendingUp, Video } from "lucide-react";
 import { Mascot } from "@/components/brand/mascot";
@@ -6,7 +5,9 @@ import { BlogDraftPreview, CalendarPreview, DiagnosisPreview } from "@/component
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ALL_PLANS } from "@/server/billing/plans";
+import { getProductConfig } from "@/server/billing/products";
+
+const FEATURED_PRODUCTS = [getProductConfig("BLOG_10"), getProductConfig("SHORTS_10")];
 
 const STEPS = [
   { title: "주소를 넣어요", description: "홈페이지나 인스타그램 주소를 입력하세요. 주소가 없으면 가게 정보를 직접 적어도 돼요." },
@@ -185,40 +186,31 @@ export default function LandingPage() {
       <section className="border-y border-border bg-card" aria-labelledby="pricing-title">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
           <div className="max-w-xl">
-            <h2 id="pricing-title" className="text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">무료로 먼저 써보고, 필요할 때 넓히세요</h2>
-            <p className="mt-3 text-base leading-7 text-muted-foreground">플랜마다 한 달에 만들 수 있는 콘텐츠 수가 달라요. 언제든 바꿀 수 있어요.</p>
+            <h2 id="pricing-title" className="text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">무료로 진단하고, 필요한 제작 횟수만 구매하세요</h2>
+            <p className="mt-3 text-base leading-7 text-muted-foreground">월 구독 없이 블로그와 숏폼을 각각 필요한 만큼 추가할 수 있어요.</p>
           </div>
           <div className="mt-10 grid gap-5 lg:grid-cols-3">
-            {ALL_PLANS.map((plan) => {
-              const recommended = plan.id === "STARTER";
-              return (
-                <article
-                  key={plan.id}
-                  className={`relative flex flex-col rounded-2xl border p-7 ${recommended ? "border-primary bg-brand-soft/50 shadow-[0_0_0_1px_var(--primary)]" : "border-border bg-card"}`}
-                >
-                  {recommended ? <Badge className="absolute right-6 top-6">가장 많이 선택</Badge> : null}
-                  <h3 className="text-lg font-bold">{PLAN_LABEL[plan.id]}</h3>
-                  <p className="tabular mt-4 text-4xl font-extrabold tracking-[-0.04em]">
-                    {plan.priceMonthlyKrw === 0 ? "무료" : `${plan.priceMonthlyKrw.toLocaleString()}원`}
-                    {plan.priceMonthlyKrw === 0 ? null : <span className="ml-1 text-sm font-medium text-muted-foreground">/월</span>}
-                  </p>
-                  <ul className="mt-6 flex-1 space-y-3 border-t border-border pt-6 text-[15px]">
-                    {planFeatures(plan).slice(0, 5).map((feature) => (
-                      <li key={feature} className="flex gap-2.5">
-                        <Check className="mt-1 size-4 shrink-0 text-primary" strokeWidth={3} aria-hidden="true" />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-                  <Button asChild variant={recommended ? "default" : "outline"} size="lg" className="mt-8">
-                    <Link href={plan.id === "FREE" ? "/signup" : `/signup?redirectTo=${encodeURIComponent(`/billing?plan=${plan.id}`)}`}>
-                      {plan.id === "FREE" ? "무료로 시작하기" : `${PLAN_LABEL[plan.id]} 시작하기`}
-                    </Link>
-                  </Button>
-                </article>
-              );
-            })}
+            <article className="flex flex-col rounded-2xl border border-border bg-card p-7">
+              <h3 className="text-lg font-bold">마케팅 진단·캘린더</h3>
+              <p className="tabular mt-4 text-4xl font-extrabold tracking-[-0.04em]">무료</p>
+              <ul className="mt-6 flex-1 space-y-3 border-t border-border pt-6 text-[15px]">
+                {["홈페이지·SNS 마케팅 진단", "날짜별 콘텐츠 계획", "가입 후 계속 무료"].map((feature) => <li key={feature} className="flex gap-2.5"><Check className="mt-1 size-4 shrink-0 text-primary" strokeWidth={3} aria-hidden="true" />{feature}</li>)}
+              </ul>
+              <Button asChild variant="outline" size="lg" className="mt-8"><Link href="/signup">무료로 시작하기</Link></Button>
+            </article>
+            {FEATURED_PRODUCTS.map((product, index) => (
+              <article key={product.id} className={`relative flex flex-col rounded-2xl border p-7 ${index === 0 ? "border-primary bg-brand-soft/50 shadow-[0_0_0_1px_var(--primary)]" : "border-border bg-card"}`}>
+                {index === 0 ? <Badge className="absolute right-6 top-6">추천</Badge> : null}
+                <h3 className="text-lg font-bold">{product.name}</h3>
+                <p className="tabular mt-4 text-4xl font-extrabold tracking-[-0.04em]">{product.priceKrw.toLocaleString()}원</p>
+                <ul className="mt-6 flex-1 space-y-3 border-t border-border pt-6 text-[15px]">
+                  {[`${product.credits}회 제작 크레딧`, `결제일부터 ${product.validityDays}일`, "추가 구매 시 잔여 횟수 합산"].map((feature) => <li key={feature} className="flex gap-2.5"><Check className="mt-1 size-4 shrink-0 text-primary" strokeWidth={3} aria-hidden="true" />{feature}</li>)}
+                </ul>
+                <Button asChild variant={index === 0 ? "default" : "outline"} size="lg" className="mt-8"><Link href={`/signup?redirectTo=${encodeURIComponent(`/billing?product=${product.id}`)}`}>{product.name} 구매</Link></Button>
+              </article>
+            ))}
           </div>
+          <div className="mt-6 text-right"><Link href="/pricing" className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline">전체 상품 보기 <ArrowRight className="size-4" aria-hidden="true" /></Link></div>
         </div>
       </section>
 

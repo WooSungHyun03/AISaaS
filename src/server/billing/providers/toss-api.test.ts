@@ -49,6 +49,23 @@ describe("TossApiClient", () => {
     expect(init.headers).toEqual(expect.objectContaining({ "Idempotency-Key": "session-charge" }));
   });
 
+  it("confirms a one-time payment with the stable order id and exact amount", async () => {
+    const payment = { paymentKey: "pay_1", orderId: "order_123456", status: "DONE", totalAmount: 19900 };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, payment));
+    const client = new TossApiClient("test_sk_secret", fetchMock as typeof fetch, "https://toss.test");
+
+    await client.confirmPayment({ paymentKey: "pay_1", orderId: "order_123456", amount: 19900, idempotencyKey: "session-confirm" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://toss.test/v1/payments/confirm",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ paymentKey: "pay_1", orderId: "order_123456", amount: 19900 }),
+        headers: expect.objectContaining({ "Idempotency-Key": "session-confirm" }),
+      }),
+    );
+  });
+
   it("preserves Toss decline codes for the failure screen", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(400, { code: "REJECT_CARD_COMPANY", message: "declined" }));
     const client = new TossApiClient("test_sk_secret", fetchMock as typeof fetch, "https://toss.test");

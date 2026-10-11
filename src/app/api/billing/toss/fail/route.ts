@@ -7,6 +7,7 @@ import {
   markCheckoutFailed,
 } from "@/server/billing/checkout-sessions";
 import { logger } from "@/lib/logger";
+import { cancelProductOrderForCheckout } from "@/server/billing/orders";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
@@ -26,7 +27,10 @@ export async function GET(request: Request) {
   try {
     const session = await getCheckoutSession(sessionId, user.id);
     if (session.provider === "toss") {
-      if (code === "PAY_PROCESS_CANCELED") await markCheckoutCanceled(session.id);
+      if (code === "PAY_PROCESS_CANCELED") {
+        await markCheckoutCanceled(session.id);
+        await cancelProductOrderForCheckout(session.id, user.id);
+      }
       else await markCheckoutFailed(session.id, code, providerMessage);
     }
   } catch (error) {

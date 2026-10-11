@@ -7,8 +7,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
 interface TossPayment {
-  requestBillingAuth(params: {
+  requestPayment(params: {
     method: "CARD";
+    amount: { currency: "KRW"; value: number };
+    orderId: string;
+    orderName: string;
     successUrl: string;
     failUrl: string;
     customerEmail?: string;
@@ -28,12 +31,18 @@ export function TossCheckoutButton({
   successUrl,
   failUrl,
   customerEmail,
+  amount,
+  orderId,
+  orderName,
 }: {
   clientKey: string;
   customerKey: string;
   successUrl: string;
   failUrl: string;
   customerEmail?: string;
+  amount: number;
+  orderId: string;
+  orderName: string;
 }) {
   const [isSdkReady, setIsSdkReady] = useState(false);
   const [isPending, setIsPending] = useState(false);
@@ -47,8 +56,11 @@ export function TossCheckoutButton({
     setIsPending(true);
     try {
       const payment = window.TossPayments(clientKey).payment({ customerKey });
-      await payment.requestBillingAuth({
+      await payment.requestPayment({
         method: "CARD",
+        amount: { currency: "KRW", value: amount },
+        orderId,
+        orderName,
         successUrl,
         failUrl,
         customerEmail,
@@ -70,7 +82,7 @@ export function TossCheckoutButton({
       />
       <Button size="lg" className="w-full" onClick={handleCheckout} disabled={!isSdkReady || isPending}>
         {isPending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <CreditCard aria-hidden="true" />}
-        {isPending ? "결제창을 여는 중…" : isSdkReady ? "카드 등록하고 결제하기" : "결제 준비 중…"}
+        {isPending ? "결제창을 여는 중…" : isSdkReady ? "테스트 카드로 결제하기" : "결제 준비 중…"}
       </Button>
     </>
   );

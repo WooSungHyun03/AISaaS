@@ -17,8 +17,10 @@ function failureUrl(code: string, message: string, sessionId?: string) {
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const sessionId = requestUrl.searchParams.get("session") ?? undefined;
-  const authKey = requestUrl.searchParams.get("authKey") ?? undefined;
-  const customerKey = requestUrl.searchParams.get("customerKey") ?? undefined;
+  const paymentKey = requestUrl.searchParams.get("paymentKey") ?? undefined;
+  const providerOrderId = requestUrl.searchParams.get("orderId") ?? undefined;
+  const rawAmount = requestUrl.searchParams.get("amount");
+  const amount = rawAmount && /^\d+$/.test(rawAmount) ? Number(rawAmount) : undefined;
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -30,7 +32,13 @@ export async function GET(request: Request) {
   if (!sessionId) return NextResponse.redirect(failureUrl("INVALID_CALLBACK", "결제 요청 정보가 누락되었습니다."));
 
   try {
-    await new TossBillingProvider().completeCheckout({ userId: user.id, sessionId, authKey, customerKey });
+    await new TossBillingProvider().confirmOrder({
+      userId: user.id,
+      sessionId,
+      paymentKey,
+      providerOrderId,
+      amount,
+    });
     const success = new URL("/billing/success", clientEnv.NEXT_PUBLIC_SITE_URL);
     success.searchParams.set("session", sessionId);
     return NextResponse.redirect(success);

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
-export function MockCheckoutConfirm({ sessionId, plan }: { sessionId: string; plan: "STARTER" | "PRO" }) {
+export function MockCheckoutConfirm({ sessionId, productName }: { sessionId: string; productName: string }) {
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -18,7 +18,7 @@ export function MockCheckoutConfirm({ sessionId, plan }: { sessionId: string; pl
       });
 
       if (response.ok) {
-        toast.success(`${plan === "PRO" ? "프로" : "스타터"} 요금제로 바뀌었어요.`);
+        toast.success(`${productName} 구매가 완료됐어요.`);
         router.push(`/billing/success?session=${encodeURIComponent(sessionId)}`);
       } else {
         toast.error("결제 시뮬레이션에 실패했어요.");

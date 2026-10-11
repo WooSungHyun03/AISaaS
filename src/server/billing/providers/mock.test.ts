@@ -3,24 +3,39 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const {
   createCheckoutSessionMock,
   claimCheckoutSessionMock,
+  getCheckoutSessionMock,
   activateSubscriptionMock,
   markCheckoutSucceededMock,
   markCheckoutFailedMock,
   cancelStoredSubscriptionMock,
   getLegacyPlanFromCheckoutMock,
+  createProductOrderMock,
+  getProductOrderByCheckoutSessionMock,
+  completeProductOrderMock,
 } = vi.hoisted(() => ({
   createCheckoutSessionMock: vi.fn(),
   claimCheckoutSessionMock: vi.fn(),
+  getCheckoutSessionMock: vi.fn(),
   activateSubscriptionMock: vi.fn(),
   markCheckoutSucceededMock: vi.fn(),
   markCheckoutFailedMock: vi.fn(),
   cancelStoredSubscriptionMock: vi.fn(),
   getLegacyPlanFromCheckoutMock: vi.fn((session: { product_id: string }) => session.product_id),
+  createProductOrderMock: vi.fn(),
+  getProductOrderByCheckoutSessionMock: vi.fn(),
+  completeProductOrderMock: vi.fn(),
+}));
+
+vi.mock("../orders", () => ({
+  createProductOrder: createProductOrderMock,
+  getProductOrderByCheckoutSession: getProductOrderByCheckoutSessionMock,
+  completeProductOrder: completeProductOrderMock,
 }));
 
 vi.mock("../checkout-sessions", () => ({
   createCheckoutSession: createCheckoutSessionMock,
   claimCheckoutSession: claimCheckoutSessionMock,
+  getCheckoutSession: getCheckoutSessionMock,
   activateSubscription: activateSubscriptionMock,
   markCheckoutSucceeded: markCheckoutSucceededMock,
   markCheckoutFailed: markCheckoutFailedMock,
@@ -50,6 +65,36 @@ const SESSION_ROW = {
 
 afterEach(() => {
   vi.resetAllMocks();
+});
+
+describe("MockBillingProvider product orders", () => {
+  const productSession = { ...SESSION_ROW, product_id: "BLOG_5" };
+
+  it("creates a snapshotted product order before opening mock checkout", async () => {
+    createProductOrderMock.mockResolvedValue({ session: productSession, order: { id: "order-db-1" } });
+
+    const result = await new MockBillingProvider().createOrder({
+      userId: "user-1",
+      productId: "BLOG_5",
+      successUrl: "https://app.example.com",
+      cancelUrl: "https://app.example.com/billing/fail",
+    });
+
+    expect(createProductOrderMock).toHaveBeenCalledWith("user-1", "BLOG_5", "mock");
+    expect(result.url).toBe("https://app.example.com/billing/mock-checkout?session=session-1");
+  });
+
+  it("completes the order through the atomic credit-grant boundary", async () => {
+    getCheckoutSessionMock.mockResolvedValue(productSession);
+    claimCheckoutSessionMock.mockResolvedValue(productSession);
+    getProductOrderByCheckoutSessionMock.mockResolvedValue({ id: "order-db-1" });
+    completeProductOrderMock.mockResolvedValue({ order: { id: "order-db-1" }, grantId: "grant-1" });
+
+    const result = await new MockBillingProvider().confirmOrder({ userId: "user-1", sessionId: "session-1" });
+
+    expect(completeProductOrderMock).toHaveBeenCalledWith("order-db-1", "mock_pay_session-1");
+    expect(result).toEqual({ orderId: "order-db-1", productId: "BLOG_5", grantId: "grant-1", provider: "mock" });
+  });
 });
 
 describe("MockBillingProvider.createCheckout", () => {

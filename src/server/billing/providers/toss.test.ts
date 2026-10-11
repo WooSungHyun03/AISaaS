@@ -24,6 +24,9 @@ const {
   cancelStoredSubscriptionMock,
   getLatestSuccessfulCheckoutMock,
   getLegacyPlanFromCheckoutMock,
+  createProductOrderMock,
+  getProductOrderByCheckoutSessionMock,
+  completeProductOrderMock,
 } = vi.hoisted(() => ({
   createCheckoutSessionMock: vi.fn(),
   getCheckoutSessionMock: vi.fn(),
@@ -35,6 +38,15 @@ const {
   cancelStoredSubscriptionMock: vi.fn(),
   getLatestSuccessfulCheckoutMock: vi.fn(),
   getLegacyPlanFromCheckoutMock: vi.fn((session: { product_id: string }) => session.product_id),
+  createProductOrderMock: vi.fn(),
+  getProductOrderByCheckoutSessionMock: vi.fn(),
+  completeProductOrderMock: vi.fn(),
+}));
+
+vi.mock("../orders", () => ({
+  createProductOrder: createProductOrderMock,
+  getProductOrderByCheckoutSession: getProductOrderByCheckoutSessionMock,
+  completeProductOrder: completeProductOrderMock,
 }));
 
 vi.mock("../checkout-sessions", async () => {
@@ -54,14 +66,15 @@ vi.mock("../checkout-sessions", async () => {
   };
 });
 
-const { issueBillingKeyMock, chargeBillingKeyMock, deleteBillingKeyMock, TossApiClientMock } = vi.hoisted(() => {
+const { issueBillingKeyMock, chargeBillingKeyMock, confirmPaymentMock, deleteBillingKeyMock, TossApiClientMock } = vi.hoisted(() => {
   const issueBillingKeyMock = vi.fn();
   const chargeBillingKeyMock = vi.fn();
+  const confirmPaymentMock = vi.fn();
   const deleteBillingKeyMock = vi.fn();
   const TossApiClientMock = vi.fn().mockImplementation(function () {
-    return { issueBillingKey: issueBillingKeyMock, chargeBillingKey: chargeBillingKeyMock, deleteBillingKey: deleteBillingKeyMock };
+    return { issueBillingKey: issueBillingKeyMock, chargeBillingKey: chargeBillingKeyMock, confirmPayment: confirmPaymentMock, deleteBillingKey: deleteBillingKeyMock };
   });
-  return { issueBillingKeyMock, chargeBillingKeyMock, deleteBillingKeyMock, TossApiClientMock };
+  return { issueBillingKeyMock, chargeBillingKeyMock, confirmPaymentMock, deleteBillingKeyMock, TossApiClientMock };
 });
 vi.mock("./toss-api", async () => {
   const actual = await vi.importActual<typeof import("./toss-api")>("./toss-api");
@@ -93,7 +106,75 @@ const SESSION_ROW = {
 afterEach(() => {
   vi.resetAllMocks();
   TossApiClientMock.mockImplementation(function () {
-    return { issueBillingKey: issueBillingKeyMock, chargeBillingKey: chargeBillingKeyMock, deleteBillingKey: deleteBillingKeyMock };
+    return { issueBillingKey: issueBillingKeyMock, chargeBillingKey: chargeBillingKeyMock, confirmPayment: confirmPaymentMock, deleteBillingKey: deleteBillingKeyMock };
+  });
+});
+
+describe("TossBillingProvider product orders", () => {
+  const productSession = { ...SESSION_ROW, product_id: "SHORTS_3", order_id: "order_product_1" };
+
+  it("creates a product order only when both Toss keys are test keys", async () => {
+    createProductOrderMock.mockResolvedValue({ session: productSession, order: { id: "order-db-1" } });
+
+    const result = await new TossBillingProvider().createOrder({
+      userId: "user-1",
+      productId: "SHORTS_3",
+      successUrl: "https://app.example.com",
+      cancelUrl: "https://app.example.com/billing/fail",
+    });
+
+    expect(createProductOrderMock).toHaveBeenCalledWith("user-1", "SHORTS_3", "toss");
+    expect(result.url).toBe("https://app.example.com/billing/toss-checkout?session=session-1");
+  });
+
+  it("rejects a live Toss secret before creating an order", async () => {
+    const { serverEnv } = await import("@/lib/env/server");
+    const original = serverEnv.TOSS_SECRET_KEY;
+    serverEnv.TOSS_SECRET_KEY = "live_sk_must_not_charge";
+    try {
+      await expect(new TossBillingProvider().createOrder({
+        userId: "user-1",
+        productId: "SHORTS_3",
+        successUrl: "https://app.example.com",
+        cancelUrl: "https://app.example.com/billing/fail",
+      })).rejects.toThrow(/test keys only/);
+      expect(createProductOrderMock).not.toHaveBeenCalled();
+    } finally {
+      serverEnv.TOSS_SECRET_KEY = original;
+    }
+  });
+
+  it("approves the exact one-time amount and grants credits once through the DB boundary", async () => {
+    getCheckoutSessionMock.mockResolvedValue(productSession);
+    claimCheckoutSessionMock.mockResolvedValue(productSession);
+    getProductOrderByCheckoutSessionMock.mockResolvedValue({ id: "order-db-1", price_krw: 19900 });
+    confirmPaymentMock.mockResolvedValue({ paymentKey: "pay-1", orderId: "order_product_1", status: "DONE", totalAmount: 19900 });
+    completeProductOrderMock.mockResolvedValue({ order: { id: "order-db-1" }, grantId: "grant-1" });
+
+    const result = await new TossBillingProvider().confirmOrder({
+      userId: "user-1",
+      sessionId: "session-1",
+      paymentKey: "pay-1",
+      providerOrderId: "order_product_1",
+      amount: 19900,
+    });
+
+    expect(confirmPaymentMock).toHaveBeenCalledWith({ paymentKey: "pay-1", orderId: "order_product_1", amount: 19900, idempotencyKey: "session-1-confirm" });
+    expect(completeProductOrderMock).toHaveBeenCalledWith("order-db-1", "pay-1");
+    expect(result).toEqual({ orderId: "order-db-1", productId: "SHORTS_3", grantId: "grant-1", provider: "toss" });
+  });
+
+  it("does not call Toss again when an already-completed callback is retried", async () => {
+    const succeeded = { ...productSession, status: "SUCCEEDED", provider_payment_key: "pay-1" };
+    getCheckoutSessionMock.mockResolvedValue(succeeded);
+    claimCheckoutSessionMock.mockResolvedValue(succeeded);
+    getProductOrderByCheckoutSessionMock.mockResolvedValue({ id: "order-db-1", price_krw: 19900 });
+    completeProductOrderMock.mockResolvedValue({ order: { id: "order-db-1" }, grantId: "grant-1" });
+
+    await new TossBillingProvider().confirmOrder({ userId: "user-1", sessionId: "session-1", paymentKey: "pay-1", providerOrderId: "order_product_1", amount: 19900 });
+
+    expect(confirmPaymentMock).not.toHaveBeenCalled();
+    expect(completeProductOrderMock).toHaveBeenCalledTimes(1);
   });
 });
 

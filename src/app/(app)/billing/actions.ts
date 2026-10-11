@@ -4,7 +4,36 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getBillingProvider } from "@/server/billing";
 import { clientEnv } from "@/lib/env/client";
+import { isProductId, type ProductId } from "@/server/billing/products";
 
+export async function startProductOrder(productId: ProductId): Promise<void> {
+  if (!isProductId(productId)) redirect("/billing/fail?code=INVALID_PRODUCT");
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect(`/login?redirectTo=${encodeURIComponent(`/billing?product=${productId}`)}`);
+
+  let url: string;
+  try {
+    const provider = getBillingProvider();
+    const checkout = await provider.createOrder({
+      userId: user.id,
+      productId,
+      successUrl: `${clientEnv.NEXT_PUBLIC_SITE_URL}/api/billing/toss/success`,
+      cancelUrl: `${clientEnv.NEXT_PUBLIC_SITE_URL}/billing/fail`,
+    });
+    url = checkout.url;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "결제 요청을 시작하지 못했습니다.";
+    redirect(`/billing/fail?code=CHECKOUT_START_FAILED&message=${encodeURIComponent(message)}`);
+  }
+
+  redirect(url);
+}
+
+/** @deprecated Existing subscriptions can still be completed from old checkout links. */
 export async function startCheckout(plan: "STARTER" | "PRO"): Promise<void> {
   const supabase = await createClient();
   const {

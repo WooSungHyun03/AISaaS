@@ -1,157 +1,136 @@
-import { ArrowDownRight, ArrowUpRight, Check } from "lucide-react";
+import { CalendarClock, Check, Clapperboard, FileText, ReceiptText } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env/server";
-import { ALL_PLANS, getPlanConfig } from "@/server/billing/plans";
-import { getBillingOverview } from "@/server/billing/read-model";
+import { ALL_PRODUCTS, getProductConfig, isProductId, type CreditKind, type ProductConfig } from "@/server/billing/products";
+import { getCreditBillingOverview } from "@/server/billing/read-model";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form-message";
 import { PageHeader } from "@/components/layout/page-header";
-import { PLAN_LABEL, planFeatures } from "@/components/billing/plan-copy";
-import { cn } from "@/lib/utils";
-import { Progress } from "@/components/ui/progress";
 import { BillingSubmitButton } from "@/components/billing/billing-submit-button";
-import { cancelSubscriptionAction, startCheckout } from "./actions";
+import { cn } from "@/lib/utils";
+import { cancelSubscriptionAction, startProductOrder } from "./actions";
 
-const ACTIVE_STATUSES = new Set(["ACTIVE", "TRIALING"]);
+const KIND_COPY: Record<CreditKind, { title: string; description: string }> = {
+  BLOG: { title: "블로그 포스팅", description: "네이버 블로그에 옮겨 쓸 수 있는 포스팅을 생성해요." },
+  SHORTS: { title: "숏폼 제작", description: "세로형 숏폼을 만들고 연결한 채널에 게시해요." },
+};
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return "결제 후 표시돼요";
-  return new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long", day: "numeric" }).format(new Date(value));
+const ORDER_STATUS = {
+  PENDING: { label: "결제 대기", variant: "secondary" as const },
+  PAID: { label: "결제 완료", variant: "success" as const },
+  CANCELED: { label: "취소", variant: "secondary" as const },
+  REFUNDED: { label: "환불", variant: "secondary" as const },
+};
+
+function formatDate(value: string | null) {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "short", day: "numeric" }).format(new Date(value));
+}
+
+function ProductCard({ product, selected }: { product: ProductConfig; selected: boolean }) {
+  return (
+    <article className={cn("flex flex-col rounded-2xl border bg-card p-5", selected && "border-primary ring-2 ring-primary/15")}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-extrabold tracking-[-0.02em]">{product.name}</h3>
+          <p className="mt-1 text-sm text-muted-foreground">결제일부터 {product.validityDays}일 동안 사용</p>
+        </div>
+        {selected ? <Badge variant="brand">선택</Badge> : null}
+      </div>
+      <p className="tabular mt-5 text-3xl font-extrabold tracking-[-0.04em]">{product.priceKrw.toLocaleString()}원</p>
+      <p className="tabular mt-1 text-sm font-semibold text-muted-foreground">1회당 약 {Math.ceil(product.priceKrw / product.credits).toLocaleString()}원</p>
+      <ul className="mt-5 flex-1 space-y-2 text-sm">
+        <li className="flex items-center gap-2"><Check className="size-4 text-success" aria-hidden="true" />{product.credits}회 제작 크레딧</li>
+        <li className="flex items-center gap-2"><Check className="size-4 text-success" aria-hidden="true" />추가 구매 시 크레딧 합산</li>
+      </ul>
+      <form action={startProductOrder.bind(null, product.id)} className="mt-5">
+        <BillingSubmitButton className="w-full" pendingLabel="결제 준비 중…">{product.name} 구매</BillingSubmitButton>
+      </form>
+    </article>
+  );
 }
 
 export default async function BillingPage({ searchParams }: PageProps<"/billing">) {
-  const { plan: requestedPlan } = await searchParams;
-  const selectedPlan = requestedPlan === "STARTER" || requestedPlan === "PRO" ? requestedPlan : null;
+  const params = await searchParams;
+  const selectedProduct = typeof params.product === "string" && isProductId(params.product) ? params.product : null;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { subscription, usage, automationCount, contentUsage } = await getBillingOverview(user.id);
-
-  const hasActiveSubscription = subscription ? ACTIVE_STATUSES.has(subscription.status) : false;
-  const plan = hasActiveSubscription ? subscription!.plan : "FREE";
-  const planConfig = getPlanConfig(plan);
-  const monthlyRuns = usage?.automation_runs ?? 0;
-  const isPaid = plan !== "FREE";
+  const { balances, orders, legacySubscription } = await getCreditBillingOverview(user.id);
   const isTestBilling = serverEnv.BILLING_PROVIDER === "mock" || serverEnv.TOSS_SECRET_KEY?.startsWith("test_");
-  const providerLabel = serverEnv.BILLING_PROVIDER === "toss" ? "토스페이먼츠" : "모의 결제";
+  const providerLabel = serverEnv.BILLING_PROVIDER === "toss" ? "토스페이먼츠 테스트" : "모의 결제";
+  const hasLegacySubscription = legacySubscription?.status === "ACTIVE" || legacySubscription?.status === "TRIALING";
 
   return (
-    <div className="mx-auto max-w-5xl space-y-10 pb-10">
-      <PageHeader title="요금제·결제" description="지금 쓰는 요금제와 이번 달 사용량을 확인하고, 요금제를 바꾸거나 해지할 수 있어요." />
+    <div className="mx-auto max-w-6xl space-y-10 pb-10">
+      <PageHeader title="요금제·결제" description="필요한 제작 횟수만 구매하고, 남은 크레딧과 주문을 한곳에서 확인하세요." />
 
       {isTestBilling ? (
-        <FormMessage variant="info"><strong>테스트 결제 환경이에요. 실제로 청구되지 않아요.</strong> 결제 제공자: {providerLabel}. 결제 흐름과 요금제 반영을 안전하게 확인할 수 있어요.</FormMessage>
+        <FormMessage variant="info"><strong>테스트 결제 환경 · 실제 청구 없음</strong> · {providerLabel}로 주문부터 크레딧 지급까지 확인할 수 있어요.</FormMessage>
       ) : null}
 
-      {selectedPlan && selectedPlan !== plan ? (
-        <div className="flex flex-col gap-4 rounded-2xl bg-brand-soft px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="font-extrabold tracking-[-0.02em]">{PLAN_LABEL[selectedPlan]} 요금제를 골랐어요</p>
-            <p className="mt-1 text-sm text-muted-foreground tabular">
-              월 {getPlanConfig(selectedPlan).priceMonthlyKrw.toLocaleString()}원 · 블로그 {getPlanConfig(selectedPlan).monthlyBlogLimit}건 · 숏폼 {getPlanConfig(selectedPlan).monthlyShortsLimit}건 / 월
-            </p>
-          </div>
-          <form action={startCheckout.bind(null, selectedPlan)}>
-            <BillingSubmitButton className="w-full sm:w-auto" pendingLabel="결제 준비 중…">
-              결제 이어서 하기 <ArrowUpRight />
-            </BillingSubmitButton>
-          </form>
-        </div>
-      ) : null}
-
-      <section aria-labelledby="current-plan-heading" className="space-y-4">
-        <h2 id="current-plan-heading" className="text-lg font-extrabold tracking-[-0.03em]">지금 이용 중인 요금제</h2>
-        <div className="grid gap-px overflow-hidden rounded-2xl border bg-border lg:grid-cols-[1.1fr_1fr]">
-          <div className="bg-card px-6 py-6">
-            <div className="flex items-center gap-3">
-              <p className="text-3xl font-extrabold tracking-[-0.04em]">{PLAN_LABEL[plan]}</p>
-              <Badge variant={hasActiveSubscription ? "success" : "secondary"}>{hasActiveSubscription ? "이용 중" : "기본"}</Badge>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground tabular">{planConfig.priceMonthlyKrw === 0 ? "무료" : `월 ${planConfig.priceMonthlyKrw.toLocaleString()}원`}</p>
-            <p className="mt-6 text-[13px] font-semibold text-muted-foreground">{isPaid ? "이용 기간 종료일" : "이용 기간"}</p>
-            <p className="mt-1 font-bold">{isPaid ? formatDate(subscription?.current_period_end) : "무료 요금제는 끝나지 않아요"}</p>
-          </div>
-          <ul className="grid content-center gap-2.5 bg-card px-6 py-6 text-[15px]">
-            {planFeatures(planConfig).map((feature) => (
-              <li key={feature} className="flex items-start gap-2.5"><Check className="mt-1 size-4 shrink-0 text-success" aria-hidden="true" />{feature}</li>
-            ))}
-          </ul>
-        </div>
-      </section>
-
-      <section aria-labelledby="usage-heading" className="space-y-4">
-        <h2 id="usage-heading" className="text-lg font-extrabold tracking-[-0.03em]">이번 달 사용량</h2>
-        <div className="grid gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { label: "블로그 글", value: contentUsage.blog, limit: planConfig.monthlyBlogLimit, unit: "건" },
-            { label: "숏폼 영상", value: contentUsage.shorts, limit: planConfig.monthlyShortsLimit, unit: "건" },
-            { label: "이번 달 전체 제작", value: monthlyRuns, limit: planConfig.monthlyRunLimit, unit: "회" },
-            { label: "만들기 설정", value: automationCount, limit: planConfig.automationLimit, unit: "개" },
-          ].map((item) => (
-            <div key={item.label} className="space-y-3 bg-card px-6 py-5">
-              <p className="text-[13px] font-semibold text-muted-foreground">{item.label}</p>
-              <p className="tabular flex items-baseline gap-1.5"><span className="text-3xl font-extrabold tracking-[-0.04em]">{item.value}</span><span className="text-sm text-muted-foreground">/ {item.limit === null ? "무제한" : `${item.limit}${item.unit}`}</span></p>
-              {item.limit !== null && item.limit > 0 ? <Progress value={Math.min(100, (item.value / item.limit) * 100)} aria-label={`${item.label} 사용량`} /> : null}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section aria-labelledby="plans-heading" className="space-y-4">
+      <section aria-labelledby="credits-heading" className="space-y-4">
         <div>
-          <h2 id="plans-heading" className="text-lg font-extrabold tracking-[-0.03em]">요금제 바꾸기</h2>
-          <p className="mt-1 text-sm text-muted-foreground">요금제별 한도와 기능을 비교해 보세요.</p>
+          <h2 id="credits-heading" className="text-lg font-extrabold tracking-[-0.03em]">남은 크레딧</h2>
+          <p className="mt-1 text-sm text-muted-foreground">유효기간이 남은 크레딧만 합산했어요. 먼저 만료되는 크레딧부터 사용돼요.</p>
         </div>
-        <div className="grid gap-px overflow-hidden rounded-2xl border bg-border lg:grid-cols-3">
-          {ALL_PLANS.map((option) => {
-            const isCurrent = option.id === plan;
-            const isUpgrade = option.priceMonthlyKrw > planConfig.priceMonthlyKrw;
+        <div className="grid gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-2">
+          {(["BLOG", "SHORTS"] as const).map((kind) => {
+            const balance = balances[kind];
+            const Icon = kind === "BLOG" ? FileText : Clapperboard;
             return (
-              <div key={option.id} className={cn("flex flex-col gap-5 px-6 py-6", isCurrent ? "bg-brand-soft" : "bg-card")}>
-                <div>
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-xl font-extrabold tracking-[-0.03em]">{PLAN_LABEL[option.id]}</h3>
-                    {isCurrent ? <Badge variant="brand">현재</Badge> : null}
-                  </div>
-                  <p className="tabular mt-2"><span className="text-3xl font-extrabold tracking-[-0.04em]">{option.priceMonthlyKrw === 0 ? "무료" : `${option.priceMonthlyKrw.toLocaleString()}원`}</span>{option.priceMonthlyKrw > 0 ? <span className="text-sm text-muted-foreground"> / 월</span> : null}</p>
-                  <p className="mt-2 text-sm font-semibold">블로그 {option.monthlyBlogLimit ?? "무제한"}건 · 숏폼 {option.monthlyShortsLimit ?? "무제한"}건 / 월</p>
-                </div>
-                <ul className="flex-1 space-y-2 text-sm text-muted-foreground">
-                  {planFeatures(option).map((feature) => <li key={feature} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" />{feature}</li>)}
-                </ul>
-                {isCurrent ? (
-                  <Button className="w-full" disabled variant="outline">이용 중</Button>
-                ) : option.id === "FREE" ? (
-                  <form action={cancelSubscriptionAction} className="w-full">
-                    <BillingSubmitButton className="w-full" variant="outline" pendingLabel="바꾸는 중…" confirmMessage="구독을 해지하고 무료 요금제로 바꿀까요?">
-                      <ArrowDownRight /> 무료로 바꾸기
-                    </BillingSubmitButton>
-                  </form>
-                ) : (
-                  <form action={startCheckout.bind(null, option.id)} className="w-full">
-                    <BillingSubmitButton className="w-full" variant={isUpgrade ? "default" : "outline"} pendingLabel="결제 준비 중…">
-                      {isUpgrade ? <ArrowUpRight /> : <ArrowDownRight />}
-                      {PLAN_LABEL[option.id]}로 {isUpgrade ? "올리기" : "바꾸기"}
-                    </BillingSubmitButton>
-                  </form>
-                )}
+              <div key={kind} className="bg-card px-6 py-6">
+                <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground"><Icon className="size-4" aria-hidden="true" />{KIND_COPY[kind].title}</div>
+                <p className="tabular mt-3 text-4xl font-extrabold tracking-[-0.05em]">{balance.remaining}<span className="ml-1 text-base font-semibold text-muted-foreground">회</span></p>
+                <p className="mt-2 flex items-center gap-1.5 text-[13px] text-muted-foreground"><CalendarClock className="size-3.5" aria-hidden="true" />{balance.nextExpiry ? `가장 빠른 만료일 ${formatDate(balance.nextExpiry)}` : "사용 가능한 크레딧이 없어요"}</p>
               </div>
             );
           })}
         </div>
       </section>
 
-      {isPaid ? (
-        <section aria-labelledby="cancel-heading" className="flex flex-col gap-4 rounded-2xl border border-destructive/30 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+      {(["BLOG", "SHORTS"] as const).map((kind) => (
+        <section key={kind} aria-labelledby={`products-${kind}`} className="space-y-4">
           <div>
-            <h2 id="cancel-heading" className="font-bold">구독 해지</h2>
-            <p className="mt-1 text-sm text-muted-foreground">해지하면 자동 갱신이 멈추고 무료 요금제 한도가 적용돼요.</p>
+            <h2 id={`products-${kind}`} className="text-lg font-extrabold tracking-[-0.03em]">{KIND_COPY[kind].title} 상품</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{KIND_COPY[kind].description}</p>
           </div>
-          <form action={cancelSubscriptionAction}>
-            <BillingSubmitButton variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/5 hover:text-destructive" pendingLabel="해지하는 중…" confirmMessage="구독을 해지할까요?">구독 해지</BillingSubmitButton>
-          </form>
+          <div className="grid gap-4 md:grid-cols-3">
+            {ALL_PRODUCTS.filter((product) => product.kind === kind).map((product) => (
+              <ProductCard key={product.id} product={product} selected={selectedProduct === product.id} />
+            ))}
+          </div>
+        </section>
+      ))}
+
+      <section aria-labelledby="orders-heading" className="space-y-4">
+        <div>
+          <h2 id="orders-heading" className="flex items-center gap-2 text-lg font-extrabold tracking-[-0.03em]"><ReceiptText className="size-5" aria-hidden="true" />주문 내역</h2>
+          <p className="mt-1 text-sm text-muted-foreground">최근 주문 20건을 보여드려요.</p>
+        </div>
+        {orders.length === 0 ? (
+          <div className="rounded-2xl border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">아직 구매한 상품이 없어요.</div>
+        ) : (
+          <div className="overflow-x-auto rounded-2xl border">
+            <table className="w-full min-w-[700px] text-left text-sm">
+              <thead className="bg-muted/60 text-[13px] text-muted-foreground"><tr><th className="px-5 py-3 font-semibold">상품</th><th className="px-5 py-3 font-semibold">크레딧</th><th className="px-5 py-3 font-semibold">결제 금액</th><th className="px-5 py-3 font-semibold">상태</th><th className="px-5 py-3 font-semibold">주문일</th></tr></thead>
+              <tbody className="divide-y">
+                {orders.map((order) => {
+                  const productName = isProductId(order.product_id) ? getProductConfig(order.product_id).name : order.product_id;
+                  const status = ORDER_STATUS[order.status];
+                  return <tr key={order.id}><td className="px-5 py-4 font-semibold">{productName}</td><td className="tabular px-5 py-4">{order.credit_amount}회</td><td className="tabular px-5 py-4">{order.price_krw.toLocaleString()}원</td><td className="px-5 py-4"><Badge variant={status.variant}>{status.label}</Badge></td><td className="tabular px-5 py-4 text-muted-foreground">{formatDate(order.paid_at ?? order.created_at)}</td></tr>;
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {hasLegacySubscription ? (
+        <section aria-labelledby="legacy-heading" className="flex flex-col gap-4 rounded-2xl border px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div><h2 id="legacy-heading" className="font-bold">이전 월 구독</h2><p className="mt-1 text-sm text-muted-foreground">{legacySubscription.plan} 구독이 남아 있어요. 종료일 {formatDate(legacySubscription.current_period_end)}</p></div>
+          <form action={cancelSubscriptionAction}><BillingSubmitButton variant="outline" pendingLabel="해지하는 중…" confirmMessage="이전 월 구독을 해지할까요?">이전 구독 해지</BillingSubmitButton></form>
         </section>
       ) : null}
     </div>

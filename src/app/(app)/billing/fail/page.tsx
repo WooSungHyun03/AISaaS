@@ -11,6 +11,10 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
   CUSTOMER_KEY_MISMATCH: "결제 요청을 확인하지 못했어요. 요금제를 다시 골라주세요.",
   MISSING_API_KEY: "테스트 결제 설정이 아직 끝나지 않았어요. 관리자에게 문의해 주세요.",
   SUBSCRIPTION_NOT_ACTIVE: "결제는 처리됐지만 구독 상태를 확인하지 못했어요. 잠시 후 다시 확인해 주세요.",
+  ORDER_NOT_PAID: "결제는 처리됐지만 주문과 크레딧 상태를 확인하지 못했어요. 잠시 후 다시 확인해 주세요.",
+  ORDER_MISMATCH: "결제 요청과 승인 정보가 일치하지 않아요. 상품을 다시 골라주세요.",
+  AMOUNT_MISMATCH: "결제 금액이 상품 가격과 일치하지 않아요. 상품을 다시 골라주세요.",
+  INVALID_PRODUCT: "선택한 상품을 찾을 수 없어요. 상품을 다시 골라주세요.",
   CHECKOUT_START_FAILED: "결제 요청을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.",
 };
 

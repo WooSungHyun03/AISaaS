@@ -125,7 +125,8 @@ export async function markCheckoutFailed(sessionId: string, code: string, messag
   const { error } = await admin
     .from("billing_checkout_sessions")
     .update({ status: "FAILED", error_code: code, error_message: message.slice(0, 500) })
-    .eq("id", sessionId);
+    .eq("id", sessionId)
+    .in("status", ["PENDING", "PROCESSING", "FAILED"]);
   if (error) throw error;
 }
 

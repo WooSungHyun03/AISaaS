@@ -109,6 +109,7 @@ async function main() {
       userClient.rpc("settle_credit", { p_reservation_id: reservations[2] }),
       userClient.rpc("release_credit", { p_reservation_id: reservations[2] }),
       userClient.rpc("expire_credits", { p_now: new Date().toISOString() }),
+      userClient.rpc("complete_billing_order", { p_order_id: crypto.randomUUID(), p_payment_key: "forbidden" }),
     ]);
     assert.ok(forbiddenCalls.every((result) => result.error), "all credit mutation RPCs must reject authenticated users");
 
@@ -126,6 +127,56 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 2_200));
     const expired = requireData(await admin.rpc("expire_credits", { p_now: new Date().toISOString() }), "expire credits");
     assert.ok(expired >= 2, "expiry must remove the short-lived grant");
+
+    const checkoutFixtureId = crypto.randomUUID();
+    const providerOrderId = `order_${crypto.randomUUID().replaceAll("-", "")}`;
+    requireSuccess(
+      await admin.from("billing_checkout_sessions").insert({
+        id: checkoutFixtureId,
+        user_id: userId,
+        product_id: "BLOG_5",
+        provider: "mock",
+        status: "PROCESSING",
+        customer_key: `cus_${crypto.randomUUID()}`,
+        order_id: providerOrderId,
+      }),
+      "create product checkout fixture",
+    );
+    const productOrder = requireData(
+      await admin.from("billing_orders").insert({
+        user_id: userId,
+        product_id: "BLOG_5",
+        kind: "BLOG",
+        credit_amount: 5,
+        price_krw: 9900,
+        validity_days: 30,
+        provider: "mock",
+        checkout_session_id: checkoutFixtureId,
+        provider_order_id: providerOrderId,
+      }).select("id").single(),
+      "create product order fixture",
+    );
+    const firstGrantId = requireData(
+      await admin.rpc("complete_billing_order", { p_order_id: productOrder.id, p_payment_key: "mock_pay_fixture" }),
+      "complete product order",
+    );
+    const duplicateGrantId = requireData(
+      await admin.rpc("complete_billing_order", { p_order_id: productOrder.id, p_payment_key: "mock_pay_fixture" }),
+      "repeat product order completion",
+    );
+    assert.equal(duplicateGrantId, firstGrantId, "duplicate approval must return the same grant");
+    const orderGrantRows = requireData(
+      await admin.from("credit_grants").select("id,remaining").eq("order_id", productOrder.id),
+      "read completed order grant",
+    );
+    assert.equal(orderGrantRows.length, 1, "duplicate approval must create one grant");
+    assert.equal(orderGrantRows[0].remaining, 5);
+    const completedOrder = requireData(
+      await admin.from("billing_orders").select("status,paid_at").eq("id", productOrder.id).single(),
+      "read completed order",
+    );
+    assert.equal(completedOrder.status, "PAID");
+    assert.ok(completedOrder.paid_at);
 
     const order = requireData(
       await admin
@@ -175,7 +226,7 @@ async function main() {
     const immutable = await admin.from("credit_ledger").update({ reference_id: "tampered" }).eq("id", ledger[0].id);
     assert.ok(immutable.error, "ledger updates must be rejected even for service role");
 
-    console.log("[credit-db] PASS: 20 concurrent reservations, service-role ACL, release, settle, expiry, refund, immutable ledger");
+    console.log("[credit-db] PASS: 20 concurrent reservations, idempotent order completion, service-role ACL, release, settle, expiry, refund, immutable ledger");
   } finally {
     requireSuccess(await admin.auth.admin.deleteUser(userId), "delete test user");
   }

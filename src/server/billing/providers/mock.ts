@@ -4,16 +4,22 @@ import { logger } from "@/lib/logger";
 import type {
   BillingProvider,
   CancelSubscriptionParams,
+  ConfirmOrderParams,
   CompleteCheckoutParams,
+  CreateOrderParams,
   CreateCheckoutParams,
   CreatePortalParams,
   HandleWebhookParams,
 } from "../provider";
+import { completeProductOrder, createProductOrder, getProductOrderByCheckoutSession } from "../orders";
+import { isProductId } from "../products";
 import {
   activateSubscription,
+  BillingCheckoutError,
   cancelStoredSubscription,
   claimCheckoutSession,
   createCheckoutSession,
+  getCheckoutSession,
   getLegacyPlanFromCheckout,
   markCheckoutFailed,
   markCheckoutSucceeded,
@@ -46,6 +52,40 @@ export function assertMockBillingAllowed(
  * provider completion boundary is used by the real Toss callback.
  */
 export class MockBillingProvider implements BillingProvider {
+  async createOrder({ userId, productId, successUrl }: CreateOrderParams) {
+    assertMockBillingAllowed();
+    const { session } = await createProductOrder(userId, productId, "mock");
+    const url = new URL("/billing/mock-checkout", successUrl);
+    url.searchParams.set("session", session.id);
+    return { url: url.toString(), provider: "mock" };
+  }
+
+  async confirmOrder({ userId, sessionId }: ConfirmOrderParams) {
+    assertMockBillingAllowed();
+    const preview = await getCheckoutSession(sessionId, userId);
+    if (!isProductId(preview.product_id)) {
+      throw new BillingCheckoutError("NOT_A_CREDIT_PRODUCT", "크레딧 상품 결제 요청이 아닙니다.");
+    }
+    const session = await claimCheckoutSession(sessionId, userId, "mock");
+
+    try {
+      const order = await getProductOrderByCheckoutSession(session.id, userId);
+      const paymentKey = session.provider_payment_key ?? `mock_pay_${session.id}`;
+      const completed = await completeProductOrder(order.id, paymentKey);
+      logger.info("mock_product_order_completed", { userId, productId: session.product_id, orderId: order.id });
+      return {
+        orderId: order.id,
+        productId: preview.product_id,
+        grantId: completed.grantId,
+        provider: "mock",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Mock order failed";
+      await markCheckoutFailed(session.id, "MOCK_ORDER_FAILED", message);
+      throw error;
+    }
+  }
+
   async createCheckout({ userId, plan, successUrl }: CreateCheckoutParams) {
     assertMockBillingAllowed();
     const session = await createCheckoutSession(userId, plan, "mock");

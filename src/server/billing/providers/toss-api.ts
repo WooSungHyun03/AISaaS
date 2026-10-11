@@ -97,6 +97,26 @@ export class TossApiClient {
     );
   }
 
+  confirmPayment(params: {
+    paymentKey: string;
+    orderId: string;
+    amount: number;
+    idempotencyKey: string;
+  }) {
+    return this.request<TossPaymentResponse>(
+      "/v1/payments/confirm",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          paymentKey: params.paymentKey,
+          orderId: params.orderId,
+          amount: params.amount,
+        }),
+      },
+      params.idempotencyKey,
+    );
+  }
+
   deleteBillingKey(billingKey: string) {
     return this.request<void>(`/v1/billing/${encodeURIComponent(billingKey)}`, { method: "DELETE" });
   }

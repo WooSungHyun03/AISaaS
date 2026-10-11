@@ -7,11 +7,15 @@ import { getPlanConfig } from "../plans";
 import type {
   BillingProvider,
   CancelSubscriptionParams,
+  ConfirmOrderParams,
   CompleteCheckoutParams,
+  CreateOrderParams,
   CreateCheckoutParams,
   CreatePortalParams,
   HandleWebhookParams,
 } from "../provider";
+import { completeProductOrder, createProductOrder, getProductOrderByCheckoutSession } from "../orders";
+import { isProductId } from "../products";
 import {
   activateSubscription,
   BillingCheckoutError,
@@ -45,6 +49,60 @@ function errorDetails(error: unknown) {
 }
 
 export class TossBillingProvider implements BillingProvider {
+  async createOrder({ userId, productId, successUrl }: CreateOrderParams) {
+    getTestKeys();
+    const { session } = await createProductOrder(userId, productId, "toss");
+    const url = new URL("/billing/toss-checkout", successUrl);
+    url.searchParams.set("session", session.id);
+    return { url: url.toString(), provider: "toss" };
+  }
+
+  async confirmOrder({ userId, sessionId, paymentKey, providerOrderId, amount }: ConfirmOrderParams) {
+    if (!paymentKey || !providerOrderId || typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) {
+      throw new BillingCheckoutError("INVALID_CALLBACK", "결제 승인 정보가 누락되었습니다.");
+    }
+
+    const preview = await getCheckoutSession(sessionId, userId);
+    if (preview.provider !== "toss" || preview.order_id !== providerOrderId || !isProductId(preview.product_id)) {
+      throw new BillingCheckoutError("ORDER_MISMATCH", "결제 요청 정보가 일치하지 않습니다.");
+    }
+    const order = await getProductOrderByCheckoutSession(preview.id, userId);
+    if (amount !== order.price_krw) {
+      throw new BillingCheckoutError("AMOUNT_MISMATCH", "결제 금액이 상품 가격과 일치하지 않습니다.");
+    }
+
+    const session = await claimCheckoutSession(sessionId, userId, "toss");
+    try {
+      if (session.status !== "SUCCEEDED") {
+        const { secretKey } = getTestKeys();
+        const payment = await new TossApiClient(secretKey).confirmPayment({
+          paymentKey,
+          orderId: providerOrderId,
+          amount,
+          idempotencyKey: `${session.id}-confirm`,
+        });
+        if (payment.paymentKey !== paymentKey || payment.orderId !== session.order_id
+          || payment.totalAmount !== order.price_krw || payment.status !== "DONE") {
+          throw new BillingCheckoutError("PAYMENT_VERIFICATION_FAILED", "결제 승인 결과를 확인할 수 없습니다.");
+        }
+      }
+
+      const completed = await completeProductOrder(order.id, session.provider_payment_key ?? paymentKey);
+      logger.info("toss_product_order_completed", { userId, productId: preview.product_id, orderId: order.id });
+      return {
+        orderId: order.id,
+        productId: preview.product_id,
+        grantId: completed.grantId,
+        provider: "toss",
+      };
+    } catch (error) {
+      const details = errorDetails(error);
+      await markCheckoutFailed(session.id, details.code, details.message);
+      logger.error("toss_product_order_failed", { userId, sessionId, code: details.code });
+      throw error;
+    }
+  }
+
   async createCheckout({ userId, plan, successUrl }: CreateCheckoutParams) {
     getTestKeys();
     const session = await createCheckoutSession(userId, plan, "toss");

@@ -532,6 +532,33 @@ of one single-shot generation:
 
 ## Billing Flow
 
+New purchases use one-time blog/shorts products. `products.ts` is the only
+source for product price, credit quantity, and validity; `billing_orders`
+keeps a snapshot so historical orders do not change when the catalog changes.
+
+```
+/pricing or /billing → startProductOrder(productId)
+    → BillingProvider.createOrder()
+    → billing_checkout_sessions + PENDING billing_orders
+    → mock confirmation, or Toss test-mode requestPayment()
+    → BillingProvider.confirmOrder()
+    → Toss /v1/payments/confirm (toss only; exact order id and amount verified)
+    → complete_billing_order() RPC
+    → order PAID + session SUCCEEDED + grant_credit(), in one transaction
+    → /billing/success re-reads the paid order and its credit grant
+```
+
+`complete_billing_order()` locks the order and relies on the unique
+`credit_grants.order_id`, so a duplicated callback returns the existing grant
+instead of granting credits again. Both Toss keys must start with `test_`;
+live keys are rejected before creating or confirming an order. The mock
+provider retains its production opt-in guard.
+
+### Legacy subscription flow
+
+The following billing-key flow remains only for users and links created before
+the product-credit migration. New UI entry points do not create subscriptions.
+
 ```
 User clicks "Upgrade" (src/app/(app)/billing/page.tsx)
     │  Server Action: startCheckout(plan)  — src/app/(app)/billing/actions.ts

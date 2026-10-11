@@ -1,5 +1,28 @@
 import type { SubscriptionPlan } from "@/types/domain";
 import type { BillingPortalSession, CheckoutSession } from "@/types/billing";
+import type { ProductId } from "./products";
+
+export interface CreateOrderParams {
+  userId: string;
+  productId: ProductId;
+  successUrl: string;
+  cancelUrl: string;
+}
+
+export interface ConfirmOrderParams {
+  userId: string;
+  sessionId: string;
+  paymentKey?: string;
+  providerOrderId?: string;
+  amount?: number;
+}
+
+export interface ConfirmOrderResult {
+  orderId: string;
+  productId: ProductId;
+  grantId: string;
+  provider: string;
+}
 
 export interface CreateCheckoutParams {
   userId: string;
@@ -43,7 +66,11 @@ export interface CompleteCheckoutResult {
  * TossPayments, ...) later touches one file: server/billing/index.ts.
  */
 export interface BillingProvider {
+  createOrder(params: CreateOrderParams): Promise<CheckoutSession>;
+  confirmOrder(params: ConfirmOrderParams): Promise<ConfirmOrderResult>;
+  /** @deprecated Legacy recurring-subscription checkout. */
   createCheckout(params: CreateCheckoutParams): Promise<CheckoutSession>;
+  /** @deprecated Legacy recurring-subscription completion. */
   completeCheckout(params: CompleteCheckoutParams): Promise<CompleteCheckoutResult>;
   createPortal(params: CreatePortalParams): Promise<BillingPortalSession>;
   cancelSubscription(params: CancelSubscriptionParams): Promise<void>;

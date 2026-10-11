@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await new MockBillingProvider().completeCheckout({ userId: user.id, sessionId: body.sessionId });
+    const result = await new MockBillingProvider().confirmOrder({ userId: user.id, sessionId: body.sessionId });
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "결제 처리에 실패했습니다.";
