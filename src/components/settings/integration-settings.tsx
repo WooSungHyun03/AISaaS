@@ -144,21 +144,29 @@ export function IntegrationSettings({ businessId, connections }: { businessId: s
   const youtube = get("youtube");
   const youtubeNeedsAnalyticsConsent = youtube?.status === "CONNECTED" && !String(metadata(youtube.metadata).scope ?? "").split(/\s+/).includes(YOUTUBE_ANALYTICS_SCOPE);
 
+  // YouTube and Instagram are what the product uses today (Shorts posting, YouTube growth numbers). WordPress and
+  // the email service belong to features that are no longer offered (blogs are written for the owner to post,
+  // the newsletter is not available), so they only show up for an account that already has such a connection and
+  // needs to see or remove it.
   return <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
-    <IntegrationRow icon={<Globe2 className="size-5" aria-hidden="true" />} title="WordPress" description="만든 블로그 글을 내 WordPress에 초안으로 보내고 싶을 때 연결해요." connection={wordpress}>
-      <WordPressDialog businessId={businessId} connection={wordpress} />
-      {wordpress && <DisconnectButton businessId={businessId} provider="wordpress" />}
-    </IntegrationRow>
-    <IntegrationRow icon={<Camera className="size-5" aria-hidden="true" />} title="인스타그램" description="비즈니스·크리에이터 계정을 연결해 두면 콘텐츠를 만들 때 참고해요." connection={instagram}>
-      <Button asChild size="sm" variant={instagram ? "outline" : "default"}><a href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`}>{instagram ? <RefreshCw aria-hidden="true" /> : null}{instagram ? "다시 연결" : "인스타그램 연결"}</a></Button>
-      {instagram && <DisconnectButton businessId={businessId} provider="instagram" />}
-    </IntegrationRow>
-    <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description={youtubeNeedsAnalyticsConsent ? "Shorts를 내 채널에 업로드해요(비공개). 조회수·시청 시간·구독자 증감을 성장 리포트에 보려면 ‘다시 연결’에서 Analytics 권한도 허용해주세요." : "Shorts를 내 채널에 업로드하고, 성장 리포트에 조회수·시청 시간·구독자 증감을 보여줘요. 업로드는 비공개로만 해요."} connection={youtube}>
+    <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description={youtubeNeedsAnalyticsConsent ? "숏폼을 내 채널에 비공개로 올려요. 조회수·시청 시간·구독자 증감을 성장 리포트에 보려면 ‘다시 연결’에서 Analytics 권한도 허용해주세요." : "숏폼을 내 채널에 비공개로 올리고, 성장 리포트에 조회수·시청 시간·구독자 증감을 보여줘요."} connection={youtube}>
       <Button asChild size="sm" variant={youtube ? "outline" : "default"}><a href={`/api/integrations/youtube/connect?businessId=${encodeURIComponent(businessId)}`}>{youtube ? <RefreshCw aria-hidden="true" /> : null}{youtube ? "다시 연결" : "YouTube 연결"}</a></Button>
       {youtube && <DisconnectButton businessId={businessId} provider="youtube" />}
     </IntegrationRow>
-    <IntegrationRow icon={<Mail className="size-5" aria-hidden="true" />} title="이메일" description="뉴스레터용 이메일 서비스 연결 상태를 확인해요." connection={email}>
-      {email ? <DisconnectButton businessId={businessId} provider="email" /> : <Button size="sm" variant="outline" disabled>준비 중</Button>}
+    <IntegrationRow icon={<Camera className="size-5" aria-hidden="true" />} title="인스타그램" description="만든 숏폼을 인스타그램 릴스로 올릴 때 연결해요. 비즈니스·크리에이터 계정이 필요해요." connection={instagram}>
+      <Button asChild size="sm" variant={instagram ? "outline" : "default"}><a href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`}>{instagram ? <RefreshCw aria-hidden="true" /> : null}{instagram ? "다시 연결" : "인스타그램 연결"}</a></Button>
+      {instagram && <DisconnectButton businessId={businessId} provider="instagram" />}
     </IntegrationRow>
+    {wordpress ? (
+      <IntegrationRow icon={<Globe2 className="size-5" aria-hidden="true" />} title="WordPress (이전 방식)" description="이전에 설정한 WordPress 자동 게시 연결이에요. 새 블로그 글은 앱에서 확인하고 직접 올리는 방식이라 새로 연결할 필요는 없어요." connection={wordpress}>
+        <WordPressDialog businessId={businessId} connection={wordpress} />
+        <DisconnectButton businessId={businessId} provider="wordpress" />
+      </IntegrationRow>
+    ) : null}
+    {email ? (
+      <IntegrationRow icon={<Mail className="size-5" aria-hidden="true" />} title="이메일 (이전 방식)" description="이전에 설정한 뉴스레터용 이메일 연결이에요. 뉴스레터는 지금 제공하지 않아요." connection={email}>
+        <DisconnectButton businessId={businessId} provider="email" />
+      </IntegrationRow>
+    ) : null}
   </ul>;
 }

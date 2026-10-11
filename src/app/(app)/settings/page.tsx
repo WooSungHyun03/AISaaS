@@ -60,7 +60,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       {youtubeMessage && <FormMessage variant={youtubeMessage.variant}>{youtubeMessage.text}</FormMessage>}
 
       <section aria-labelledby="integration-heading" className="space-y-4">
-        <div><h2 id="integration-heading" className="text-lg font-extrabold tracking-[-0.03em]">외부 서비스 연결</h2><p className="mt-1 text-sm text-muted-foreground">사업체마다 따로 연결해요. 비밀번호와 토큰은 저장한 뒤 다시 보여주지 않아요.</p></div>
+        <div><h2 id="integration-heading" className="text-lg font-extrabold tracking-[-0.03em]">외부 서비스 연결</h2><p className="mt-1 text-sm text-muted-foreground">숏폼 게시와 성장 리포트에 쓰는 YouTube·인스타그램만 연결해요. 사업체마다 따로 연결하고, 비밀번호와 토큰은 저장한 뒤 다시 보여주지 않아요.</p></div>
         {(businesses ?? []).length === 0 ? <EmptyState mascot="welcome" title="연결할 사업체가 없어요" description="외부 서비스는 사업체마다 따로 연결해요. 먼저 사업 정보를 등록해주세요." action={<Button asChild><Link href="/onboarding">사업 정보 등록</Link></Button>} /> : <>
           {(businesses ?? []).length > 1 && <nav className="flex flex-wrap gap-2" aria-label="연결을 관리할 사업체">
             {(businesses ?? []).map((business) => <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness?.id ? "default" : "outline"} className="h-9 rounded-full px-4"><Link href={`/settings?business=${business.id}`} aria-current={business.id === selectedBusiness?.id ? "page" : undefined}>{business.name}</Link></Button>)}
