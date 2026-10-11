@@ -2,7 +2,7 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import { getPeriodKey } from "@/lib/utils/date";
-import { getContentTypeUsage } from "./entitlements";
+import { ensureTrialCredits } from "./credits";
 
 export async function getBillingOverview(userId: string) {
   const supabase = await createClient();
@@ -16,16 +16,10 @@ export async function getBillingOverview(userId: string) {
   if (usageResult.error) throw usageResult.error;
   if (automationResult.error) throw automationResult.error;
 
-  const [blogUsed, shortsUsed] = await Promise.all([
-    getContentTypeUsage(supabase as never, userId, "blog-marketing"),
-    getContentTypeUsage(supabase as never, userId, "shorts"),
-  ]);
-
   return {
     subscription: subscriptionResult.data,
     usage: usageResult.data,
     automationCount: automationResult.count ?? 0,
-    contentUsage: { blog: blogUsed, shorts: shortsUsed },
   };
 }
 
@@ -41,6 +35,7 @@ export async function getSubscriptionForUser(userId: string) {
 }
 
 export async function getCreditBillingOverview(userId: string) {
+  await ensureTrialCredits(userId);
   const supabase = await createClient();
   const now = new Date().toISOString();
   const [grantsResult, ordersResult, subscriptionResult] = await Promise.all([

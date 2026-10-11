@@ -69,6 +69,20 @@ export type ProductId = keyof typeof PRODUCT_CONFIGS;
 export type CreditKind = (typeof PRODUCT_CONFIGS)[ProductId]["kind"];
 export type ProductConfig = (typeof PRODUCT_CONFIGS)[ProductId];
 
+/**
+ * One-time signup trial. `referenceId` is persisted in the immutable ledger;
+ * keep it stable so support can identify historical trial grants.
+ */
+export const FREE_TRIAL_CREDITS = {
+  referenceId: "signup-trial-v1",
+  validityDays: 30,
+  amounts: { BLOG: 1, SHORTS: 1 },
+} as const satisfies {
+  referenceId: string;
+  validityDays: number;
+  amounts: Record<CreditKind, number>;
+};
+
 export const ALL_PRODUCTS: readonly ProductConfig[] = Object.values(PRODUCT_CONFIGS);
 
 export function isProductId(value: string): value is ProductId {

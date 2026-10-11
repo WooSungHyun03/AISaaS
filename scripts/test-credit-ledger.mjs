@@ -94,6 +94,102 @@ async function main() {
     requireSuccess(await admin.rpc("release_credit", { p_reservation_id: reservations[0], p_reason: "db-test" }), "release credit");
     requireSuccess(await admin.rpc("settle_credit", { p_reservation_id: reservations[1], p_reference_id: "db-test" }), "settle credit");
 
+    const trialReference = `trial-${crypto.randomUUID()}`;
+    assert.equal(requireData(await admin.rpc("ensure_trial_credits", {
+      p_user_id: userId,
+      p_blog_amount: 1,
+      p_shorts_amount: 1,
+      p_expires_at: future,
+      p_reference_id: trialReference,
+    }), "grant signup trial"), true);
+    assert.equal(requireData(await admin.rpc("ensure_trial_credits", {
+      p_user_id: userId,
+      p_blog_amount: 1,
+      p_shorts_amount: 1,
+      p_expires_at: future,
+      p_reference_id: trialReference,
+    }), "repeat signup trial"), false, "signup trial must only be granted once");
+
+    const idempotentRunId = crypto.randomUUID();
+    const firstReservation = requireData(await admin.rpc("reserve_credit", {
+      p_user_id: userId,
+      p_kind: "BLOG",
+      p_amount: 1,
+      p_reference_id: idempotentRunId,
+    }), "reserve run credit");
+    const duplicateReservation = requireData(await admin.rpc("reserve_credit", {
+      p_user_id: userId,
+      p_kind: "BLOG",
+      p_amount: 1,
+      p_reference_id: idempotentRunId,
+    }), "repeat run reservation");
+    assert.equal(duplicateReservation, firstReservation, "one run id must reuse one reservation");
+    assert.equal(requireData(await admin.rpc("release_credit_by_reference", {
+      p_reference_id: idempotentRunId,
+      p_reason: "stale-run-test",
+    }), "release run reservation"), true);
+
+    const successfulRunId = crypto.randomUUID();
+    requireData(await admin.rpc("reserve_credit", {
+      p_user_id: userId,
+      p_kind: "SHORTS",
+      p_amount: 1,
+      p_reference_id: successfulRunId,
+    }), "reserve successful run credit");
+    assert.equal(requireData(await admin.rpc("settle_credit_by_reference", {
+      p_reference_id: successfulRunId,
+    }), "settle successful run reservation"), true);
+
+    const business = requireData(
+      await admin.from("businesses").insert({ owner_id: userId, name: "Credit runner test" }).select("id").single(),
+      "create runner business",
+    );
+    const template = requireData(
+      await admin.from("automation_templates").select("id").eq("slug", "blog-marketing").single(),
+      "find runner template",
+    );
+    const automation = requireData(
+      await admin.from("automations").insert({
+        user_id: userId,
+        business_id: business.id,
+        template_id: template.id,
+        name: "Credit runner",
+        status: "ACTIVE",
+      }).select("id").single(),
+      "create runner automation",
+    );
+    const run = requireData(
+      await admin.from("automation_runs").insert({
+        automation_id: automation.id,
+        status: "RUNNING",
+        source: "MANUAL",
+      }).select("id").single(),
+      "create runner run",
+    );
+    requireData(await admin.rpc("reserve_credit", {
+      p_user_id: userId,
+      p_kind: "BLOG",
+      p_amount: 1,
+      p_reference_id: run.id,
+    }), "reserve atomic completion credit");
+    assert.equal(requireData(await admin.rpc("complete_automation_run_credit", {
+      p_run_id: run.id,
+      p_output: { title: "atomic success" },
+      p_requires_credit: true,
+    }), "complete run and settle credit"), true);
+    assert.equal(requireData(await admin.rpc("complete_automation_run_credit", {
+      p_run_id: run.id,
+      p_output: { title: "ignored retry" },
+      p_requires_credit: true,
+    }), "repeat atomic run completion"), true, "successful run completion must be idempotent");
+    const completedRun = requireData(
+      await admin.from("automation_runs").select("status,output,completed_at").eq("id", run.id).single(),
+      "read atomically completed run",
+    );
+    assert.equal(completedRun.status, "SUCCESS");
+    assert.equal(completedRun.output.title, "atomic success", "a retry must not overwrite the first terminal output");
+    assert.ok(completedRun.completed_at);
+
     const signedIn = requireData(await client(url, anonKey).auth.signInWithPassword({ email, password }), "sign in test user");
     const userClient = client(url, anonKey);
     await userClient.auth.setSession({ access_token: signedIn.session.access_token, refresh_token: signedIn.session.refresh_token });
@@ -109,6 +205,10 @@ async function main() {
       userClient.rpc("settle_credit", { p_reservation_id: reservations[2] }),
       userClient.rpc("release_credit", { p_reservation_id: reservations[2] }),
       userClient.rpc("expire_credits", { p_now: new Date().toISOString() }),
+      userClient.rpc("ensure_trial_credits", { p_user_id: userId, p_blog_amount: 1, p_shorts_amount: 1, p_expires_at: future }),
+      userClient.rpc("release_credit_by_reference", { p_reference_id: idempotentRunId }),
+      userClient.rpc("settle_credit_by_reference", { p_reference_id: successfulRunId }),
+      userClient.rpc("complete_automation_run_credit", { p_run_id: crypto.randomUUID(), p_output: {}, p_requires_credit: false }),
       userClient.rpc("complete_billing_order", { p_order_id: crypto.randomUUID(), p_payment_key: "forbidden" }),
     ]);
     assert.ok(forbiddenCalls.every((result) => result.error), "all credit mutation RPCs must reject authenticated users");
@@ -226,7 +326,7 @@ async function main() {
     const immutable = await admin.from("credit_ledger").update({ reference_id: "tampered" }).eq("id", ledger[0].id);
     assert.ok(immutable.error, "ledger updates must be rejected even for service role");
 
-    console.log("[credit-db] PASS: 20 concurrent reservations, idempotent order completion, service-role ACL, release, settle, expiry, refund, immutable ledger");
+    console.log("[credit-db] PASS: concurrent reservations, run-id idempotency, atomic run completion, one-time trial, service-role ACL, release, settle, expiry, refund, immutable ledger");
   } finally {
     requireSuccess(await admin.auth.admin.deleteUser(userId), "delete test user");
   }

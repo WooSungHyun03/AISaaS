@@ -14,26 +14,29 @@ const { canExecuteAutomationMock, incrementUsageMock } = vi.hoisted(() => ({
 vi.mock("@/server/billing/entitlements", () => ({
   canExecuteAutomation: canExecuteAutomationMock,
   incrementUsage: incrementUsageMock,
+  CREDIT_EXHAUSTED_MESSAGE: "크레딧이 부족해요. 구매하러 가기",
+  getAutomationCreditKind: (slug: string) => slug === "blog-marketing" ? "BLOG" : slug === "shorts" ? "SHORTS" : null,
 }));
 
-const { reserveRunCreditMock, settleRunCreditMock, releaseRunCreditMock, InsufficientCreditsErrorMock } = vi.hoisted(() => {
-  class InsufficientCreditsErrorMock extends Error {}
-  return {
-    reserveRunCreditMock: vi.fn(),
-    settleRunCreditMock: vi.fn(),
-    releaseRunCreditMock: vi.fn(),
-    InsufficientCreditsErrorMock,
-  };
-});
-vi.mock("@/server/billing/run-credits", () => ({
-  reserveRunCredit: reserveRunCreditMock,
-  settleRunCredit: settleRunCreditMock,
-  releaseRunCredit: releaseRunCreditMock,
-  InsufficientCreditsError: InsufficientCreditsErrorMock,
-  readCreditReservationId: (input: unknown) =>
-    input && typeof input === "object" && typeof (input as Record<string, unknown>).creditReservationId === "string"
-      ? ((input as Record<string, unknown>).creditReservationId as string)
-      : null,
+const {
+  ensureTrialCreditsMock,
+  reserveCreditMock,
+  settleCreditByReferenceMock,
+  releaseCreditByReferenceMock,
+  isInsufficientCreditErrorMock,
+} = vi.hoisted(() => ({
+  ensureTrialCreditsMock: vi.fn(),
+  reserveCreditMock: vi.fn(),
+  settleCreditByReferenceMock: vi.fn(),
+  releaseCreditByReferenceMock: vi.fn(),
+  isInsufficientCreditErrorMock: vi.fn(),
+}));
+vi.mock("@/server/billing/credits", () => ({
+  ensureTrialCredits: ensureTrialCreditsMock,
+  reserveCredit: reserveCreditMock,
+  settleCreditByReference: settleCreditByReferenceMock,
+  releaseCreditByReference: releaseCreditByReferenceMock,
+  isInsufficientCreditError: isInsufficientCreditErrorMock,
 }));
 
 const { runAutomationNow, runDueAutomation } = await import("./runner");
@@ -79,7 +82,8 @@ function makeAdmin(tableQueues: Record<string, Result[]>) {
     };
     return builder;
   });
-  return { from, inserts, updates, filters };
+  const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+  return { from, rpc, inserts, updates, filters };
 }
 
 const SCHEDULE = { frequency: "DAILY" as const, timeOfDay: "09:00", timezone: "Asia/Seoul" };
@@ -113,7 +117,11 @@ function okHandler(result: Record<string, unknown> = { output: { ok: true } }) {
 }
 
 beforeEach(() => {
-  reserveRunCreditMock.mockResolvedValue("reservation-1");
+  ensureTrialCreditsMock.mockResolvedValue(true);
+  reserveCreditMock.mockResolvedValue("reservation-1");
+  settleCreditByReferenceMock.mockResolvedValue(true);
+  releaseCreditByReferenceMock.mockResolvedValue(true);
+  isInsufficientCreditErrorMock.mockImplementation((error: unknown) => Boolean(error && typeof error === "object" && "code" in error && error.code === "P0001"));
 });
 
 afterEach(() => {
@@ -151,6 +159,12 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
     expect(admin.inserts.content_history[0]).toMatchObject({ run_id: "run-1" });
     const expectedNext = computeNextRunAt(SCHEDULE).toISOString();
     expect(admin.updates.automations[0]).toMatchObject({ next_run_at: expectedNext });
+    expect(reserveCreditMock).toHaveBeenCalledWith({ userId: "user-1", kind: "BLOG", referenceId: "run-1" });
+    expect(admin.rpc).toHaveBeenCalledWith("complete_automation_run_credit", expect.objectContaining({
+      p_run_id: "run-1",
+      p_requires_credit: true,
+    }));
+    expect(releaseCreditByReferenceMock).not.toHaveBeenCalled();
     expect(incrementUsageMock).toHaveBeenCalledWith(admin, "user-1", { automationRuns: 1, aiGenerations: 1 });
   });
 
@@ -285,13 +299,14 @@ describe("runDueAutomation / runAutomationNow — refusal to run", () => {
       automation_runs: [{ data: { id: "refused-3" }, error: null }],
     });
     createAdminClientMock.mockReturnValue(admin);
-    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: false, reason: "STARTER 플랜의 이번 달 실행 한도(30회)를 모두 사용했습니다." });
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: false, reason: "크레딧이 부족해요. 구매하러 가기" });
 
     const result = await runDueAutomation("auto-1");
 
     expect(result.status).toBe("FAILED");
-    expect(result.errorMessage).toBe("STARTER 플랜의 이번 달 실행 한도(30회)를 모두 사용했습니다.");
+    expect(result.errorMessage).toBe("크레딧이 부족해요. 구매하러 가기");
     expect(getHandlerMock).not.toHaveBeenCalled();
+    expect(reserveCreditMock).not.toHaveBeenCalled();
     const expectedNext = computeNextRunAt(SCHEDULE).toISOString();
     expect(admin.updates.automations[0]).toMatchObject({ next_run_at: expectedNext });
   });
@@ -310,6 +325,51 @@ describe("runDueAutomation / runAutomationNow — refusal to run", () => {
 
     expect(result.status).toBe("FAILED");
     expect(admin.updates.automations).toBeUndefined();
+  });
+
+  it("records the exact purchase message when the last credit is lost in a reservation race", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: AUTOMATION, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-no-credit" }, error: null }, { data: null, error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    reserveCreditMock.mockRejectedValueOnce({ code: "P0001", message: "insufficient BLOG credits: missing 1" });
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result).toEqual({ runId: "run-no-credit", status: "FAILED", errorMessage: "크레딧이 부족해요. 구매하러 가기" });
+    expect(admin.updates.automation_runs[0]).toMatchObject({ status: "FAILED", error_message: "크레딧이 부족해요. 구매하러 가기" });
+    expect(getHandlerMock).not.toHaveBeenCalled();
+    expect(admin.updates.automations).toBeUndefined();
+  });
+
+  it("does not reserve a second credit for publishing an existing Shorts preview", async () => {
+    const shortsTemplate = { ...TEMPLATE, slug: "shorts" };
+    const admin = makeAdmin({
+      automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: shortsTemplate, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-publish" }, error: null }, { data: null, error: null }],
+      content_history: [{ data: [], error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    okHandler({ output: { operation: "PUBLISH" }, aiGenerationCount: 0 });
+
+    const result = await runAutomationNow("auto-1", {
+      shorts: { publish: { sourceRunId: "preview-1", platforms: ["youtube"] } },
+    });
+
+    expect(result.status).toBe("SUCCESS");
+    expect(ensureTrialCreditsMock).not.toHaveBeenCalled();
+    expect(canExecuteAutomationMock).not.toHaveBeenCalled();
+    expect(reserveCreditMock).not.toHaveBeenCalled();
+    expect(admin.rpc).toHaveBeenCalledWith("complete_automation_run_credit", expect.objectContaining({
+      p_run_id: "run-publish",
+      p_requires_credit: false,
+    }));
   });
 });
 
@@ -390,117 +450,27 @@ describe("runDueAutomation / runAutomationNow — exception isolation", () => {
     expect(admin.updates.automations[0]).toMatchObject({ next_run_at: computeNextRunAt(SCHEDULE).toISOString() });
     expect(admin.updates.automations[1]).toMatchObject({ status: "ERROR" });
     expect(incrementUsageMock).not.toHaveBeenCalled();
+    expect(releaseCreditByReferenceMock).toHaveBeenCalledWith("run-3", "AI provider exploded");
   });
 
-  it("marks the run FAILED when persisting the SUCCESS status itself fails, instead of leaving it RUNNING", async () => {
+  it("marks the run FAILED when the atomic SUCCESS/SETTLE RPC fails, instead of leaving it RUNNING", async () => {
     const admin = makeAdmin({
       automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }],
       businesses: [{ data: BUSINESS, error: null }],
       automation_templates: [{ data: TEMPLATE, error: null }],
-      automation_runs: [
-        noInFlight(),
-        { data: { id: "run-4" }, error: null },
-        { data: null, error: { message: "connection reset" } },
-        { data: null, error: null },
-      ],
+      automation_runs: [noInFlight(), { data: { id: "run-4" }, error: null }, { data: null, error: null }],
       content_history: [{ data: [], error: null }],
     });
     createAdminClientMock.mockReturnValue(admin);
+    admin.rpc.mockResolvedValueOnce({ data: null, error: new Error("connection reset") });
     canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
     okHandler({ output: { ok: true } });
 
     const result = await runDueAutomation("auto-1");
 
     expect(result.status).toBe("FAILED");
-    expect(admin.updates.automation_runs[1]).toMatchObject({ status: "FAILED" });
-    // [0] is the run-start next_run_at advance; [1] is the ERROR status write
-    // from the catch block once persisting SUCCESS itself failed.
-    expect(admin.updates.automations[1]).toMatchObject({ status: "ERROR" });
-  });
-});
-
-describe("runDueAutomation / runAutomationNow — credits (pay per use)", () => {
-  function setup(runId: string) {
-    const admin = makeAdmin({
-      automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }, { data: null, error: null }],
-      businesses: [{ data: BUSINESS, error: null }],
-      automation_templates: [{ data: TEMPLATE, error: null }],
-      automation_runs: [noInFlight(), { data: { id: runId }, error: null }, { data: null, error: null }],
-      content_history: [{ data: [], error: null }, { data: { id: "content-x" }, error: null }],
-    });
-    createAdminClientMock.mockReturnValue(admin);
-    canExecuteAutomationMock.mockResolvedValue({ allowed: true });
-    return admin;
-  }
-
-  it("reserves a credit before the run exists, stores the reservation on the run and settles it on success", async () => {
-    const admin = setup("run-c1");
-    okHandler({ output: { ok: true }, content: "body" });
-
-    const result = await runAutomationNow("auto-1");
-
-    expect(result.status).toBe("SUCCESS");
-    expect(reserveRunCreditMock).toHaveBeenCalledWith("user-1", "blog-marketing", expect.any(String));
-    const inserted = admin.inserts.automation_runs[0] as { id: string; input: Record<string, unknown> };
-    expect(inserted.input.creditReservationId).toBe("reservation-1");
-    // The reservation is tied to the very run id that was inserted.
-    expect(reserveRunCreditMock.mock.calls[0][2]).toBe(inserted.id);
-    expect(settleRunCreditMock).toHaveBeenCalledWith("reservation-1", "run-c1");
-    expect(releaseRunCreditMock).not.toHaveBeenCalled();
-  });
-
-  it("gives the credit back when the handler fails", async () => {
-    setup("run-c2");
-    getHandlerMock.mockReturnValue({ templateSlug: "blog-marketing", run: vi.fn().mockRejectedValue(new Error("AI provider exploded")) });
-
-    const result = await runAutomationNow("auto-1");
-
-    expect(result.status).toBe("FAILED");
-    expect(releaseRunCreditMock).toHaveBeenCalledWith("reservation-1", "run-c2", "run_failed");
-    expect(settleRunCreditMock).not.toHaveBeenCalled();
-  });
-
-  it("refuses a run with no usable credit without starting it, and never calls the handler", async () => {
-    const admin = makeAdmin({
-      automations: [{ data: AUTOMATION, error: null }],
-      businesses: [{ data: BUSINESS, error: null }],
-      automation_templates: [{ data: TEMPLATE, error: null }],
-      automation_runs: [noInFlight(), { data: { id: "refused-credit" }, error: null }],
-    });
-    createAdminClientMock.mockReturnValue(admin);
-    canExecuteAutomationMock.mockResolvedValue({ allowed: true });
-    reserveRunCreditMock.mockRejectedValueOnce(new InsufficientCreditsErrorMock("블로그 이용권이 없거나 모두 만료됐어요."));
-
-    const result = await runAutomationNow("auto-1");
-
-    expect(result).toMatchObject({ status: "FAILED", errorMessage: "블로그 이용권이 없거나 모두 만료됐어요." });
-    expect(getHandlerMock).not.toHaveBeenCalled();
-    expect(admin.inserts.automation_runs).toHaveLength(1);
-    expect(admin.inserts.automation_runs[0]).toMatchObject({ status: "FAILED" });
-  });
-
-  it("releases the reservation when the run row cannot be created", async () => {
-    const admin = makeAdmin({
-      automations: [{ data: AUTOMATION, error: null }],
-      businesses: [{ data: BUSINESS, error: null }],
-      automation_templates: [{ data: TEMPLATE, error: null }],
-      automation_runs: [noInFlight(), { data: null, error: { message: "automation_runs_one_inflight_idx" } }],
-    });
-    createAdminClientMock.mockReturnValue(admin);
-    canExecuteAutomationMock.mockResolvedValue({ allowed: true });
-
-    await expect(runAutomationNow("auto-1")).rejects.toBeTruthy();
-    expect(releaseRunCreditMock).toHaveBeenCalledWith("reservation-1", expect.any(String), "run_not_started");
-  });
-
-  it("does not charge for posting a preview that already exists", async () => {
-    const admin = setup("run-publish");
-    getHandlerMock.mockReturnValue({ templateSlug: "shorts", run: vi.fn().mockResolvedValue({ output: { ok: true } }) });
-
-    await runAutomationNow("auto-1", { shorts: { publish: { sourceRunId: "old-run", platforms: ["youtube"] } } });
-
-    expect(canExecuteAutomationMock).not.toHaveBeenCalled();
-    expect(reserveRunCreditMock).not.toHaveBeenCalled();
-    expect(admin.inserts.automation_runs[0]).not.toHaveProperty("input.creditReservationId");
+    expect(admin.updates.automation_runs[0]).toMatchObject({ status: "FAILED" });
+    // [0] advances the schedule, [1] records last_run_at, and [2] parks the automation.
+    expect(admin.updates.automations[2]).toMatchObject({ status: "ERROR" });
   });
 });

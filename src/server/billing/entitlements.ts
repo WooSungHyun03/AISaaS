@@ -3,161 +3,93 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
 import type { SubscriptionPlan } from "@/types/domain";
 import { logger } from "@/lib/logger";
-import { getPeriodKey, getPeriodRange } from "@/lib/utils/date";
+import { getPeriodKey } from "@/lib/utils/date";
 import { getPlanConfig, PLAN_LABEL } from "./plans";
-import { checkRunCredits, creditKindForTemplate } from "./run-credits";
+import type { CreditKind } from "./products";
 
 type DbClient = SupabaseClient<Database>;
+
+export const CREDIT_EXHAUSTED_MESSAGE = "크레딧이 부족해요. 구매하러 가기";
+
+const CREDIT_KIND_BY_TEMPLATE: Readonly<Record<string, CreditKind | undefined>> = {
+  "blog-marketing": "BLOG",
+  shorts: "SHORTS",
+};
+
+export function getAutomationCreditKind(templateSlug: string): CreditKind | null {
+  return CREDIT_KIND_BY_TEMPLATE[templateSlug] ?? null;
+}
 
 export interface EntitlementCheck {
   allowed: boolean;
   reason?: string;
-  /** canUseAnimatedShorts: the image-to-video quality the plan includes. */
+  /** Animated Shorts still use the legacy plan's provider quality setting. */
   animationQuality?: "standard" | "premium";
 }
 
-/**
- * Server-side plan + limit checks. Called from Server Actions / Route
- * Handlers *before* mutating anything — the UI may also hide buttons for
- * UX, but these checks are the real gate (Rule: never trust the client).
- */
-
 export async function getEffectivePlan(supabase: DbClient, userId: string): Promise<SubscriptionPlan> {
   const { data } = await supabase.from("subscriptions").select("plan, status").eq("user_id", userId).maybeSingle();
-
-  if (!data) return "FREE";
-  // A lapsed/canceled/past-due subscription loses paid entitlements
-  // immediately, even if `plan` still says STARTER/PRO until the row is
-  // reconciled by the next webhook event.
-  if (data.status === "CANCELED" || data.status === "PAST_DUE" || data.status === "INCOMPLETE") {
-    return "FREE";
-  }
+  if (!data || data.status === "CANCELED" || data.status === "PAST_DUE" || data.status === "INCOMPLETE") return "FREE";
   return data.plan;
 }
 
+/** Legacy automation-count limits remain until automation setup itself moves to products. */
 export async function canCreateAutomation(supabase: DbClient, userId: string): Promise<EntitlementCheck> {
   const plan = await getEffectivePlan(supabase, userId);
   const config = getPlanConfig(plan);
-
   if (config.automationLimit === null) return { allowed: true };
 
-  const { count, error } = await supabase
-    .from("automations")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", userId);
-
+  const { count, error } = await supabase.from("automations").select("id", { count: "exact", head: true }).eq("user_id", userId);
   if (error) throw error;
-
   if ((count ?? 0) >= config.automationLimit) {
     return {
       allowed: false,
-      reason: `${PLAN_LABEL[plan]} 요금제는 만들기 설정을 ${config.automationLimit}개까지 만들 수 있어요. 요금제를 올리면 더 만들 수 있어요.`,
+      reason: `${PLAN_LABEL[plan]} 요금제는 만들기 설정을 ${config.automationLimit}개까지 만들 수 있어요.`,
     };
   }
   return { allowed: true };
 }
 
+/**
+ * Execution entitlement is now only an unexpired balance check. The runner
+ * repeats this check and atomically reserves a credit, so a direct Server
+ * Action call or two concurrent requests cannot bypass billing.
+ */
 export async function canExecuteAutomation(
   supabase: DbClient,
   userId: string,
   templateSlug: string,
 ): Promise<EntitlementCheck> {
-  // Blog and Shorts are pay-per-use: a valid credit decides, never the plan
-  // (a free account without credits cannot generate; one with credits can).
-  if (creditKindForTemplate(templateSlug)) return checkRunCredits(supabase, userId, templateSlug);
+  const kind = getAutomationCreditKind(templateSlug);
+  if (!kind) return { allowed: true };
 
+  const { data, error } = await supabase
+    .from("credit_grants")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("kind", kind)
+    .gt("remaining", 0)
+    .gt("expires_at", new Date().toISOString())
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? { allowed: true } : { allowed: false, reason: CREDIT_EXHAUSTED_MESSAGE };
+}
+
+/**
+ * Animation model selection remains a legacy-plan quality choice. Content
+ * execution itself is governed only by Shorts credits and has no monthly cap.
+ */
+export async function canUseAnimatedShorts(supabase: DbClient, userId: string): Promise<EntitlementCheck> {
   const plan = await getEffectivePlan(supabase, userId);
-  const config = getPlanConfig(plan);
-
-  if (config.allowedTemplateSlugs && !config.allowedTemplateSlugs.includes(templateSlug)) {
-    return { allowed: false, reason: `${PLAN_LABEL[plan]} 요금제에서는 이 콘텐츠를 만들 수 없어요. 요금제를 올리면 이용할 수 있어요.` };
-  }
-
-  if (config.monthlyRunLimit === null) return { allowed: true };
-
-  const period = getPeriodKey();
-  const { data: usage } = await supabase
-    .from("usage")
-    .select("automation_runs")
-    .eq("user_id", userId)
-    .eq("period", period)
-    .maybeSingle();
-
-  const used = usage?.automation_runs ?? 0;
-  if (used >= config.monthlyRunLimit) {
-    return {
-      allowed: false,
-      reason: `${PLAN_LABEL[plan]} 요금제의 이번 달 제작 한도(${config.monthlyRunLimit}회)를 모두 썼어요. 다음 달에 다시 쓰거나 요금제를 올려보세요.`,
-    };
-  }
-
-  return { allowed: true };
-}
-
-/**
- * Counts this user's SUCCESS automation_runs for the given template slug
- * within the current calendar month. No FK embedding is available on these
- * generated types (see other two-step lookups in this codebase, e.g.
- * src/app/(app)/automations/actions.ts), so this resolves template -> the
- * user's automation ids for that template -> a count over automation_runs,
- * mirroring the same "SUCCESS only" counting rule incrementUsage uses for
- * monthlyRunLimit (see src/server/automations/runner.ts).
- */
-export async function getContentTypeUsage(supabase: DbClient, userId: string, templateSlug: string): Promise<number> {
-  const { data: template, error: templateError } = await supabase
-    .from("automation_templates")
-    .select("id")
-    .eq("slug", templateSlug)
-    .maybeSingle();
-  if (templateError) throw templateError;
-  if (!template) return 0;
-
-  const { data: automations, error: automationsError } = await supabase
-    .from("automations")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("template_id", template.id);
-  if (automationsError) throw automationsError;
-
-  const automationIds = (automations ?? []).map((a) => a.id);
-  if (automationIds.length === 0) return 0;
-
-  const { start, end } = getPeriodRange();
-  const { count, error: runsError } = await supabase
-    .from("automation_runs")
-    .select("id", { count: "exact", head: true })
-    .in("automation_id", automationIds)
-    .eq("status", "SUCCESS")
-    .gte("completed_at", start.toISOString())
-    .lt("completed_at", end.toISOString());
-  if (runsError) throw runsError;
-
-  return count ?? 0;
-}
-
-/**
- * Animated clips are part of the Shorts credit the run already reserved, so there is no separate
- * monthly allowance any more. This only reports the clip quality to use.
- */
-export async function canUseAnimatedShorts(_supabase: DbClient, _userId: string): Promise<EntitlementCheck> {
-  return { allowed: true, animationQuality: "standard" };
+  return { allowed: true, animationQuality: getPlanConfig(plan).animationQuality };
 }
 
 export async function getAutomationLimit(plan: SubscriptionPlan): Promise<number | null> {
   return getPlanConfig(plan).automationLimit;
 }
 
-export async function getMonthlyRunLimit(plan: SubscriptionPlan): Promise<number | null> {
-  return getPlanConfig(plan).monthlyRunLimit;
-}
-
-/**
- * Increments this month's usage counters atomically through the
- * `increment_usage` RPC (0032_audit_hardening.sql) so concurrent runs can't
- * lose an increment. Falls back to the old read-then-write only when the RPC
- * doesn't exist yet (a deploy that ran before the migration did), so rolling
- * the code out ahead of the migration never breaks run bookkeeping.
- */
+/** Legacy usage rows remain as analytics; they no longer authorize execution. */
 export async function incrementUsage(
   admin: DbClient,
   userId: string,
@@ -166,7 +98,6 @@ export async function incrementUsage(
   const period = getPeriodKey();
   const runs = delta.automationRuns ?? 0;
   const generations = delta.aiGenerations ?? 0;
-
   const { error: rpcError } = await admin.rpc("increment_usage", {
     p_user_id: userId,
     p_period: period,
@@ -174,10 +105,7 @@ export async function incrementUsage(
     p_generations: generations,
   });
   if (!rpcError) return;
-  // PGRST202 = function not found in the schema cache, 42883 = undefined_function.
   if (rpcError.code !== "PGRST202" && rpcError.code !== "42883") {
-    // The generated content already exists; a bookkeeping failure must not
-    // turn a successful run into a failed one. Surface it loudly instead.
     logger.error("usage_increment_failed", { userId, period, code: rpcError.code });
     return;
   }
@@ -188,12 +116,10 @@ export async function incrementUsage(
     .eq("user_id", userId)
     .eq("period", period)
     .maybeSingle();
-
   if (!existing) {
     await admin.from("usage").insert({ user_id: userId, period, automation_runs: runs, ai_generations: generations });
     return;
   }
-
   await admin
     .from("usage")
     .update({ automation_runs: existing.automation_runs + runs, ai_generations: existing.ai_generations + generations })

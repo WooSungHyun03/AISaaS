@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { CreditKind } from "./products";
+import { FREE_TRIAL_CREDITS, type CreditKind } from "./products";
 
 function requireRpcResult<T>(data: T | null, error: { message: string } | null): T {
   if (error) throw error;
@@ -61,6 +61,43 @@ export async function releaseCredit(reservationId: string, reason?: string | nul
     p_reason: reason ?? null,
   });
   if (error) throw error;
+}
+
+export async function releaseCreditByReference(referenceId: string, reason?: string | null): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("release_credit_by_reference", {
+    p_reference_id: referenceId,
+    p_reason: reason ?? null,
+  });
+  return requireRpcResult(data, error);
+}
+
+export async function settleCreditByReference(referenceId: string): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("settle_credit_by_reference", {
+    p_reference_id: referenceId,
+  });
+  return requireRpcResult(data, error);
+}
+
+export function isInsufficientCreditError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; message?: unknown };
+  return value.code === "P0001" || (typeof value.message === "string" && /insufficient (BLOG|SHORTS) credits/i.test(value.message));
+}
+
+/** Grants the configured signup trial once. Safe to call on every first-party entry point. */
+export async function ensureTrialCredits(userId: string, now = new Date()): Promise<boolean> {
+  const expiresAt = new Date(now.getTime() + FREE_TRIAL_CREDITS.validityDays * 24 * 60 * 60 * 1_000);
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("ensure_trial_credits", {
+    p_user_id: userId,
+    p_blog_amount: FREE_TRIAL_CREDITS.amounts.BLOG,
+    p_shorts_amount: FREE_TRIAL_CREDITS.amounts.SHORTS,
+    p_expires_at: expiresAt.toISOString(),
+    p_reference_id: FREE_TRIAL_CREDITS.referenceId,
+  });
+  return requireRpcResult(data, error);
 }
 
 export async function expireCredits(now = new Date()): Promise<number> {

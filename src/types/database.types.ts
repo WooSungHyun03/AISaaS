@@ -400,6 +400,24 @@ export interface Database {
         Update: never;
         Relationships: [];
       };
+      credit_trial_claims: {
+        Row: {
+          user_id: string;
+          blog_amount: number;
+          shorts_amount: number;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          blog_amount: number;
+          shorts_amount: number;
+          expires_at: string;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [];
+      };
       usage: {
         Row: {
           id: string;
@@ -842,6 +860,33 @@ export interface Database {
       release_credit: {
         Args: { p_reservation_id: string; p_reason?: string | null };
         Returns: void;
+      };
+      release_credit_by_reference: {
+        Args: { p_reference_id: string; p_reason?: string | null };
+        Returns: boolean;
+      };
+      settle_credit_by_reference: {
+        Args: { p_reference_id: string };
+        Returns: boolean;
+      };
+      ensure_trial_credits: {
+        Args: {
+          p_user_id: string;
+          p_blog_amount: number;
+          p_shorts_amount: number;
+          p_expires_at: string;
+          p_reference_id?: string;
+        };
+        Returns: boolean;
+      };
+      complete_automation_run_credit: {
+        Args: {
+          p_run_id: string;
+          p_output: Json;
+          p_completed_at?: string;
+          p_requires_credit?: boolean;
+        };
+        Returns: boolean;
       };
       expire_credits: {
         Args: { p_now?: string };

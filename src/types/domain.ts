@@ -17,6 +17,7 @@ export type BillingCheckoutSession = Database["public"]["Tables"]["billing_check
 export type BillingOrder = Database["public"]["Tables"]["billing_orders"]["Row"];
 export type CreditGrant = Database["public"]["Tables"]["credit_grants"]["Row"];
 export type CreditLedgerEntry = Database["public"]["Tables"]["credit_ledger"]["Row"];
+export type CreditTrialClaim = Database["public"]["Tables"]["credit_trial_claims"]["Row"];
 export type Usage = Database["public"]["Tables"]["usage"]["Row"];
 export type SetupRequest = Database["public"]["Tables"]["setup_requests"]["Row"];
 export type DirectoryTool = Database["public"]["Tables"]["directory_tools"]["Row"];

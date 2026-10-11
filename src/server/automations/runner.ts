@@ -2,14 +2,18 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
-import { canExecuteAutomation, incrementUsage } from "@/server/billing/entitlements";
 import {
-  InsufficientCreditsError,
-  readCreditReservationId,
-  releaseRunCredit,
-  reserveRunCredit,
-  settleRunCredit,
-} from "@/server/billing/run-credits";
+  canExecuteAutomation,
+  CREDIT_EXHAUSTED_MESSAGE,
+  getAutomationCreditKind,
+  incrementUsage,
+} from "@/server/billing/entitlements";
+import {
+  ensureTrialCredits,
+  isInsufficientCreditError,
+  releaseCreditByReference,
+  reserveCredit,
+} from "@/server/billing/credits";
 import { isAppError } from "@/server/shared/errors";
 import { isDeferredOutcome, type AutomationHandlerResult, type AutomationRunContext, type AutomationSchedule } from "@/types/automation";
 import type { Automation, AutomationRunSource, Json } from "@/types/domain";
@@ -36,11 +40,11 @@ export interface RunAutomationOptions {
 
 /**
  * Persists a run the runner never actually started (paused/error automation,
- * plan limit reached) as an already-`FAILED` row with the reason, so it
+ * no usable credit) as an already-`FAILED` row with the reason, so it
  * shows up in history instead of vanishing as a silent no-op. Never touches
  * `automations.status` — refusing a run isn't itself a new failure. When a
- * SCHEDULED run is refused for a reason that can recur next tick (a plan
- * limit, not a paused/error automation already excluded from the due
+ * SCHEDULED run is refused for a reason that can recur next tick (an empty
+ * credit balance, not a paused/error automation already excluded from the due
  * query), `next_run_at` is advanced so the cron loop doesn't retry the same
  * slot every few minutes until the next legitimately due time.
  */
@@ -82,14 +86,46 @@ async function recordRefusedRun(
   return { runId: run.id, status: "FAILED", errorMessage: reason };
 }
 
+/** Handles the narrow race where the balance check passed but another run reserved the last credit first. */
+async function recordCreditRefusal(
+  admin: AdminClient,
+  automation: Automation,
+  runId: string,
+  source: AutomationRunSource,
+  advanceSchedule: boolean,
+): Promise<RunAutomationResult> {
+  const now = new Date().toISOString();
+  const { error } = await admin
+    .from("automation_runs")
+    .update({ status: "FAILED", error_message: CREDIT_EXHAUSTED_MESSAGE, completed_at: now })
+    .eq("id", runId)
+    .eq("status", "RUNNING");
+  if (error) throw error;
+
+  if (advanceSchedule) {
+    try {
+      const nextRunAt = computeNextRunAt(automation.schedule as unknown as AutomationSchedule).toISOString();
+      const { error: advanceError } = await admin.from("automations").update({ next_run_at: nextRunAt }).eq("id", automation.id);
+      if (advanceError) throw advanceError;
+    } catch (scheduleError) {
+      logger.error("automation_credit_refusal_schedule_advance_failed", {
+        automationId: automation.id,
+        runId,
+        error: scheduleError instanceof Error ? scheduleError.message : String(scheduleError),
+      });
+    }
+  }
+
+  return { runId, status: "FAILED", errorMessage: CREDIT_EXHAUSTED_MESSAGE };
+}
+
 interface RunFinishContext {
   automation: Automation;
   templateSlug: string;
   runId: string;
   source: AutomationRunSource;
   startedAtMs: number;
-  /** The credit this run reserved, settled on success and released on failure. */
-  creditReservationId?: string | null;
+  creditReferenceId?: string;
 }
 
 /** Marks a finished run SUCCESS and does the bookkeeping that follows (history row, last_run_at, usage). */
@@ -98,19 +134,6 @@ async function persistSuccess(admin: AdminClient, ctx: RunFinishContext, result:
   const automationId = automation.id;
   const run = { id: runIdValue };
   const template = { slug: ctx.templateSlug };
-  // Every write below is checked for a returned `error` and thrown into
-  // the catch block on failure: the Supabase client resolves a failed
-  // query rather than throwing, so a silently-ignored error here (a
-  // dropped connection, a constraint violation) would leave the run
-  // marked SUCCESS while content_history never actually got written — or
-  // worse, leave the row stuck RUNNING when even the status update itself
-  // fails silently.
-  const { error: markSuccessError } = await admin
-    .from("automation_runs")
-    .update({ status: "SUCCESS", output: result.output ?? {}, completed_at: new Date().toISOString() })
-    .eq("id", run.id);
-  if (markSuccessError) throw markSuccessError;
-
   let contentHistoryId: string | undefined;
   if (result.content) {
     const { data: contentHistory, error: contentHistoryError } = await admin
@@ -144,8 +167,18 @@ async function persistSuccess(admin: AdminClient, ctx: RunFinishContext, result:
     .eq("id", automationId);
   if (lastRunAtError) throw lastRunAtError;
 
+  // Run-row locking, SETTLE and SUCCESS happen in one transaction so the
+  // stale reaper and the runner cannot choose different terminal outcomes.
+  const { data: completed, error: markSuccessError } = await admin.rpc("complete_automation_run_credit", {
+    p_run_id: run.id,
+    p_output: (result.output ?? {}) as Json,
+    p_completed_at: new Date().toISOString(),
+    p_requires_credit: Boolean(ctx.creditReferenceId),
+  });
+  if (markSuccessError) throw markSuccessError;
+  if (!completed) throw new Error("Automation run was already closed before success could be recorded.");
+
   await incrementUsage(admin, automation.user_id, { automationRuns: 1, aiGenerations: result.aiGenerationCount ?? 1 });
-  await settleRunCredit(ctx.creditReservationId, run.id);
 
   logger.info("automation_run_success", {
     automationId,
@@ -166,10 +199,23 @@ async function persistFailure(admin: AdminClient, ctx: RunFinishContext, err: un
   const template = { slug: ctx.templateSlug };
   const errorMessage = err instanceof Error ? err.message : "Unknown error";
 
+  if (ctx.creditReferenceId) {
+    try {
+      await releaseCreditByReference(ctx.creditReferenceId, errorMessage);
+    } catch (releaseError) {
+      logger.error("automation_credit_release_failed", {
+        automationId,
+        runId: run.id,
+        message: releaseError instanceof Error ? releaseError.message : String(releaseError),
+      });
+    }
+  }
+
   const { error: markFailedError } = await admin
     .from("automation_runs")
     .update({ status: "FAILED", error_message: errorMessage, completed_at: new Date().toISOString() })
-    .eq("id", run.id);
+    .eq("id", run.id)
+    .eq("status", "RUNNING");
   if (markFailedError) {
     // This is the single most important write in the whole function —
     // if it fails there is nothing left to safely retry inside this
@@ -177,9 +223,6 @@ async function persistFailure(admin: AdminClient, ctx: RunFinishContext, err: un
     // Make that loud instead of silent.
     logger.error("automation_run_terminal_write_failed", { automationId, runId: run.id, dbError: markFailedError });
   }
-
-  // The content was never delivered, so the credit goes back.
-  await releaseRunCredit(ctx.creditReservationId, run.id, "run_failed");
 
   // Stop scheduling this automation until a human looks at it — no
   // infinite retries (Rule 29). This is a stronger guarantee than merely
@@ -211,8 +254,8 @@ async function persistFailure(admin: AdminClient, ctx: RunFinishContext, err: un
 
 /**
  * The one execution path every automation type shares:
- *   load context -> guard against paused/limited/duplicate runs -> call the
- *   handler -> persist automation_runs + content_history -> update usage.
+ *   load context -> guard against paused/uncredited/duplicate runs -> reserve
+ *   credit -> call the handler -> settle or release -> persist history.
  * Automation-type differences live entirely inside the handler
  * (src/server/automations/handlers/), never here.
  */
@@ -268,15 +311,18 @@ async function executeAutomation(
     return recordRefusedRun(admin, automation, source, reason, { advanceSchedule: false });
   }
 
-  // Posting a preview that was already made generates nothing, so it never needs (or spends) a credit.
-  const publishesExistingVideo = Boolean(options.shorts?.publish);
-  const entitlement = publishesExistingVideo
-    ? { allowed: true as const, reason: undefined }
-    : await canExecuteAutomation(admin, automation.user_id, template.slug);
-  if (!entitlement.allowed) {
-    return recordRefusedRun(admin, automation, source, entitlement.reason ?? "이 플랜에서는 지금 이 자동화를 실행할 수 없습니다.", {
-      advanceSchedule,
-    });
+  const creditKind = getAutomationCreditKind(template.slug);
+  // Re-publishing an already rendered Shorts preview performs no AI/render
+  // work and follows the existing aiGenerationCount: 0 precedent.
+  const consumesCredit = Boolean(creditKind) && !(template.slug === "shorts" && options.shorts?.publish);
+  if (consumesCredit) {
+    await ensureTrialCredits(automation.user_id);
+    const entitlement = await canExecuteAutomation(admin, automation.user_id, template.slug);
+    if (!entitlement.allowed) {
+      return recordRefusedRun(admin, automation, source, entitlement.reason ?? CREDIT_EXHAUSTED_MESSAGE, {
+        advanceSchedule,
+      });
+    }
   }
 
   // Duplicate-run guard. A partial unique index on automation_runs backs
@@ -291,42 +337,45 @@ async function executeAutomation(
     throw new Error("This automation already has a run in progress.");
   }
 
-  // Pay-per-use: the credit is reserved before the run exists, so two
-  // simultaneous requests can never both spend the last one. The reservation
-  // is tied to the run id chosen here and released if the run cannot start.
-  const runId = crypto.randomUUID();
-  let creditReservationId: string | null = null;
-  try {
-    creditReservationId = publishesExistingVideo ? null : await reserveRunCredit(automation.user_id, template.slug, runId);
-  } catch (error) {
-    if (error instanceof InsufficientCreditsError) {
-      return recordRefusedRun(admin, automation, source, error.message, { advanceSchedule });
-    }
-    throw error;
-  }
-
   const { data: run, error: insertError } = await admin
     .from("automation_runs")
     .insert({
-      id: runId,
       automation_id: automationId,
       status: "RUNNING",
       source,
       input: {
         ...(options.calendarItem ? { calendarItem: options.calendarItem } : {}),
         ...(options.shorts ? { shorts: options.shorts } : {}),
-        ...(creditReservationId ? { creditReservationId } : {}),
       } as unknown as Json,
       started_at: new Date().toISOString(),
     })
     .select()
     .single();
   if (insertError || !run) {
-    await releaseRunCredit(creditReservationId, runId, "run_not_started");
     throw insertError ?? new Error("Failed to create automation run");
   }
 
+  const finish = {
+    automation,
+    templateSlug: template.slug,
+    runId: run.id,
+    source,
+    startedAtMs,
+    ...(consumesCredit ? { creditReferenceId: run.id } : {}),
+  } satisfies RunFinishContext;
+
   try {
+    if (consumesCredit && creditKind) {
+      try {
+        await reserveCredit({ userId: automation.user_id, kind: creditKind, referenceId: run.id });
+      } catch (error) {
+        if (isInsufficientCreditError(error)) {
+          return recordCreditRefusal(admin, automation, run.id, source, advanceSchedule);
+        }
+        throw error;
+      }
+    }
+
     // Recomputed and persisted at run START, not completion. findDueAutomations()
     // re-polls on every cron tick independent of how long the handler takes;
     // leaving next_run_at at its already-past value until the handler finishes
@@ -366,9 +415,9 @@ async function executeAutomation(
       return { runId: run.id, status: "RUNNING", progress: outcome.deferred.progress };
     }
 
-    return await persistSuccess(admin, { automation, templateSlug: template.slug, runId: run.id, source, startedAtMs, creditReservationId }, outcome);
+    return await persistSuccess(admin, finish, outcome);
   } catch (err) {
-    return persistFailure(admin, { automation, templateSlug: template.slug, runId: run.id, source, startedAtMs, creditReservationId }, err);
+    return persistFailure(admin, finish, err);
   }
 }
 
@@ -480,20 +529,21 @@ export async function advanceDeferredRun(runId: string): Promise<AdvanceDeferred
   if (!automation) return { runId, status: "NOT_DEFERRED" };
   const { data: business } = await admin.from("businesses").select("*").eq("id", automation.business_id).single();
   const { data: template } = await admin.from("automation_templates").select("*").eq("id", automation.template_id).single();
+  const input = run.input && typeof run.input === "object" && !Array.isArray(run.input) ? (run.input as Record<string, Json>) : {};
+  const shortsInput = input.shorts as AutomationRunContext["shorts"];
+  const consumesCredit = Boolean(getAutomationCreditKind(template?.slug ?? "")) && !shortsInput?.publish;
   const finish: RunFinishContext = {
     automation,
     templateSlug: template?.slug ?? "",
     runId,
     source: run.source,
     startedAtMs: Date.parse(run.created_at),
-    creditReservationId: readCreditReservationId(run.input),
+    ...(consumesCredit ? { creditReferenceId: runId } : {}),
   };
   try {
     if (!business || !template) throw new Error("Business or template not found for a deferred run.");
     const handler = getHandler(template.slug);
     if (!handler.resume) throw new Error(`The ${template.slug} handler cannot resume a deferred run.`);
-    const input = run.input && typeof run.input === "object" && !Array.isArray(run.input) ? (run.input as Record<string, Json>) : {};
-
     const outcome = await handler.resume(
       {
         automation,
@@ -502,7 +552,7 @@ export async function advanceDeferredRun(runId: string): Promise<AdvanceDeferred
         recentTopics: [],
         runId,
         calendarItem: input.calendarItem as AutomationRunContext["calendarItem"],
-        shorts: input.shorts as AutomationRunContext["shorts"],
+        shorts: shortsInput,
       },
       job.state,
     );

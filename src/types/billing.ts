@@ -7,18 +7,6 @@ export interface PlanConfig {
   priceMonthlyKrw: number;
   /** Max number of ACTIVE + DRAFT + PAUSED automations. null = unlimited. */
   automationLimit: number | null;
-  /** Max automation_runs per calendar month, across all content types. null = unlimited. */
-  monthlyRunLimit: number | null;
-  /** Max SUCCESS runs of the "blog-marketing" template per calendar month. null = unlimited. */
-  monthlyBlogLimit: number | null;
-  /** Max SUCCESS runs of the "shorts" template per calendar month. null = unlimited. */
-  monthlyShortsLimit: number | null;
-  /**
-   * Max SUCCESS Shorts per calendar month whose characters were really animated
-   * (image-to-video clips cost far more than the rest of the pipeline). Beyond it,
-   * character Shorts still render with the simple motion effect. null = unlimited.
-   */
-  monthlyAnimatedShortsLimit: number | null;
   /** Which image-to-video model the plan's animated videos use: `premium` is the stronger (pricier) one. */
   animationQuality: "standard" | "premium";
   /** Automation templates this plan is allowed to use. null = all. */

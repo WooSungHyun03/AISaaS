@@ -28,7 +28,7 @@ Without `ANIMATION_PROVIDER=fal` (or without the key) character videos still wor
 ## Cost and limits
 
 - Kling 2.5 Turbo Pro on fal.ai: US$0.35 per 5 s clip; Kling 3.0 Pro about US$0.56 (verify at https://fal.ai/models); a music track about US$0.10. A video has 4–6 scenes → roughly **US$1.4–2.1**, plus the JSON2Video render (≈ 25 credits).
-- A promo animates at most 4 scenes (≈ US$1.4); a character video has 4–6 clips. Plans cap animated videos per month (`monthlyAnimatedShortsLimit` in `src/server/billing/plans.ts`: Free 0, Starter 2, Pro 6). Past the cap the video is still made, with the simple motion effect and a note. Change the numbers there only.
+- A promo animates at most 4 scenes (≈ US$1.4); a character video has 4–6 clips. Generating the Shorts preview consumes one `SHORTS` credit for the whole run. Publishing that existing preview consumes no additional credit. If the animation provider is unavailable, the video uses the simple motion effect and reports that fallback in the preview.
 - Clips are a fixed 5 s (the shortest length these models bill); each spoken line is ≤ 28 characters so one clip covers it, and the clip is cut to / looped over the voice.
 - Only the images the owner marked as characters are sent to the animation model. fal retries server failures itself; the app retries a failed clip once with a fresh request, then fails the run.
 - The default endpoint can be deprecated (the Veo 3.1 Fast endpoint, for example, is scheduled to be). If clips fail with "not found", pick a current endpoint and set `ANIMATION_MODEL`.

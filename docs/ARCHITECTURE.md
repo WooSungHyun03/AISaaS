@@ -78,9 +78,9 @@ A handler only implements "what does this automation actually do" — loading co
 `executeAutomation()` is the single internal function both `runAutomationNow()` and `runDueAutomation()` call — every guard below applies identically to a manual click and a cron tick, instead of being re-implemented (and potentially missed) at each entry point:
 
 - **Status gate.** A `PAUSED` or `ERROR` automation is refused before the handler ever runs. `findDueAutomations()` already only selects `ACTIVE` automations, so this mainly protects the manual "Run Now" path and closes a race where an automation flips status between being read and actually executing.
-- **Entitlement gate.** `canExecuteAutomation()` (`src/server/billing/entitlements.ts`) is re-checked inside the runner itself — not only in the `triggerRunNow()` Server Action — so the cron path is covered too, not just manual runs initiated through the UI.
-- **Refused runs are recorded, not silently dropped.** Both gates above insert an already-`FAILED` `automation_runs` row with a human-readable `error_message` (`recordRefusedRun()`), so a refusal shows up in run history like any other outcome instead of vanishing as a no-op. Neither gate touches `automations.status` — being paused or over a plan limit isn't itself a new failure.
-- **No retry-storm on a recurring refusal.** If a `SCHEDULED` run is refused for a reason that can repeat on the very next tick (a plan limit — a paused/error automation is already excluded from the due query), `next_run_at` is advanced immediately so the cron loop waits for the next legitimately due slot instead of re-attempting and re-refusing every few minutes.
+- **Credit gate.** `canExecuteAutomation()` checks for an unexpired BLOG or SHORTS balance, and the runner atomically reserves one credit before invoking the handler. The check is repeated inside the runner — not only in the `triggerRunNow()` Server Action — so direct calls and cron runs cannot bypass billing.
+- **Refused runs are recorded, not silently dropped.** Both gates above insert an already-`FAILED` `automation_runs` row with a human-readable `error_message` (`recordRefusedRun()`), so a refusal shows up in run history like any other outcome instead of vanishing as a no-op. Neither gate touches `automations.status` — being paused or out of credit isn't itself a new failure.
+- **No retry-storm on a recurring refusal.** If a `SCHEDULED` run is refused because its credit balance is empty, `next_run_at` is advanced immediately so the cron loop waits for the next legitimately due slot instead of re-attempting every few minutes.
 - **Every status-transition write is error-checked.** The Supabase client resolves a failed query with `{ error }` rather than throwing; `executeAutomation()` explicitly checks and re-throws on every write that transitions a run's lifecycle (marking `SUCCESS`, writing `content_history`, advancing `next_run_at`) so a silently swallowed DB error can never leave a run's `automation_runs` row out of sync with reality, and can never leave it stuck `RUNNING` because the one write meant to close it out failed unnoticed. The final `FAILED`/`ERROR` writes inside the `catch` block are themselves error-checked too (logged as `automation_run_terminal_write_failed` if even that fails) — there is nothing further to safely retry inside the same request, so this is best-effort observability, not a guarantee.
 - **`source: "MANUAL" | "SCHEDULED"`** (new column, `0016_automation_run_source.sql`) is stamped on every `automation_runs` row at creation, including refused ones — the one place to answer "was this a dashboard click or a cron tick" without inferring it from `started_at`/`next_run_at` heuristics.
 - **On a genuine handler failure**, the automation still flips to `ERROR` (unchanged from before this Day) — a stronger guarantee against a retry storm than merely advancing `next_run_at`, since `findDueAutomations()` only ever selects `status = 'ACTIVE'` and reactivating always recomputes a fresh `next_run_at` anyway.
@@ -553,6 +553,32 @@ keeps a snapshot so historical orders do not change when the catalog changes.
 instead of granting credits again. Both Toss keys must start with `test_`;
 live keys are rejected before creating or confirming an order. The mock
 provider retains its production opt-in guard.
+
+### Credit-backed execution
+
+`FREE_TRIAL_CREDITS` in `src/server/billing/products.ts` is the only signup
+trial configuration. On the first authenticated app entry,
+`ensure_trial_credits()` records one `credit_trial_claims` row and grants the
+configured BLOG and SHORTS balances in one transaction. The claim primary key
+makes parallel page loads and retries idempotent.
+
+For a Blog generation or Shorts generation/preview, the runner uses the
+`automation_runs.id` as the immutable credit reference:
+
+```
+balance check → automation_runs RUNNING → reserve_credit(run id)
+    → handler SUCCESS → complete_automation_run_credit(run id)
+                         (SETTLE + run SUCCESS in one transaction)
+    → handler FAILED  → release_credit_by_reference(run id)
+```
+
+`reserve_credit()` serializes on the run reference and returns the original
+reservation on a retry. Deferred runs keep the reservation while rendering;
+their final resume settles or releases it. `reapStaleRuns()` releases a stale
+run by the same reference after marking it failed. Publishing an already
+rendered Shorts preview is a publish-only operation (`aiGenerationCount: 0`)
+and consumes no additional credit. Monthly Blog/Shorts/run limits no longer
+authorize execution; the legacy `usage` table remains analytics only.
 
 ### Legacy subscription flow
 

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
+import { ensureTrialCredits } from "@/server/billing/credits";
 import { getCreditBalances } from "@/server/billing/run-credits";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -15,6 +16,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) {
     redirect("/login");
   }
+
+  // The RPC is idempotent, so every authenticated first-party entry can safely
+  // ensure the one-time trial. A migration rolling out behind the app shell
+  // must not make every protected page unavailable.
+  await ensureTrialCredits(user.id).catch(() => false);
 
   // A missing credits table must not take the whole app shell down.
   const credits = await getCreditBalances(supabase, user.id).catch(() => null);

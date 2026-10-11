@@ -3,7 +3,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { createAdminClientMock } = vi.hoisted(() => ({ createAdminClientMock: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: createAdminClientMock }));
 vi.mock("./handlers", () => ({ getHandler: vi.fn() }));
-vi.mock("@/server/billing/entitlements", () => ({ canExecuteAutomation: vi.fn(), incrementUsage: vi.fn() }));
+vi.mock("@/server/billing/entitlements", () => ({
+  canExecuteAutomation: vi.fn(),
+  incrementUsage: vi.fn(),
+  getAutomationCreditKind: (slug: string) => slug === "blog-marketing" ? "BLOG" : slug === "shorts" ? "SHORTS" : null,
+  CREDIT_EXHAUSTED_MESSAGE: "크레딧이 부족해요. 구매하러 가기",
+}));
+vi.mock("@/server/billing/credits", () => ({
+  ensureTrialCredits: vi.fn(),
+  reserveCredit: vi.fn(),
+  settleCreditByReference: vi.fn().mockResolvedValue(true),
+  releaseCreditByReference: vi.fn().mockResolvedValue(true),
+  isInsufficientCreditError: vi.fn().mockReturnValue(false),
+}));
 
 const { advanceDeferredRun, readDeferredJob } = await import("./runner");
 

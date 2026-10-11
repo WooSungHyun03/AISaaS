@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, Check, CircleCheck, CircleX, PlayCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { ensureTrialCredits } from "@/server/billing/credits";
 import { getCreditBalances } from "@/server/billing/run-credits";
 import { getPeriodKey, SERVICE_TIMEZONE, zonedTimeToUtc } from "@/lib/utils/date";
 import { StatCard, StatGroup } from "@/components/dashboard/stat-card";
@@ -33,6 +34,9 @@ export default async function DashboardPage() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+  // Layouts and pages may render concurrently, so the dashboard also performs
+  // the idempotent first-entry grant before reading its balances.
+  await ensureTrialCredits(user.id).catch(() => false);
   const periodKey = getPeriodKey();
   const [year, month] = periodKey.split("-").map(Number);
 

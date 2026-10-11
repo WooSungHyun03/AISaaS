@@ -61,4 +61,9 @@ describe("describeAutomationRunError — video, YouTube and plan limits", () => 
     const notAllowed = "무료 요금제에서는 이 콘텐츠를 만들 수 없어요. 요금제를 올리면 이용할 수 있어요.";
     expect(describeAutomationRunError(notAllowed)).toBe(notAllowed);
   });
+
+  it("passes the credit purchase message through unchanged", () => {
+    const message = "크레딧이 부족해요. 구매하러 가기";
+    expect(describeAutomationRunError(message)).toBe(message);
+  });
 });
