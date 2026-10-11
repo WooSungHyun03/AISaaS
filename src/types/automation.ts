@@ -110,6 +110,12 @@ export interface AutomationHandler<TRun extends AutomationHandlerOutcome = Autom
   run(ctx: AutomationRunContext): Promise<TRun>;
   /** Continues a deferred run from the state it last returned. Bounded: one quick step per call. */
   resume?(ctx: AutomationRunContext, state: Json): Promise<AutomationHandlerOutcome>;
+  /**
+   * A reason this run cannot produce a real result right now (a service is not connected), or null. It is asked
+   * before any credit is reserved: the run is recorded as refused, nothing is charged, and the automation is not
+   * parked in ERROR — the owner cannot fix a server setting.
+   */
+  preflight?(ctx: AutomationRunContext): string | null;
 }
 
 export type AutomationAvailability = "AVAILABLE" | "BETA" | "COMING_SOON";

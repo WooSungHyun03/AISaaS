@@ -30,6 +30,8 @@ interface Preview {
   format: "character" | "promo" | null;
   animationMode: "video" | "tween" | "photos" | null;
   animationNote: string | null;
+  /** A placeholder from a test renderer, not a real video. */
+  sample: boolean;
 }
 
 function previewBadge(format: Preview["format"], mode: Preview["animationMode"]): string | null {
@@ -149,7 +151,13 @@ export function ShortsStudio({
 
       <section aria-labelledby="preview-heading" className="grid gap-6 lg:grid-cols-[minmax(280px,380px)_1fr]">
         <div className="overflow-hidden rounded-3xl border bg-neutral-950 shadow-sm">
-          {latestPreview ? (
+          {latestPreview?.sample ? (
+            <div className="flex aspect-[9/16] min-h-[480px] flex-col items-center justify-center gap-3 px-8 text-center text-white" role="status">
+              <span className="flex size-14 items-center justify-center rounded-2xl bg-white/10"><Film className="size-7" aria-hidden="true" /></span>
+              <p className="font-bold">테스트용 샘플이에요</p>
+              <p className="text-sm leading-6 text-white/65">영상 제작 서비스(JSON2Video)가 연결되지 않은 환경이라 실제 영상은 만들어지지 않았어요. 대본·장면 구성만 확인할 수 있고, 게시할 수 없어요.</p>
+            </div>
+          ) : latestPreview ? (
             <video
               key={latestPreview.videoUrl}
               src={latestPreview.videoUrl}
@@ -203,7 +211,7 @@ export function ShortsStudio({
               })}
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <Button disabled={busy || !latestPreview || platforms.length === 0 || platforms.some((platform) => connections[platform] !== "CONNECTED")} onClick={() => latestPreview && run("publish", () => publishShortsNow(automationId, latestPreview.runId, platforms), "선택한 플랫폼에 게시했어요.")}>
+              <Button disabled={busy || !latestPreview || latestPreview.sample || platforms.length === 0 || platforms.some((platform) => connections[platform] !== "CONNECTED")} onClick={() => latestPreview && run("publish", () => publishShortsNow(automationId, latestPreview.runId, platforms), "선택한 플랫폼에 게시했어요.")}>
                 {busyAction === "publish" ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Send aria-hidden="true" />}{busyAction === "publish" ? "게시 중…" : "지금 게시"}
               </Button>
               <p className="text-xs leading-5 text-muted-foreground">YouTube는 현재 비공개 상태로 업로드됩니다.</p>

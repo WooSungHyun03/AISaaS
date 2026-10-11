@@ -249,6 +249,8 @@ describe("shortsAutomationHandler", () => {
       hook: "사장님, 큰일 났어요!",
       topic: "마케팅 대신 해주는 로봇",
       publicationResults: {},
+      // The test renderer is not a real one: the result is flagged as a sample so it is never shown or posted as a finished video.
+      sampleVideo: true,
     });
     expect(done.content).toBe(plan.scenes.map((scene) => scene.text).join(" "));
     expect(done).toMatchObject({ externalUrl: "https://cdn.example.com/skit.mp4", title: plan.hook, contentType: "shorts" });
@@ -581,6 +583,25 @@ describe("shortsAutomationHandler", () => {
       animationProviderMock.getClip.mockResolvedValueOnce({ state: "failed", message: "x" }).mockResolvedValue({ state: "pending" });
       await resume(started.deferred.state);
       expect(animationProviderMock.startClip.mock.calls.at(-1)?.[1]).toEqual({ quality: "premium" });
+    });
+  });
+
+  describe("without a real video renderer", () => {
+    it("refuses to start in production (nothing to render with) but still lets an existing preview be posted", async () => {
+      const { shortsAutomationHandler } = await import("./shorts");
+      vi.stubEnv("NODE_ENV", "production");
+      try {
+        const ctx = { automation: {}, business: {}, config: {}, recentTopics: [], runId: "r" } as never;
+        expect(shortsAutomationHandler.preflight?.(ctx)).toContain("영상 제작 서비스가 아직 연결되지 않아");
+        expect(shortsAutomationHandler.preflight?.({ ...(ctx as object), shorts: { publish: { sourceRunId: "s", platforms: ["youtube"] } } } as never)).toBeNull();
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it("is fine in development (the sample is clearly labelled instead)", async () => {
+      const { shortsAutomationHandler } = await import("./shorts");
+      expect(shortsAutomationHandler.preflight?.({ automation: {}, business: {}, config: {}, recentTopics: [], runId: "r" } as never)).toBeNull();
     });
   });
 });

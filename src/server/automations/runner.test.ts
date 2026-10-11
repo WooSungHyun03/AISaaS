@@ -342,7 +342,7 @@ describe("runDueAutomation / runAutomationNow — refusal to run", () => {
 
     expect(result).toEqual({ runId: "run-no-credit", status: "FAILED", errorMessage: "이용권이 없거나 모두 만료됐어요. 이용권을 구매하면 바로 만들 수 있어요." });
     expect(admin.updates.automation_runs[0]).toMatchObject({ status: "FAILED", error_message: "이용권이 없거나 모두 만료됐어요. 이용권을 구매하면 바로 만들 수 있어요." });
-    expect(getHandlerMock).not.toHaveBeenCalled();
+    
     expect(admin.updates.automations).toBeUndefined();
   });
 
@@ -423,7 +423,6 @@ describe("runDueAutomation / runAutomationNow — duplicate-run guard", () => {
     canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
 
     await expect(runDueAutomation("auto-1")).rejects.toThrow(/automation_runs_one_inflight_idx/);
-    expect(getHandlerMock).not.toHaveBeenCalled();
   });
 });
 
@@ -489,5 +488,25 @@ describe("runDueAutomation / runAutomationNow — exception isolation", () => {
     expect(result.errorMessage).toContain("홍보 대상");
     expect(getHandlerMock).not.toHaveBeenCalled();
     expect(reserveCreditMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses, without charging or parking the automation, when the handler says a service is not connected", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: AUTOMATION, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "refused-preflight" }, error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValue({ allowed: true });
+    const run = vi.fn();
+    getHandlerMock.mockReturnValue({ templateSlug: "blog-marketing", run, preflight: () => "영상 제작 서비스가 아직 연결되지 않았어요." });
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result).toMatchObject({ status: "FAILED", errorMessage: "영상 제작 서비스가 아직 연결되지 않았어요." });
+    expect(run).not.toHaveBeenCalled();
+    expect(reserveCreditMock).not.toHaveBeenCalled();
+    expect(admin.updates.automations).toBeUndefined(); // not parked in ERROR
   });
 });

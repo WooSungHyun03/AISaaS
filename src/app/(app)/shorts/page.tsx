@@ -68,6 +68,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     format: previewRun.safe.format,
     animationMode: previewRun.safe.animationMode,
     animationNote: previewRun.safe.animationNote,
+    sample: previewRun.safe.sampleVideo,
   } : null;
   const publications = safeRuns.flatMap((run) => (Object.entries(run.safe?.publicationResults ?? {}) as Array<[ShortsPublishPlatform, NonNullable<typeof run.safe>["publicationResults"][ShortsPublishPlatform]]>)
     .filter((entry): entry is [ShortsPublishPlatform, NonNullable<typeof entry[1]>] => Boolean(entry[1]))

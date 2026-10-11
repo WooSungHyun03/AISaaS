@@ -261,6 +261,15 @@ async function persistFailure(admin: AdminClient, ctx: RunFinishContext, err: un
  * Automation-type differences live entirely inside the handler
  * (src/server/automations/handlers/), never here.
  */
+/** The handler for a template, or undefined when it has none (an unknown template is reported by the real lookup later). */
+function automationHandlerFor(slug: string) {
+  try {
+    return getHandler(slug);
+  } catch {
+    return undefined;
+  }
+}
+
 async function executeAutomation(
   automationId: string,
   source: AutomationRunSource,
@@ -343,6 +352,17 @@ async function executeAutomation(
   if (inFlight) {
     throw new Error("This automation already has a run in progress.");
   }
+
+  const notReady = automationHandlerFor(template.slug)?.preflight?.({
+    automation,
+    business,
+    config: (automation.config as Record<string, never>) ?? {},
+    recentTopics: [],
+    runId: "",
+    calendarItem: options.calendarItem,
+    shorts: options.shorts,
+  });
+  if (notReady) return recordRefusedRun(admin, automation, source, notReady, { advanceSchedule });
 
   const { data: run, error: insertError } = await admin
     .from("automation_runs")

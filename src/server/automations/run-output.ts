@@ -27,6 +27,8 @@ export interface SafeAutomationRunOutput {
   format: "character" | "promo" | null;
   animationMode: "video" | "tween" | "photos" | null;
   animationNote: string | null;
+  /** The video is a test placeholder (no real renderer connected): not a finished Short, cannot be posted. */
+  sampleVideo: boolean;
   publicationResults: Partial<Record<"instagram" | "youtube", {
     externalId: string | null;
     externalUrl: string | null;
@@ -153,12 +155,14 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
     format: output.format === "character" || output.format === "promo" ? output.format : null,
     animationMode: output.animationMode === "video" || output.animationMode === "tween" || output.animationMode === "photos" ? output.animationMode : null,
     animationNote: safeText(output.animationNote, 300),
+    sampleVideo: output.sampleVideo === true,
     publicationResults: safePublicationResults(output.publicationResults),
   };
 
   const hasVisibleValue = Object.entries(safe).some(([key, item]) => {
     if (Array.isArray(item)) return item.length > 0;
     if (key === "publicationResults") return Object.keys(item as object).length > 0;
+    if (key === "sampleVideo") return false;
     return item !== null;
   });
   return hasVisibleValue ? safe : null;

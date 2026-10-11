@@ -14,6 +14,7 @@ import {
 } from "@/server/ai/prompts/shorts";
 import { isNearDuplicateTopic } from "@/server/ai/similarity";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { serverEnv } from "@/lib/env/server";
 import { publishShortsToPlatforms } from "@/server/automations/shorts-publishing";
 import { getAnimationProvider, isAnimationAvailable, type AnimationClipHandle, type AnimationQuality } from "@/server/connectors/animation";
 import { animationClipHandleSchema } from "@/server/connectors/animation/types";
@@ -109,6 +110,9 @@ async function publishExistingPreview(ctx: AutomationRunContext): Promise<Automa
   const topic = typeof output?.topic === "string" ? output.topic : content.success ? content.data.hook : "";
   if (!content.success || !/^https:\/\//i.test(videoUrl)) {
     throw new Error("게시할 영상 정보가 올바르지 않습니다. 영상을 다시 만들어주세요.");
+  }
+  if (isSampleVideo(output)) {
+    throw new Error("테스트용 샘플 영상은 게시할 수 없어요. 영상 제작 서비스를 연결한 뒤 다시 만들어주세요.");
   }
 
   const publicationResults = await publishShortsToPlatforms({
@@ -588,6 +592,8 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
       format: state.format,
       animationMode: state.animationMode,
       ...(state.animationNote ? { animationNote: state.animationNote } : {}),
+      // A mock renderer's address is a placeholder; flag it so the screen says so and posting is refused.
+      ...(serverEnv.VIDEO_RENDER_PROVIDER !== "json2video" ? { sampleVideo: true } : {}),
       publicationResults,
     } as unknown as Json,
     externalUrl: videoUrl,
@@ -598,8 +604,24 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
   };
 }
 
+/** The preview a mock renderer returns is a placeholder address, not a video: it must never be shown as a finished Short. */
+function isSampleVideo(output: Record<string, unknown> | null | undefined): boolean {
+  if (!output) return false;
+  if (output.sampleVideo === true) return true;
+  return typeof output.videoUrl === "string" && /\.invalid(\/|$)/.test(output.videoUrl);
+}
+
 export const shortsAutomationHandler: AutomationHandler = {
   templateSlug: "shorts",
+
+  preflight(ctx) {
+    if (ctx.shorts?.publish) return null;
+    // Without a real renderer a production run would "succeed" with a placeholder instead of a video.
+    if (process.env.NODE_ENV === "production" && serverEnv.VIDEO_RENDER_PROVIDER !== "json2video") {
+      return "영상 제작 서비스가 아직 연결되지 않아 지금은 숏폼을 만들 수 없어요. 이용권은 차감되지 않았어요. 관리자에게 문의해주세요.";
+    }
+    return null;
+  },
 
   async run(ctx: AutomationRunContext): Promise<AutomationHandlerOutcome> {
     if (ctx.shorts?.publish) return publishExistingPreview(ctx);
