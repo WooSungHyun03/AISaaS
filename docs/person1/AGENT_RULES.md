@@ -41,6 +41,7 @@
 
 ## 진행 현황
 - 완료: 1-1, 1-2, 1-3, 1-4, 1-6, 1-5, 1-7, 1-8, 1-9
-- 남음: 1-10
+- 진행 중(사람1 영역 범위로 축소 완료, Dev1 응답 대기): 1-10
 - 1-9 비고: 4-a(로딩/오류 화면), 4-b(태블릿 반응형 기준)는 코드상 정상으로 확인됐으나 브라우저 확인은 생략함. 5(생성→완료 반영)는 캘린더 트리거 시 블로그 deferred 실행이 결과 페이지로 안 이어지는 버그를 추가로 발견해 수정함(Dev1 영역인 cron 로컬 안전망 부재만 메모로 전달) — PLAN_1-9.md, NOTE_FOR_DEV1_stuck_blog_run.md 참고
-- 참고 문서: docs/person1/ 아래 PLAN_1-5.md, PLAN_1-7.md, PLAN_1-8.md, PLAN_1-9.md, CHANNEL_DASHBOARD_API.md, MIGRATION_NUMBERING_NOTES.md 등
+- 1-10 비고: `src/server/connectors/`(Dev1 영역)는 팀 답변 대기 중이라 전혀 수정하지 않음. 사람1 영역(`src/server/channels/`)만 1~5단계 완료 — 인터페이스+mock, 스코프 확인, 수집 파이프라인 연결(연결 해제 시 중단 + live 모드에서 조용히 스킵, 공개 지표 수집 영향 없음 확인), 성장 리포트 연결(연결된 채널에만 노출, 해제 후 데이터는 보존되지만 화면에선 숨김), Dev1/팀장 문서 작성. **6단계(실제 Analytics API 호출 구현, 스코프 추가)는 Dev1 몫**이라 아직 완료 아님 — `REQUEST_FOR_DEV1_youtube_analytics.md` 참고. 구글 클라우드 설정은 `GOOGLE_CLOUD_SETUP_youtube_analytics.md` 참고(팀장 몫). migration 0건.
+- 참고 문서: docs/person1/ 아래 PLAN_1-5.md, PLAN_1-7.md, PLAN_1-8.md, PLAN_1-9.md, PLAN_1-10.md, REQUEST_FOR_DEV1_youtube_analytics.md, GOOGLE_CLOUD_SETUP_youtube_analytics.md, CHANNEL_DASHBOARD_API.md, MIGRATION_NUMBERING_NOTES.md 등
