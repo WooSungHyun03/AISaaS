@@ -55,7 +55,7 @@ async function resolveAutomationId(
   if (existing) return { automationId: existing.id };
 
   const entitlement = await canCreateAutomation(supabase as never, userId);
-  if (!entitlement.allowed) return { error: entitlement.reason ?? "이 요금제에서는 만들기 설정을 더 만들 수 없습니다." };
+  if (!entitlement.allowed) return { error: entitlement.reason ?? "지금은 만들기 설정을 더 만들 수 없습니다." };
 
   const { data: business } = await supabase
     .from("businesses")

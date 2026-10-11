@@ -16,9 +16,7 @@ import {
 import { signOut } from "@/app/(auth)/actions";
 import { APP_NAV, getActiveNavItem } from "./nav-config";
 
-const PLAN_LABEL: Record<string, string> = { FREE: "무료 플랜", STARTER: "스타터 플랜", PRO: "프로 플랜" };
-
-export function AppHeader({ email, plan }: { email: string; plan: string }) {
+export function AppHeader({ email, credits }: { email: string; credits: { blog: number; shorts: number } | null }) {
   const pathname = usePathname();
   const activeItem = getActiveNavItem(pathname);
   const initial = (email.trim()[0] ?? "?").toUpperCase();
@@ -77,7 +75,7 @@ export function AppHeader({ email, plan }: { email: string; plan: string }) {
           href="/billing"
           className="inline-flex h-9 items-center rounded-full bg-brand-soft px-3.5 text-[13px] font-semibold text-primary transition-colors hover:bg-accent"
         >
-          {PLAN_LABEL[plan] ?? plan}
+          {credits ? `이용권 · 블로그 ${credits.blog} · 숏폼 ${credits.shorts}` : "이용권"}
         </Link>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -93,7 +91,7 @@ export function AppHeader({ email, plan }: { email: string; plan: string }) {
             <DropdownMenuLabel className="truncate text-sm font-medium text-foreground">{email}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild><Link href="/settings">설정</Link></DropdownMenuItem>
-            <DropdownMenuItem asChild><Link href="/billing">요금제·결제</Link></DropdownMenuItem>
+            <DropdownMenuItem asChild><Link href="/billing">이용권·결제</Link></DropdownMenuItem>
             <DropdownMenuSeparator />
             <form action={signOut}>
               <DropdownMenuItem asChild>

@@ -38,7 +38,7 @@ export default async function TossCheckoutPage({ searchParams }: PageProps<"/bil
     <div className="mx-auto max-w-lg space-y-5 py-10 sm:py-16">
       <div>
         <h1 className="text-2xl font-extrabold tracking-[-0.04em]">{product.name} 구매하기</h1>
-        <p className="mt-1 text-[15px] text-muted-foreground">일회성 결제 후 {order.credit_amount}회 크레딧이 바로 지급돼요.</p>
+        <p className="mt-1 text-[15px] text-muted-foreground">일회성 결제 후 {order.credit_amount}회 이용권이 바로 지급돼요.</p>
       </div>
       <FormMessage variant="info">테스트 결제 환경이에요. 실제 카드 청구는 없어요.</FormMessage>
       <div className="rounded-2xl border bg-card px-5 py-5">

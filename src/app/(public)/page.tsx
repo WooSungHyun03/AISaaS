@@ -36,7 +36,7 @@ const FAQS = [
   },
   {
     q: "무료로 어디까지 쓸 수 있어요?",
-    a: "마케팅 진단과 마케팅 캘린더는 무료예요. 블로그 글과 숏폼 영상은 플랜마다 한 달에 만들 수 있는 횟수가 달라요.",
+    a: "마케팅 진단과 마케팅 캘린더는 무료예요. 블로그 글과 숏폼 영상은 필요한 만큼만 이용권을 구매해서 쓰는 방식이에요.",
   },
 ];
 
@@ -64,7 +64,7 @@ export default function LandingPage() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline">
-                <Link href="/pricing">요금제 보기</Link>
+                <Link href="/pricing">이용권 보기</Link>
               </Button>
             </div>
             <p className="mt-5 text-sm text-muted-foreground">카드 등록 없이 시작해요 · 진단과 캘린더는 계속 무료예요</p>
@@ -204,7 +204,7 @@ export default function LandingPage() {
                 <h3 className="text-lg font-bold">{product.name}</h3>
                 <p className="tabular mt-4 text-4xl font-extrabold tracking-[-0.04em]">{product.priceKrw.toLocaleString()}원</p>
                 <ul className="mt-6 flex-1 space-y-3 border-t border-border pt-6 text-[15px]">
-                  {[`${product.credits}회 제작 크레딧`, `결제일부터 ${product.validityDays}일`, "추가 구매 시 잔여 횟수 합산"].map((feature) => <li key={feature} className="flex gap-2.5"><Check className="mt-1 size-4 shrink-0 text-primary" strokeWidth={3} aria-hidden="true" />{feature}</li>)}
+                  {[`${product.credits}회 제작 이용권`, `결제일부터 ${product.validityDays}일`, "추가 구매 시 잔여 횟수 합산"].map((feature) => <li key={feature} className="flex gap-2.5"><Check className="mt-1 size-4 shrink-0 text-primary" strokeWidth={3} aria-hidden="true" />{feature}</li>)}
                 </ul>
                 <Button asChild variant={index === 0 ? "default" : "outline"} size="lg" className="mt-8"><Link href={`/signup?redirectTo=${encodeURIComponent(`/billing?product=${product.id}`)}`}>{product.name} 구매</Link></Button>
               </article>

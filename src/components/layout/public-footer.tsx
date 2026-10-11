@@ -7,7 +7,7 @@ const FOOTER_LINKS = [
     links: [
       { href: "/#features", label: "무엇을 해주나요" },
       { href: "/#how", label: "이용 방법" },
-      { href: "/pricing", label: "요금제" },
+      { href: "/pricing", label: "이용권" },
     ],
   },
 ];

@@ -71,7 +71,7 @@ export async function completeProductOrder(orderId: string, paymentKey: string):
     p_payment_key: paymentKey,
   });
   if (error) throw error;
-  if (!grantId) throw new Error("크레딧 지급 결과를 확인할 수 없습니다.");
+  if (!grantId) throw new Error("이용권 지급 결과를 확인할 수 없습니다.");
 
   const { data: order, error: orderError } = await admin
     .from("billing_orders")

@@ -86,3 +86,34 @@ export async function getCreditBillingOverview(userId: string) {
     legacySubscription: subscriptionResult.data,
   };
 }
+
+export interface CreditLedgerEntry {
+  id: string;
+  kind: "BLOG" | "SHORTS";
+  eventType: "GRANT" | "RESERVE" | "RELEASE" | "EXPIRE" | "REFUND";
+  delta: number;
+  createdAt: string;
+}
+
+/**
+ * The owner's credit movements, newest first. SETTLE rows carry no change
+ * (the credit was already taken at RESERVE), so they are left out.
+ */
+export async function getCreditLedger(userId: string, limit = 30): Promise<CreditLedgerEntry[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("credit_ledger")
+    .select("id,kind,event_type,delta,created_at")
+    .eq("user_id", userId)
+    .neq("event_type", "SETTLE")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    kind: row.kind as CreditLedgerEntry["kind"],
+    eventType: row.event_type as CreditLedgerEntry["eventType"],
+    delta: row.delta,
+    createdAt: row.created_at,
+  }));
+}

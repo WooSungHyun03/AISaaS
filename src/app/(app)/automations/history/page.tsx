@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getAutomationRunHistory, type RunHistoryFilter } from "@/server/automations/history";
+import { getCreditLedger, type CreditLedgerEntry } from "@/server/billing/read-model";
 import { RunSourceBadge, RunStatusBadge } from "@/components/automations/run-badges";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
@@ -30,6 +31,38 @@ function formatDate(value: string | null, fallback: string) {
   return value ? dateFormatter.format(new Date(value)) : fallback;
 }
 
+const LEDGER_LABEL: Record<CreditLedgerEntry["eventType"], string> = {
+  GRANT: "구매 지급",
+  RESERVE: "사용",
+  RELEASE: "환원 (만들기 실패)",
+  EXPIRE: "유효기간 만료",
+  REFUND: "환불",
+};
+const KIND_LABEL = { BLOG: "블로그", SHORTS: "숏폼" } as const;
+
+function CreditLedger({ entries }: { entries: CreditLedgerEntry[] }) {
+  return (
+    <section aria-labelledby="credit-ledger-title" className="space-y-3">
+      <h2 id="credit-ledger-title" className="text-lg font-extrabold tracking-[-0.03em]">이용권 사용 내역</h2>
+      {entries.length === 0 ? (
+        <p className="rounded-2xl border border-dashed px-5 py-6 text-sm text-muted-foreground">아직 이용권을 사용하거나 구매한 기록이 없어요.</p>
+      ) : (
+        <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
+          {entries.map((entry) => (
+            <li key={entry.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+              <span className="min-w-0">
+                <span className="font-semibold">{KIND_LABEL[entry.kind]} 이용권 · {LEDGER_LABEL[entry.eventType]}</span>
+                <span className="tabular ml-2 text-[13px] text-muted-foreground">{formatDate(entry.createdAt, "-")}</span>
+              </span>
+              <span className={cn("tabular shrink-0 font-bold", entry.delta > 0 ? "text-success" : "text-muted-foreground")}>{entry.delta > 0 ? "+" : ""}{entry.delta}회</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function historyHref(status: RunHistoryFilter | null, page?: number) {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
@@ -50,7 +83,10 @@ export default async function AutomationHistoryPage({ searchParams }: PageProps<
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { runs, total, pageSize } = await getAutomationRunHistory(user.id, status, page);
+  const [{ runs, total, pageSize }, ledger] = await Promise.all([
+    getAutomationRunHistory(user.id, status, page),
+    page === 1 && !status ? getCreditLedger(user.id).catch(() => []) : Promise.resolve(null),
+  ]);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   if (total > 0 && page > totalPages) redirect(historyHref(status, totalPages));
 
@@ -61,6 +97,9 @@ export default async function AutomationHistoryPage({ searchParams }: PageProps<
         description={`블로그 글과 숏폼을 언제, 어떻게 만들었는지 한눈에 봐요. 총 ${total.toLocaleString()}건 (한국 시간)`}
       />
 
+      {ledger ? <CreditLedger entries={ledger} /> : null}
+
+      <h2 className="pt-2 text-lg font-extrabold tracking-[-0.03em]">제작 기록</h2>
       <nav className="flex flex-wrap gap-2" aria-label="상태별 보기">
         {FILTERS.map((filter) => {
           const active = status === filter.value;

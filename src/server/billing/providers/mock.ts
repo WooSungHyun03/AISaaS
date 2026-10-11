@@ -64,7 +64,7 @@ export class MockBillingProvider implements BillingProvider {
     assertMockBillingAllowed();
     const preview = await getCheckoutSession(sessionId, userId);
     if (!isProductId(preview.product_id)) {
-      throw new BillingCheckoutError("NOT_A_CREDIT_PRODUCT", "크레딧 상품 결제 요청이 아닙니다.");
+      throw new BillingCheckoutError("NOT_A_CREDIT_PRODUCT", "이용권 상품 결제 요청이 아닙니다.");
     }
     const session = await claimCheckoutSession(sessionId, userId, "mock");
 

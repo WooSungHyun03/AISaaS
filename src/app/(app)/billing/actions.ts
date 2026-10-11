@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getBillingProvider } from "@/server/billing";
 import { clientEnv } from "@/lib/env/client";
 import { isProductId, type ProductId } from "@/server/billing/products";
+import { classifyCheckoutStartError } from "@/server/billing/checkout-errors";
+import { logger } from "@/lib/logger";
 
 export async function startProductOrder(productId: ProductId): Promise<void> {
   if (!isProductId(productId)) redirect("/billing/fail?code=INVALID_PRODUCT");
@@ -26,8 +28,9 @@ export async function startProductOrder(productId: ProductId): Promise<void> {
     });
     url = checkout.url;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "결제 요청을 시작하지 못했습니다.";
-    redirect(`/billing/fail?code=CHECKOUT_START_FAILED&message=${encodeURIComponent(message)}`);
+    const failure = classifyCheckoutStartError(error);
+    logger.error("checkout_start_failed", { userId: user.id, productId, failureCode: failure.code, detail: failure.detail });
+    redirect(`/billing/fail?code=${failure.code}&product=${productId}`);
   }
 
   redirect(url);
@@ -52,8 +55,9 @@ export async function startCheckout(plan: "STARTER" | "PRO"): Promise<void> {
     });
     url = checkout.url;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "결제 요청을 시작하지 못했습니다.";
-    redirect(`/billing/fail?code=CHECKOUT_START_FAILED&message=${encodeURIComponent(message)}`);
+    const failure = classifyCheckoutStartError(error);
+    logger.error("checkout_start_failed", { userId: user.id, plan, failureCode: failure.code, detail: failure.detail });
+    redirect(`/billing/fail?code=${failure.code}`);
   }
 
   redirect(url);

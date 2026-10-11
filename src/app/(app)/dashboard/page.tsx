@@ -2,14 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowRight, Check, CircleCheck, CircleX, PlayCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getPlanConfig } from "@/server/billing/plans";
-import { PLAN_LABEL } from "@/components/billing/plan-copy";
+import { getCreditBalances } from "@/server/billing/run-credits";
 import { getPeriodKey, SERVICE_TIMEZONE, zonedTimeToUtc } from "@/lib/utils/date";
 import { StatCard, StatGroup } from "@/components/dashboard/stat-card";
 import { Mascot } from "@/components/brand/mascot";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import type { AutomationRun } from "@/types/domain";
 import { EmptyState } from "@/components/ui/page-state";
@@ -38,15 +36,15 @@ export default async function DashboardPage() {
   const periodKey = getPeriodKey();
   const [year, month] = periodKey.split("-").map(Number);
 
-  const [businessResult, automationResult, subscriptionResult, usageResult, profileResult] = await Promise.all([
+  const [businessResult, automationResult, credits, profileResult] = await Promise.all([
     supabase.from("businesses").select("id").eq("owner_id", user.id).limit(1).maybeSingle(),
     supabase.from("automations").select("id, name, status, next_run_at").eq("user_id", user.id),
-    supabase.from("subscriptions").select("plan, status").eq("user_id", user.id).maybeSingle(),
-    supabase.from("usage").select("automation_runs").eq("user_id", user.id).eq("period", periodKey).maybeSingle(),
+    // The dashboard still opens when credit data is unavailable.
+    getCreditBalances(supabase, user.id).catch(() => ({ BLOG: { remaining: 0, nextExpiry: null }, SHORTS: { remaining: 0, nextExpiry: null } })),
     supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
   ]);
 
-  const readError = businessResult.error || automationResult.error || subscriptionResult.error || usageResult.error;
+  const readError = businessResult.error || automationResult.error;
   if (readError) throw new Error("대시보드 데이터를 불러오지 못했습니다.", { cause: readError });
 
   const automations = automationResult.data ?? [];
@@ -78,12 +76,6 @@ export default async function DashboardPage() {
   const nextAutomation = activeAutomations
     .filter((automation) => automation.next_run_at)
     .sort((a, b) => Date.parse(a.next_run_at!) - Date.parse(b.next_run_at!))[0];
-  const subscription = subscriptionResult.data;
-  const plan = subscription && (subscription.status === "ACTIVE" || subscription.status === "TRIALING")
-    ? subscription.plan
-    : "FREE";
-  const planConfig = getPlanConfig(plan);
-  const quotaRuns = usageResult.data?.automation_runs ?? 0;
   const hasBusiness = Boolean(businessResult.data);
 
   let calendarCount = 0;
@@ -163,9 +155,9 @@ export default async function DashboardPage() {
           hint={nextAutomation?.name ?? "만들기를 켜면 일정이 표시돼요"}
         />
         <StatCard
-          label="이용 중인 플랜"
-          value={PLAN_LABEL[plan]}
-          hint={<Link href="/billing" className="font-medium text-primary hover:underline">플랜 관리</Link>}
+          label="남은 이용권"
+          value={<>블로그 {credits.BLOG.remaining}<span className="mx-1.5 text-sm font-semibold text-muted-foreground">·</span>숏폼 {credits.SHORTS.remaining}</>}
+          hint={<Link href="/billing" className="font-medium text-primary hover:underline">이용권 구매·관리</Link>}
         />
       </StatGroup>
 
@@ -207,17 +199,24 @@ export default async function DashboardPage() {
           )}
         </section>
 
-        <aside aria-label="사용량">
+        <aside aria-label="이용권">
           <section aria-labelledby="usage-title" className="rounded-xl border border-border bg-card p-5">
-            <h2 id="usage-title" className="text-base font-bold tracking-[-0.02em]">이번 달 사용량</h2>
-            <p className="tabular mt-3 text-2xl font-extrabold tracking-[-0.03em]">
-              {quotaRuns.toLocaleString()}
-              <span className="ml-1 text-sm font-semibold text-muted-foreground">/ {planConfig.monthlyRunLimit?.toLocaleString() ?? "무제한"}회</span>
-            </p>
-            {planConfig.monthlyRunLimit !== null ? <Progress value={Math.min(100, (quotaRuns / planConfig.monthlyRunLimit) * 100)} className="mt-3" aria-label="이번 달 제작 사용량" /> : null}
-            <p className="mt-3 text-[13px] leading-5 text-muted-foreground">플랜의 월 제작 한도에 반영되는 횟수예요.</p>
+            <h2 id="usage-title" className="text-base font-bold tracking-[-0.02em]">남은 이용권</h2>
+            <dl className="mt-3 space-y-3 text-sm">
+              {([["블로그 글", credits.BLOG], ["숏폼 영상", credits.SHORTS]] as const).map(([label, balance]) => (
+                <div key={label} className="flex items-baseline justify-between gap-3">
+                  <dt className="text-muted-foreground">{label}</dt>
+                  <dd className="tabular text-right">
+                    <span className="text-xl font-extrabold tracking-[-0.03em]">{balance.remaining}</span>
+                    <span className="ml-0.5 text-muted-foreground">회</span>
+                    {balance.nextExpiry ? <span className="block text-[12px] text-muted-foreground">~{dateFormatter.format(new Date(balance.nextExpiry))}</span> : null}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-3 text-[13px] leading-5 text-muted-foreground">콘텐츠 한 건을 만들 때마다 1회씩 차감돼요. 만들기에 실패하면 자동으로 돌려드려요.</p>
+            <Button asChild size="sm" variant="outline" className="mt-4 w-full"><Link href="/billing">이용권 구매하기</Link></Button>
           </section>
-
         </aside>
       </div>
     </div>

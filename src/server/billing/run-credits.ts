@@ -98,6 +98,32 @@ export async function getUsableCredits(
   return { remaining: rows.reduce((sum, row) => sum + row.remaining, 0), nextExpiry: rows[0]?.expires_at ?? null };
 }
 
+export interface CreditBalance {
+  remaining: number;
+  nextExpiry: string | null;
+}
+
+/** Usable Blog and Shorts credits in one query (header, dashboard). */
+export async function getCreditBalances(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+): Promise<Record<CreditKind, CreditBalance>> {
+  const { data, error } = await supabase
+    .from("credit_grants")
+    .select("kind,remaining,expires_at")
+    .eq("user_id", userId)
+    .gt("remaining", 0)
+    .gt("expires_at", new Date().toISOString())
+    .order("expires_at", { ascending: true });
+  if (error) throw error;
+  const balances: Record<CreditKind, CreditBalance> = { BLOG: { remaining: 0, nextExpiry: null }, SHORTS: { remaining: 0, nextExpiry: null } };
+  for (const grant of data ?? []) {
+    balances[grant.kind].remaining += grant.remaining;
+    balances[grant.kind].nextExpiry ??= grant.expires_at;
+  }
+  return balances;
+}
+
 /**
  * Read-only pre-check for friendly early errors. The runner's reservation is
  * what actually protects the balance; this only avoids starting work that

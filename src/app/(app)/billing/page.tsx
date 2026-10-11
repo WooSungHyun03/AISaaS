@@ -40,8 +40,8 @@ function ProductCard({ product, selected }: { product: ProductConfig; selected: 
       <p className="tabular mt-5 text-3xl font-extrabold tracking-[-0.04em]">{product.priceKrw.toLocaleString()}원</p>
       <p className="tabular mt-1 text-sm font-semibold text-muted-foreground">1회당 약 {Math.ceil(product.priceKrw / product.credits).toLocaleString()}원</p>
       <ul className="mt-5 flex-1 space-y-2 text-sm">
-        <li className="flex items-center gap-2"><Check className="size-4 text-success" aria-hidden="true" />{product.credits}회 제작 크레딧</li>
-        <li className="flex items-center gap-2"><Check className="size-4 text-success" aria-hidden="true" />추가 구매 시 크레딧 합산</li>
+        <li className="flex items-center gap-2"><Check className="size-4 text-success" aria-hidden="true" />{product.credits}회 제작 이용권</li>
+        <li className="flex items-center gap-2"><Check className="size-4 text-success" aria-hidden="true" />추가 구매 시 이용권 합산</li>
       </ul>
       <form action={startProductOrder.bind(null, product.id)} className="mt-5">
         <BillingSubmitButton className="w-full" pendingLabel="결제 준비 중…">{product.name} 구매</BillingSubmitButton>
@@ -64,16 +64,16 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
 
   return (
     <div className="mx-auto max-w-6xl space-y-10 pb-10">
-      <PageHeader title="요금제·결제" description="필요한 제작 횟수만 구매하고, 남은 크레딧과 주문을 한곳에서 확인하세요." />
+      <PageHeader title="이용권·결제" description="필요한 제작 횟수만 구매하고, 남은 이용권과 주문을 한곳에서 확인하세요." />
 
       {isTestBilling ? (
-        <FormMessage variant="info"><strong>테스트 결제 환경 · 실제 청구 없음</strong> · {providerLabel}로 주문부터 크레딧 지급까지 확인할 수 있어요.</FormMessage>
+        <FormMessage variant="info"><strong>테스트 결제 환경 · 실제 청구 없음</strong> · {providerLabel}로 주문부터 이용권 지급까지 확인할 수 있어요.</FormMessage>
       ) : null}
 
       <section aria-labelledby="credits-heading" className="space-y-4">
         <div>
-          <h2 id="credits-heading" className="text-lg font-extrabold tracking-[-0.03em]">남은 크레딧</h2>
-          <p className="mt-1 text-sm text-muted-foreground">유효기간이 남은 크레딧만 합산했어요. 먼저 만료되는 크레딧부터 사용돼요.</p>
+          <h2 id="credits-heading" className="text-lg font-extrabold tracking-[-0.03em]">남은 이용권</h2>
+          <p className="mt-1 text-sm text-muted-foreground">유효기간이 남은 이용권만 합산했어요. 먼저 만료되는 이용권부터 사용돼요.</p>
         </div>
         <div className="grid gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-2">
           {(["BLOG", "SHORTS"] as const).map((kind) => {
@@ -83,7 +83,7 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
               <div key={kind} className="bg-card px-6 py-6">
                 <div className="flex items-center gap-2 text-sm font-semibold text-muted-foreground"><Icon className="size-4" aria-hidden="true" />{KIND_COPY[kind].title}</div>
                 <p className="tabular mt-3 text-4xl font-extrabold tracking-[-0.05em]">{balance.remaining}<span className="ml-1 text-base font-semibold text-muted-foreground">회</span></p>
-                <p className="mt-2 flex items-center gap-1.5 text-[13px] text-muted-foreground"><CalendarClock className="size-3.5" aria-hidden="true" />{balance.nextExpiry ? `가장 빠른 만료일 ${formatDate(balance.nextExpiry)}` : "사용 가능한 크레딧이 없어요"}</p>
+                <p className="mt-2 flex items-center gap-1.5 text-[13px] text-muted-foreground"><CalendarClock className="size-3.5" aria-hidden="true" />{balance.nextExpiry ? `가장 빠른 만료일 ${formatDate(balance.nextExpiry)}` : "사용 가능한 이용권이 없어요"}</p>
               </div>
             );
           })}
@@ -114,7 +114,7 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
         ) : (
           <div className="overflow-x-auto rounded-2xl border">
             <table className="w-full min-w-[700px] text-left text-sm">
-              <thead className="bg-muted/60 text-[13px] text-muted-foreground"><tr><th className="px-5 py-3 font-semibold">상품</th><th className="px-5 py-3 font-semibold">크레딧</th><th className="px-5 py-3 font-semibold">결제 금액</th><th className="px-5 py-3 font-semibold">상태</th><th className="px-5 py-3 font-semibold">주문일</th></tr></thead>
+              <thead className="bg-muted/60 text-[13px] text-muted-foreground"><tr><th className="px-5 py-3 font-semibold">상품</th><th className="px-5 py-3 font-semibold">이용권</th><th className="px-5 py-3 font-semibold">결제 금액</th><th className="px-5 py-3 font-semibold">상태</th><th className="px-5 py-3 font-semibold">주문일</th></tr></thead>
               <tbody className="divide-y">
                 {orders.map((order) => {
                   const productName = isProductId(order.product_id) ? getProductConfig(order.product_id).name : order.product_id;

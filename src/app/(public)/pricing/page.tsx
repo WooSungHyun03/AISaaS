@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env/server";
 import { startProductOrder } from "@/app/(app)/billing/actions";
 
-export const metadata = { title: "요금제" };
+export const metadata = { title: "이용권" };
 
 const KIND_COPY: Record<CreditKind, { title: string; description: string }> = {
   BLOG: { title: "블로그 포스팅", description: "네이버 블로그용 글을 필요한 횟수만 구매하세요." },
@@ -83,7 +83,7 @@ export default async function PricingPage() {
       <section className="border-t bg-muted/30">
         <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-8 text-[13px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p>모든 상품 가격·횟수·유효기간은 결제 화면과 동일하게 적용돼요.{isTestBilling ? " 현재는 테스트 결제 환경이며 실제 청구되지 않아요." : ""}</p>
-          <Link href="/billing" className="inline-flex shrink-0 items-center gap-1 font-semibold text-primary hover:underline">잔여 크레딧과 주문 보기 <ArrowRight className="size-3.5" aria-hidden="true" /></Link>
+          <Link href="/billing" className="inline-flex shrink-0 items-center gap-1 font-semibold text-primary hover:underline">잔여 이용권과 주문 보기 <ArrowRight className="size-3.5" aria-hidden="true" /></Link>
         </div>
       </section>
     </>

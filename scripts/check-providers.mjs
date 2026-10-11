@@ -52,9 +52,48 @@ if (env.VIDEO_RENDER_PROVIDER !== "json2video") {
   else ok("VIDEO_RENDER_API_KEY", "설정됨(유효성은 첫 영상 만들기에서 확인돼요)");
 }
 
-// --- Billing safety ---------------------------------------------------------
+// --- Billing ----------------------------------------------------------------
 if (env.BILLING_PROVIDER === "mock" && env.ALLOW_MOCK_BILLING !== "true") {
   bad("BILLING_PROVIDER", "mock 결제는 운영 환경에서 막혀 있어요. toss로 바꾸거나(데모라면) ALLOW_MOCK_BILLING=true");
+} else if (env.BILLING_PROVIDER === "toss") {
+  const client = env.NEXT_PUBLIC_TOSS_CLIENT_KEY ?? "";
+  const secret = env.TOSS_SECRET_KEY ?? "";
+  if (!client) bad("NEXT_PUBLIC_TOSS_CLIENT_KEY", "not set (결제창에 필요해요. NEXT_PUBLIC 값은 설정 뒤 다시 배포해야 반영돼요)");
+  else if (!client.startsWith("test_ck_")) bad("NEXT_PUBLIC_TOSS_CLIENT_KEY", "테스트 클라이언트 키(test_ck_…)만 쓸 수 있어요");
+  else ok("NEXT_PUBLIC_TOSS_CLIENT_KEY", "테스트 키 형식 OK");
+  if (!secret) bad("TOSS_SECRET_KEY", "not set");
+  else if (!secret.startsWith("test_sk_")) bad("TOSS_SECRET_KEY", "테스트 시크릿 키(test_sk_…)만 쓸 수 있어요");
+  else ok("TOSS_SECRET_KEY", "테스트 키 형식 OK");
+} else {
+  ok("BILLING_PROVIDER", `${env.BILLING_PROVIDER ?? "mock"} (실제 청구 없음)`);
+}
+
+// --- Database: every table the app reads must exist (a missing migration looks like a broken feature) ---
+const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseUrl || !serviceKey) {
+  bad("Supabase", "NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — 테이블 점검을 건너뛰었어요");
+} else {
+  const required = {
+    "결제·이용권 (0051~)": ["billing_orders", "credit_grants", "credit_ledger"],
+    "마케팅 진단·성장 리포트 (0034~0042)": ["tracked_channels", "channel_diagnoses", "marketing_metric_snapshots"],
+  };
+  for (const [feature, tables] of Object.entries(required)) {
+    const missing = [];
+    for (const table of tables) {
+      try {
+        const response = await fetch(`${supabaseUrl}/rest/v1/${table}?select=*&limit=0`, {
+          headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}` },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!response.ok) missing.push(table);
+      } catch {
+        missing.push(`${table}(연결 실패)`);
+      }
+    }
+    if (missing.length === 0) ok(`DB · ${feature}`, "테이블 OK");
+    else bad(`DB · ${feature}`, `없는 테이블: ${missing.join(", ")} → npx supabase db push --linked 로 migration을 적용하세요`);
+  }
 }
 
 for (const { name, state, detail } of results) console.log(`${state === "OK" ? "✅" : "❌"} ${name}: ${detail}`);
