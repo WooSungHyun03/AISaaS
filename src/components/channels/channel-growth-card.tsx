@@ -2,6 +2,7 @@ import { ArrowDownRight, ArrowRight, ArrowUpRight, Minus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { GrowthLineChart } from "@/components/channels/growth-line-chart";
 import { PLATFORM_LABEL } from "@/server/channels/platform";
+import { SOURCE_LABEL } from "@/server/marketing/growth-report";
 import { cn } from "@/lib/utils";
 import type { ChannelGrowthSeries, GrowthMetricSeries } from "@/server/channels/growth-series";
 
@@ -28,7 +29,10 @@ function MetricCard({ metric, days }: { metric: GrowthMetricSeries; days: number
   return (
     <div className="space-y-2 rounded-xl border border-border p-4">
       <div className="flex items-baseline justify-between gap-2">
-        <p className="font-semibold">{metric.label}</p>
+        <span className="inline-flex items-center gap-1.5">
+          <p className="font-semibold">{metric.label}</p>
+          {metric.source === "EXTERNAL_VERIFIED" ? <Badge variant="outline">{SOURCE_LABEL.EXTERNAL_VERIFIED}</Badge> : null}
+        </span>
         <p className="tabular text-lg font-bold">{metric.current === null ? "측정 불가" : metric.current.toLocaleString("ko-KR")}</p>
       </div>
       <p className="text-[13px]"><MetricDelta metric={metric} days={days} /></p>

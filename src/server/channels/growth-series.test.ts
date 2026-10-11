@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock } = vi.hoisted(() => ({ createClientMock: vi.fn() }));
+const { createClientMock, getConnectionMock } = vi.hoisted(() => ({ createClientMock: vi.fn(), getConnectionMock: vi.fn().mockResolvedValue(null) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
+vi.mock("@/server/connectors/integrations", () => ({ getConnection: getConnectionMock }));
 
 const { getChannelGrowthSeries, ALLOWED_GROWTH_METRICS } = await import("./growth-series");
 
@@ -19,8 +20,18 @@ function errorQuery(error: unknown) {
   return builder;
 }
 
-function makeClient(tables: Record<string, ReturnType<typeof listQuery> | ReturnType<typeof errorQuery>>) {
-  return { from: vi.fn((table: string) => tables[table]) };
+/** businesses lookup uses .maybeSingle(), not the array-returning .then() chain the other tables use. */
+function singleQuery<T>(row: T | null) {
+  const builder: Record<string, unknown> = {};
+  for (const method of ["select", "eq", "gte", "in", "order"]) builder[method] = vi.fn(() => builder);
+  builder.maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null });
+  return builder;
+}
+
+function makeClient(tables: Record<string, ReturnType<typeof listQuery> | ReturnType<typeof errorQuery> | ReturnType<typeof singleQuery>>) {
+  // Default: no business row found → ownerId undefined → getConnection never called → existing
+  // tests that don't care about ticket 1-10's YouTube Analytics gating are unaffected.
+  return { from: vi.fn((table: string) => tables[table] ?? singleQuery(null)) };
 }
 
 const DAY_MS = 86_400_000;
@@ -29,6 +40,11 @@ const NOW = new Date("2026-10-10T00:00:00.000Z");
 function snapshot(channelId: string, metric: string, value: number, daysAgo: number, source = "mock") {
   return { channel_id: channelId, metric, value, recorded_at: new Date(NOW.getTime() - daysAgo * DAY_MS).toISOString(), source };
 }
+
+afterEach(() => {
+  vi.clearAllMocks();
+  getConnectionMock.mockResolvedValue(null);
+});
 
 describe("getChannelGrowthSeries", () => {
   it("returns hasAnyData: false when the business has no tracked channels", async () => {
@@ -184,5 +200,83 @@ describe("getChannelGrowthSeries", () => {
     );
     const result = await getChannelGrowthSeries("business-1", { now: NOW, days: 7 });
     expect(result.hasAnyData).toBe(false);
+  });
+
+  describe("ticket 1-10: yt_analytics.* metrics", () => {
+    it("appear, tagged EXTERNAL_VERIFIED, only when the business owner has a CONNECTED + scoped YouTube integration", async () => {
+      createClientMock.mockResolvedValue(
+        makeClient({
+          tracked_channels: listQuery([{ id: "c1", platform: "youtube", external_id: "@my", url: "" }]),
+          marketing_metric_snapshots: listQuery([snapshot("c1", "yt_analytics.estimatedMinutesWatched", 400, 1)]),
+          businesses: singleQuery({ owner_id: "user-1" }),
+        }),
+      );
+      getConnectionMock.mockResolvedValue({ status: "CONNECTED", metadata: { scope: "https://www.googleapis.com/auth/yt-analytics.readonly" } });
+
+      const result = await getChannelGrowthSeries("business-1", { now: NOW, days: 7 });
+      const metrics = result.channels[0].metrics.map((m) => m.metric);
+      expect(metrics).toEqual(["subscriberCount", "viewCount", "yt_analytics.estimatedMinutesWatched", "yt_analytics.averageViewDuration"]);
+
+      const watched = result.channels[0].metrics.find((m) => m.metric === "yt_analytics.estimatedMinutesWatched")!;
+      expect(watched.source).toBe("EXTERNAL_VERIFIED");
+      expect(watched.current).toBe(400);
+      const subscriberCount = result.channels[0].metrics.find((m) => m.metric === "subscriberCount")!;
+      expect(subscriberCount.source).toBeUndefined();
+    });
+
+    it("stay hidden (not just empty) for an unconnected YouTube channel — no business row at all", async () => {
+      createClientMock.mockResolvedValue(
+        makeClient({
+          tracked_channels: listQuery([{ id: "c1", platform: "youtube", external_id: "@my", url: "" }]),
+          marketing_metric_snapshots: listQuery([]),
+        }),
+      );
+
+      const result = await getChannelGrowthSeries("business-1", { now: NOW, days: 7 });
+      expect(result.channels[0].metrics.map((m) => m.metric)).toEqual(["subscriberCount", "viewCount"]);
+      expect(getConnectionMock).not.toHaveBeenCalled();
+    });
+
+    it("stay hidden after disconnect, even though the previously-collected data is preserved in the snapshots table (retention option A)", async () => {
+      createClientMock.mockResolvedValue(
+        makeClient({
+          tracked_channels: listQuery([{ id: "c1", platform: "youtube", external_id: "@my", url: "" }]),
+          // Data from before the disconnect is still sitting in the table.
+          marketing_metric_snapshots: listQuery([snapshot("c1", "yt_analytics.estimatedMinutesWatched", 400, 1)]),
+          businesses: singleQuery({ owner_id: "user-1" }),
+        }),
+      );
+      getConnectionMock.mockResolvedValue({ status: "DISCONNECTED", metadata: { scope: "https://www.googleapis.com/auth/yt-analytics.readonly" } });
+
+      const result = await getChannelGrowthSeries("business-1", { now: NOW, days: 7 });
+      expect(result.channels[0].metrics.map((m) => m.metric)).toEqual(["subscriberCount", "viewCount"]);
+    });
+
+    it("stay hidden when connected but the token predates the yt-analytics.readonly scope", async () => {
+      createClientMock.mockResolvedValue(
+        makeClient({
+          tracked_channels: listQuery([{ id: "c1", platform: "youtube", external_id: "@my", url: "" }]),
+          marketing_metric_snapshots: listQuery([]),
+          businesses: singleQuery({ owner_id: "user-1" }),
+        }),
+      );
+      getConnectionMock.mockResolvedValue({ status: "CONNECTED", metadata: { scope: "https://www.googleapis.com/auth/youtube.upload" } });
+
+      const result = await getChannelGrowthSeries("business-1", { now: NOW, days: 7 });
+      expect(result.channels[0].metrics.map((m) => m.metric)).toEqual(["subscriberCount", "viewCount"]);
+    });
+
+    it("never apply to non-YouTube platforms, and never trigger a connection lookup for them", async () => {
+      createClientMock.mockResolvedValue(
+        makeClient({
+          tracked_channels: listQuery([{ id: "c1", platform: "tistory", external_id: "myname", url: "" }]),
+          marketing_metric_snapshots: listQuery([]),
+        }),
+      );
+
+      const result = await getChannelGrowthSeries("business-1", { now: NOW, days: 7 });
+      expect(result.channels[0].metrics.map((m) => m.metric)).toEqual(["postCount"]);
+      expect(getConnectionMock).not.toHaveBeenCalled();
+    });
   });
 });

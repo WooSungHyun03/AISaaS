@@ -1,6 +1,9 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { getConnection } from "@/server/connectors/integrations";
+import type { MetricSource } from "@/server/marketing/growth-report";
 import { ChannelsError, deltaPercent, latestBefore } from "./summary";
+import { hasYouTubeAnalyticsScope } from "./youtube-analytics-scope";
 import type { ChannelPlatform } from "./platform";
 
 const DAY_MS = 86_400_000;
@@ -21,12 +24,26 @@ export const ALLOWED_GROWTH_METRICS: Record<ChannelPlatform, readonly string[]> 
   tistory: ["postCount"],
 };
 
+/**
+ * Ticket 1-10: NOT part of ALLOWED_GROWTH_METRICS above — that list is
+ * static and platform-wide, but these two must only appear for a YouTube
+ * channel whose business owner currently has a CONNECTED,
+ * yt-analytics.readonly-scoped integration (see the
+ * youtubeAnalyticsConnected check in getChannelGrowthSeries). Appending
+ * them to ALLOWED_GROWTH_METRICS would show an empty/"측정 불가" row for
+ * every unconnected YouTube channel instead of omitting the metric
+ * entirely.
+ */
+const YOUTUBE_ANALYTICS_METRICS: readonly string[] = ["yt_analytics.estimatedMinutesWatched", "yt_analytics.averageViewDuration"];
+
 export const GROWTH_METRIC_LABEL: Record<string, string> = {
   subscriberCount: "구독자 수",
   viewCount: "조회수",
   matchedPostCount: "검색된 글 수",
   postsLast30Days: "최근 30일 게시 수",
   postCount: "게시글 수",
+  "yt_analytics.estimatedMinutesWatched": "시청 시간(분)",
+  "yt_analytics.averageViewDuration": "평균 시청 지속시간(초)",
 };
 
 /** Below this many snapshots in the current period, there isn't enough history to call it a trend yet. */
@@ -56,6 +73,14 @@ export interface GrowthMetricSeries {
   points: GrowthSeriesPoint[];
   /** True if any snapshot behind this metric came from scripts/seed-growth-demo.sql — the UI must show a "데모 데이터" badge. */
   hasDemoSeedData: boolean;
+  /**
+   * Ticket 1-10: set only for yt_analytics.* metrics (always "EXTERNAL_VERIFIED",
+   * since they only ever appear when a real OAuth-connected scope confirmed
+   * them) — undefined for every other metric, which keeps their display
+   * unchanged. Reuses growth-report.ts's MetricSource rather than inventing
+   * a second source-classification type.
+   */
+  source?: MetricSource;
 }
 
 export interface ChannelGrowthSeries {
@@ -80,7 +105,7 @@ export function kstDate(timeMs: number): string {
   return new Date(timeMs + 9 * 3_600_000).toISOString().slice(0, 10);
 }
 
-function buildMetricSeries(metric: string, rows: Array<{ value: number; recorded_at: string; source: string }>, nowMs: number, days: number): GrowthMetricSeries {
+function buildMetricSeries(metric: string, rows: Array<{ value: number; recorded_at: string; source: string }>, nowMs: number, days: number, metricSource?: MetricSource): GrowthMetricSeries {
   const currentPeriodStart = nowMs - days * DAY_MS;
   const rowsInCurrentPeriod = rows.filter((row) => Date.parse(row.recorded_at) >= currentPeriodStart);
 
@@ -104,6 +129,7 @@ function buildMetricSeries(metric: string, rows: Array<{ value: number; recorded
     deltaPercent: deltaPercent(current, previous),
     points,
     hasDemoSeedData: rows.some((row) => row.source === "DEMO_SEED"),
+    source: metricSource,
   };
 }
 
@@ -136,6 +162,17 @@ export async function getChannelGrowthSeries(businessId: string, options: { days
   const channels = (channelRows ?? []) as Array<{ id: string; platform: ChannelPlatform; external_id: string; url: string }>;
   if (channels.length === 0) return { businessId, days, channels: [], hasAnyData: false };
 
+  // Ticket 1-10: yt_analytics.* only ever shows for a currently-connected,
+  // correctly-scoped YouTube integration — disconnecting (data preserved,
+  // see docs/person1/PLAN_1-10.md) or a scope predating this feature both
+  // fall through to false here, which is what hides those rows below.
+  let youtubeAnalyticsConnected = false;
+  if (channels.some((channel) => channel.platform === "youtube")) {
+    const { data: business } = await supabase.from("businesses").select("owner_id").eq("id", businessId).maybeSingle();
+    const connection = business?.owner_id ? await getConnection(supabase, business.owner_id, businessId, "youtube") : null;
+    youtubeAnalyticsConnected = connection?.status === "CONNECTED" && hasYouTubeAnalyticsScope(connection);
+  }
+
   const since = new Date(nowMs - days * 2 * DAY_MS).toISOString();
   const { data: snapshotRows, error: snapshotsError } = await supabase
     .from("marketing_metric_snapshots")
@@ -153,15 +190,26 @@ export async function getChannelGrowthSeries(businessId: string, options: { days
     byChannelMetric.set(key, bucket);
   }
 
-  const result: ChannelGrowthSeries[] = channels.map((channel) => ({
-    channelId: channel.id,
-    platform: channel.platform,
-    externalId: channel.external_id,
-    url: channel.url,
-    metrics: ALLOWED_GROWTH_METRICS[channel.platform].map((metric) =>
-      buildMetricSeries(metric, byChannelMetric.get(`${channel.id}:${metric}`) ?? [], nowMs, days),
-    ),
-  }));
+  const result: ChannelGrowthSeries[] = channels.map((channel) => {
+    const metricNames: string[] = [...ALLOWED_GROWTH_METRICS[channel.platform]];
+    if (channel.platform === "youtube" && youtubeAnalyticsConnected) metricNames.push(...YOUTUBE_ANALYTICS_METRICS);
+
+    return {
+      channelId: channel.id,
+      platform: channel.platform,
+      externalId: channel.external_id,
+      url: channel.url,
+      metrics: metricNames.map((metric) =>
+        buildMetricSeries(
+          metric,
+          byChannelMetric.get(`${channel.id}:${metric}`) ?? [],
+          nowMs,
+          days,
+          YOUTUBE_ANALYTICS_METRICS.includes(metric) ? "EXTERNAL_VERIFIED" : undefined,
+        ),
+      ),
+    };
+  });
 
   const hasAnyData = result.some((channel) => channel.metrics.some((metric) => metric.current !== null || metric.points.some((point) => point.value !== null)));
   return { businessId, days, channels: result, hasAnyData };
