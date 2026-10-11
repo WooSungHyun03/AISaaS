@@ -40,7 +40,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
   2. Register the daily metrics cron when ready (`docs/person1/METRICS_COLLECTION_CRON.md`): needs the Edge Function `?job=metrics` branch deployed and the `cron.schedule(...)` SQL run. The route itself now works.
   3. Vercel: account deletion and snapshot writes need `SUPABASE_SERVICE_ROLE_KEY` (already required by billing/cron — confirm it is set).
 - **Next run priorities:** F-006 (confirm teammates know), F-007 channel removal (팀원 1) or a minimal fix if still missing; review new 팀원 2 commits (credits, refunds/inquiry, Admin `requireAdmin`); F-001..F-004 follow-up; mobile check of /diagnosis and /growth-report charts.
-- **Commit:** see git log (`fix(channels)…` 2026-10-11)
+- **Commit:** `6438089` (fix(channels): snapshot writes + metrics cron blocked by RLS; account deletion)
 
 ### 2026-10-10 (run 1)
 
