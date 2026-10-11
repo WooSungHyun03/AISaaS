@@ -10,6 +10,10 @@ import { ReadinessScoreCard } from "@/components/marketing/readiness-score-card"
 import { getChannelNarrative, getLatestChannelDiagnosisSummary } from "@/server/channels";
 import { ChannelDiagnosisCard } from "@/components/channels/channel-diagnosis-card";
 import { AddChannelForm } from "@/components/channels/add-channel-form";
+import { WebsiteDiagnosisCard, type StoredWebsiteDiagnosis } from "@/components/channels/website-diagnosis-card";
+import { scoreItemsSchema } from "@/server/marketing/scoring";
+import { isMissingSchemaError } from "@/server/shared/db-errors";
+import { FormMessage } from "@/components/ui/form-message";
 
 /** Readiness score, channel summary, and per-channel AI narratives are all fetched/generated here — give it room beyond the 10s default. */
 export const maxDuration = 60;
@@ -48,10 +52,39 @@ export default async function DiagnosisPage({
     );
   }
 
-  const [readiness, channelSummary] = await Promise.all([
+  // A database that has not received the channel migrations yet must not take the whole page (and the homepage diagnosis) down.
+  const [readiness, summaryResult, websiteResult] = await Promise.all([
     getReadinessScore(selectedBusiness, user.id),
-    getLatestChannelDiagnosisSummary(selectedBusiness.id),
+    getLatestChannelDiagnosisSummary(selectedBusiness.id).then(
+      (summary) => ({ summary, unavailable: false }),
+      (error: unknown) => {
+        if (!isMissingSchemaError(error)) throw error;
+        return { summary: { businessId: selectedBusiness.id, channels: [], hasAnyData: false }, unavailable: true };
+      },
+    ),
+    supabase
+      .from("marketing_diagnoses")
+      .select("score, score_breakdown, recommendations, content_status, source_url, created_at")
+      .eq("business_id", selectedBusiness.id)
+      .eq("source_type", "website")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
+
+  const channelSummary = summaryResult.summary;
+  const channelsUnavailable = summaryResult.unavailable;
+  const breakdown = scoreItemsSchema.safeParse(websiteResult.data?.score_breakdown);
+  const storedWebsite: StoredWebsiteDiagnosis | null = websiteResult.data
+    ? {
+        score: websiteResult.data.score,
+        scoreBreakdown: breakdown.success ? breakdown.data : [],
+        recommendations: websiteResult.data.recommendations ?? [],
+        contentStatus: websiteResult.data.content_status,
+        sourceUrl: websiteResult.data.source_url,
+        createdAt: websiteResult.data.created_at,
+      }
+    : null;
 
   const narratives = await Promise.all(channelSummary.channels.map((item) => getChannelNarrative(item, selectedBusiness)));
 
@@ -71,15 +104,27 @@ export default async function DiagnosisPage({
 
       <ReadinessScoreCard businessName={selectedBusiness.name} result={readiness} />
 
+      <section aria-labelledby="website-diagnosis-title" className="space-y-5">
+        <div>
+          <h2 id="website-diagnosis-title" className="text-lg font-bold tracking-[-0.02em]">홈페이지 진단</h2>
+          <p className="mt-1 text-[15px] text-muted-foreground">홈페이지를 직접 열어보고 항목별 점수와 이유를 알려드려요.</p>
+        </div>
+        <WebsiteDiagnosisCard businessId={selectedBusiness.id} website={selectedBusiness.website} stored={storedWebsite} />
+      </section>
+
       <section aria-labelledby="channel-diagnosis-title" className="space-y-5">
         <div>
           <h2 id="channel-diagnosis-title" className="text-lg font-bold tracking-[-0.02em]">채널 진단</h2>
           <p className="mt-1 text-[15px] text-muted-foreground">유튜브·네이버 블로그·티스토리 채널의 활동성·꾸준함·콘텐츠 점수를 확인해요.</p>
         </div>
 
-        <AddChannelForm businessId={selectedBusiness.id} />
+        {channelsUnavailable ? (
+          <FormMessage variant="info">채널 진단 기능을 준비하는 중이에요. 서비스 관리자가 데이터베이스 업데이트를 마치면 바로 쓸 수 있어요. 홈페이지 진단은 지금도 쓸 수 있어요.</FormMessage>
+        ) : (
+          <AddChannelForm businessId={selectedBusiness.id} />
+        )}
 
-        {channelSummary.hasAnyData ? (
+        {channelsUnavailable ? null : channelSummary.hasAnyData ? (
           <div className="space-y-4">
             {channelSummary.channels.map((item, index) => (
               <ChannelDiagnosisCard key={item.channelId} item={item} narrative={narratives[index].narrative} />

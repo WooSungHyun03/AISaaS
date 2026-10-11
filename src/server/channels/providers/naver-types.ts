@@ -25,6 +25,11 @@ export interface NaverBlogMetrics {
   /** KST date (YYYY-MM-DD) — postdate has no time component. */
   lastPostDate: string | null;
   firstPostDate: string | null;
+  /**
+   * Where the posts came from: the blog's own RSS (`rss`, its latest posts) or blog search (`search`, only posts
+   * that mention the blog id). Missing on rows/mocks from before RSS support, which were search-based.
+   */
+  basis?: "rss" | "search";
 }
 
 export type NaverBlogCollector = (externalId: string, businessName: string | undefined, now?: Date) => Promise<NaverBlogMetrics>;

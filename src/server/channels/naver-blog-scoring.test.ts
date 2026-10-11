@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NAVER_SEARCH_LIMITATION_NOTICE, scoreNaverBlogChannel } from "./naver-blog-scoring";
+import { NAVER_RSS_LIMITATION_NOTICE, NAVER_SEARCH_LIMITATION_NOTICE, scoreNaverBlogChannel } from "./naver-blog-scoring";
 import type { NaverBlogMetrics } from "./providers/naver-types";
 
 const ACTIVE_METRICS: NaverBlogMetrics = {
@@ -46,5 +46,26 @@ describe("scoreNaverBlogChannel", () => {
     const result = scoreNaverBlogChannel(metrics);
     expect(result.activityScore).toBe(0);
     expect(result.completeness).toBe("COMPLETE");
+  });
+});
+
+describe("scoreNaverBlogChannel — RSS basis", () => {
+  it("describes the numbers as the blog's own recent posts, not as search exposure", () => {
+    const result = scoreNaverBlogChannel({ ...ACTIVE_METRICS, basis: "rss" });
+    expect(result.findings).toEqual([NAVER_RSS_LIMITATION_NOTICE]);
+    expect(result.items.map((item) => item.detail).join(" ")).toContain("최근 공개된 글");
+    expect(result.items.map((item) => item.detail).join(" ")).not.toContain("검색에 노출");
+    expect(result.recommendations.join(" ")).not.toContain("검색에 노출되려면");
+  });
+
+  it("keeps the search wording when the numbers came from search (or from before RSS support)", () => {
+    expect(scoreNaverBlogChannel({ ...ACTIVE_METRICS, basis: "search" }).findings).toEqual([NAVER_SEARCH_LIMITATION_NOTICE]);
+    expect(scoreNaverBlogChannel(ACTIVE_METRICS).findings).toEqual([NAVER_SEARCH_LIMITATION_NOTICE]);
+  });
+
+  it("still says INSUFFICIENT_DATA, with the RSS caveat, for a blog whose RSS shows no posts", () => {
+    const result = scoreNaverBlogChannel({ matchedPostCount: 0, postsLast30Days: 0, averageGapDays: null, lastPostDate: null, firstPostDate: null, basis: "rss" });
+    expect(result.completeness).toBe("INSUFFICIENT_DATA");
+    expect(result.findings).toEqual([NAVER_RSS_LIMITATION_NOTICE]);
   });
 });

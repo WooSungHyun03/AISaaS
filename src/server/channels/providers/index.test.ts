@@ -57,8 +57,8 @@ describe("getNaverBlogCollector", () => {
   it("returns the live collector when CHANNEL_DATA_PROVIDER=live", async () => {
     serverEnvMock.CHANNEL_DATA_PROVIDER = "live";
     const { getNaverBlogCollector } = await import("./index");
-    const { collectNaverBlogMetrics } = await import("./naver-blog");
-    expect(getNaverBlogCollector()).toBe(collectNaverBlogMetrics);
+    const { collectNaverBlogLive } = await import("./naver-blog-live");
+    expect(getNaverBlogCollector()).toBe(collectNaverBlogLive);
   });
 });
 

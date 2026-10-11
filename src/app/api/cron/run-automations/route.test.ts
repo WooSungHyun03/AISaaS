@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findDueMock, runDueMock, reapMock, advanceMock, envState } = vi.hoisted(() => ({
+const { findDueMock, runDueMock, reapMock, advanceMock, processChannelsMock, cleanupMock, envState } = vi.hoisted(() => ({
+  processChannelsMock: vi.fn(),
+  cleanupMock: vi.fn(),
   findDueMock: vi.fn(),
   runDueMock: vi.fn(),
   reapMock: vi.fn(),
@@ -9,6 +11,7 @@ const { findDueMock, runDueMock, reapMock, advanceMock, envState } = vi.hoisted(
 }));
 
 vi.mock("@/lib/env/server", () => ({ serverEnv: envState }));
+vi.mock("@/server/channels/collect-pipeline", () => ({ processDueChannels: processChannelsMock, cleanupOldSnapshots: cleanupMock }));
 vi.mock("@/server/automations", () => ({ findDueAutomations: findDueMock, runDueAutomation: runDueMock, reapStaleRuns: reapMock, advanceDeferredRuns: advanceMock }));
 
 const { POST } = await import("./route");
@@ -21,6 +24,8 @@ beforeEach(() => {
   reapMock.mockResolvedValue(0);
   advanceMock.mockResolvedValue([]);
   findDueMock.mockResolvedValue([]);
+  processChannelsMock.mockResolvedValue({ processed: 0, failed: 0, paused: 0 });
+  cleanupMock.mockResolvedValue(0);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -92,5 +97,32 @@ describe("POST /api/cron/run-automations", () => {
     advanceMock.mockRejectedValueOnce(new Error("db down"));
     const second = await (await POST(request("test-cron-secret"))).json();
     expect(second).toMatchObject({ advanced: 0, processed: 1 });
+  });
+
+  it("also collects channel metrics that are due, so the daily growth-report job needs no second schedule", async () => {
+    processChannelsMock.mockResolvedValue({ processed: 3, failed: 0, paused: 0 });
+
+    const body = await (await POST(request("test-cron-secret"))).json();
+
+    expect(processChannelsMock).toHaveBeenCalledTimes(1);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(body.channels).toEqual({ processed: 3, failed: 0, paused: 0 });
+  });
+
+  it("does not clean up snapshots on the many ticks where no channel was due", async () => {
+    await POST(request("test-cron-secret"));
+    expect(processChannelsMock).toHaveBeenCalledTimes(1);
+    expect(cleanupMock).not.toHaveBeenCalled();
+  });
+
+  it("never lets a channel-collection failure (e.g. tables not migrated yet) break the automation tick", async () => {
+    findDueMock.mockResolvedValue([{ id: "a-1" }]);
+    runDueMock.mockResolvedValue({ runId: "r", status: "SUCCESS" });
+    processChannelsMock.mockRejectedValue(new Error("relation tracked_channels does not exist"));
+
+    const response = await POST(request("test-cron-secret"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ processed: 1 });
   });
 });

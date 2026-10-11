@@ -8,6 +8,17 @@ import type { NaverBlogMetrics } from "./providers/naver-types";
  * result and as a permanent note on an otherwise-COMPLETE one.
  */
 export const NAVER_SEARCH_LIMITATION_NOTICE = "검색에 노출된 글 기준이에요, 방문자 수는 확인할 수 없어요.";
+/** The RSS lists the blog's own latest posts, so the caveat is about how far back it reaches, not about search exposure. */
+export const NAVER_RSS_LIMITATION_NOTICE = "블로그 RSS에 공개된 최근 글(최대 50개) 기준이에요, 방문자 수와 조회수는 확인할 수 없어요.";
+
+function limitationNotice(metrics: NaverBlogMetrics): string {
+  return metrics.basis === "rss" ? NAVER_RSS_LIMITATION_NOTICE : NAVER_SEARCH_LIMITATION_NOTICE;
+}
+
+/** "RSS에 공개된" vs "검색에 노출된" — the same sentence, honest about where the numbers came from. */
+function posts(metrics: NaverBlogMetrics): string {
+  return metrics.basis === "rss" ? "최근 공개된 글" : "검색에 노출된 글";
+}
 
 export interface NaverBlogScoreItem {
   key: string;
@@ -32,8 +43,8 @@ export interface NaverBlogScoreResult {
 function scoreActivity(metrics: NaverBlogMetrics): NaverBlogScoreItem {
   const { postsLast30Days } = metrics;
   const points = postsLast30Days === 0 ? 0 : postsLast30Days <= 3 ? 40 : postsLast30Days <= 7 ? 70 : 100;
-  const detail = postsLast30Days === 0 ? "최근 30일간 검색에 노출된 글이 없어요." : `최근 30일간 검색에 노출된 글이 ${postsLast30Days}개예요.`;
-  return { key: "posts_last_30_days", group: "activity", label: "최근 게시 빈도(검색 노출 기준)", points, detail };
+  const detail = postsLast30Days === 0 ? `최근 30일간 ${posts(metrics)}이 없어요.` : `최근 30일간 ${posts(metrics)}이 ${postsLast30Days}개예요.`;
+  return { key: "posts_last_30_days", group: "activity", label: metrics.basis === "rss" ? "최근 게시 빈도(RSS 기준)" : "최근 게시 빈도(검색 노출 기준)", points, detail };
 }
 
 function scoreConsistency(metrics: NaverBlogMetrics): NaverBlogScoreItem {
@@ -43,7 +54,7 @@ function scoreConsistency(metrics: NaverBlogMetrics): NaverBlogScoreItem {
       group: "consistency",
       label: "게시 간격 꾸준함",
       points: 20,
-      detail: "검색에 노출된 글이 적어 꾸준함을 판단하기엔 데이터가 부족해요.",
+      detail: `${posts(metrics)}이 적어 꾸준함을 판단하기엔 데이터가 부족해요.`,
     };
   }
 
@@ -54,7 +65,7 @@ function scoreConsistency(metrics: NaverBlogMetrics): NaverBlogScoreItem {
     group: "consistency",
     label: "게시 간격 꾸준함",
     points,
-    detail: `검색에 노출된 글 사이 평균 간격이 ${gap.toFixed(1)}일이에요.`,
+    detail: `${posts(metrics)} 사이 평균 간격이 ${gap.toFixed(1)}일이에요.`,
   };
 }
 
@@ -67,7 +78,7 @@ export function scoreNaverBlogChannel(metrics: NaverBlogMetrics): NaverBlogScore
       consistencyScore: 0,
       contentScore: null,
       items: [],
-      findings: [NAVER_SEARCH_LIMITATION_NOTICE],
+      findings: [limitationNotice(metrics)],
       recommendations: [],
       completeness: "INSUFFICIENT_DATA",
     };
@@ -79,10 +90,10 @@ export function scoreNaverBlogChannel(metrics: NaverBlogMetrics): NaverBlogScore
   const overallScore = Math.round((activityItem.points + consistencyItem.points) / 2);
 
   const recommendations: string[] = [];
-  if (activityItem.points < 70) recommendations.push("검색에 노출되려면 블로그 이름/키워드가 포함된 제목으로 꾸준히 게시해보세요.");
+  if (activityItem.points < 70) recommendations.push(metrics.basis === "rss" ? "한 달에 최소 4~8개씩 정해진 요일에 꾸준히 올려보세요." : "검색에 노출되려면 블로그 이름/키워드가 포함된 제목으로 꾸준히 게시해보세요.");
   if (consistencyItem.points < 70) recommendations.push("게시 요일을 일정하게 유지하면 꾸준함 점수가 올라가요.");
 
   const completeness: ChannelDiagnosisCompleteness = metrics.matchedPostCount < 2 ? "PARTIAL" : "COMPLETE";
 
-  return { overallScore, activityScore: activityItem.points, consistencyScore: consistencyItem.points, contentScore: null, items, findings: [NAVER_SEARCH_LIMITATION_NOTICE], recommendations, completeness };
+  return { overallScore, activityScore: activityItem.points, consistencyScore: consistencyItem.points, contentScore: null, items, findings: [limitationNotice(metrics)], recommendations, completeness };
 }

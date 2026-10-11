@@ -11,6 +11,8 @@ import { buildGrowthReport, SOURCE_LABEL, type Comparison, type MetricSource, ty
 import { getChannelGrowthSeries, getOrCreateGrowthNarrative } from "@/server/channels";
 import { ChannelGrowthCard } from "@/components/channels/channel-growth-card";
 import { cn } from "@/lib/utils";
+import { FormMessage } from "@/components/ui/form-message";
+import { isMissingSchemaError } from "@/server/shared/db-errors";
 
 const PERIODS = [7, 30, 90] as const;
 const DAY_MS = 86_400_000;
@@ -82,7 +84,15 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
   const since = new Date(now.getTime() - days * 2 * DAY_MS);
   const sinceDate = new Date(since.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
 
-  const growthSeries = await getChannelGrowthSeries(business.id, { days, now });
+  const seriesResult = await getChannelGrowthSeries(business.id, { days, now }).then(
+    (series) => ({ series, unavailable: false }),
+    (error: unknown) => {
+      if (!isMissingSchemaError(error)) throw error;
+      return { series: { businessId: business.id, days, channels: [], hasAnyData: false }, unavailable: true };
+    },
+  );
+  const growthSeries = seriesResult.series;
+  const channelsUnavailable = seriesResult.unavailable;
   const channelNarratives = await Promise.all(
     growthSeries.channels.map((channel) =>
       getOrCreateGrowthNarrative({ id: channel.channelId, business_id: business.id }, channel, business, days, now),
@@ -142,7 +152,9 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
           </p>
         </div>
 
-        {growthSeries.channels.length === 0 ? (
+        {channelsUnavailable ? (
+          <FormMessage variant="info">채널 성장 기능을 준비하는 중이에요. 서비스 관리자가 데이터베이스 업데이트를 마치면 구독자·게시 활동 변화를 볼 수 있어요. 아래 서비스 내부 기록은 지금도 볼 수 있어요.</FormMessage>
+        ) : growthSeries.channels.length === 0 ? (
           <EmptyState
             mascot="guide"
             title="아직 추적 중인 채널이 없어요"

@@ -256,6 +256,7 @@ export async function runDiagnosis(_prevState: DiagnosisActionState, formData: F
   // 사람1(ticket 1-5): the website-diagnosis UI moved to /business (see
   // AutoFillFromWebsiteButton) — /marketing/diagnosis is now just a
   // redirect to /diagnosis and never renders this data.
+  revalidatePath("/diagnosis");
   revalidatePath("/business");
   revalidatePath("/calendar");
   revalidatePath("/marketing/calendar");

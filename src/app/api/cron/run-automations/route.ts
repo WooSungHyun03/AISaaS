@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { serverEnv } from "@/lib/env/server";
 import { advanceDeferredRuns, findDueAutomations, reapStaleRuns, runDueAutomation } from "@/server/automations";
+import { cleanupOldSnapshots, processDueChannels } from "@/server/channels/collect-pipeline";
 import { logger } from "@/lib/logger";
 import { safeEqual } from "@/server/shared/secret";
 
@@ -57,5 +58,19 @@ export async function POST(request: Request) {
     }
   }
 
-  return NextResponse.json({ processed: results.length, advanced, results });
+  // Growth-report numbers: each tracked channel is due once a day (next_snapshot_at), so most ticks find nothing
+  // and this stays one cheap indexed query. Riding on this already-scheduled tick means the daily collection needs no
+  // second pg_cron job to be registered; a failure here never affects the automations above.
+  let channels = { processed: 0, failed: 0, paused: 0 };
+  const remainingMs = deadline - Date.now();
+  if (remainingMs > 10_000) {
+    try {
+      channels = await processDueChannels(new Date(), Math.min(remainingMs - 5_000, 25_000));
+      if (channels.processed + channels.failed > 0) await cleanupOldSnapshots().catch((err) => logger.error("cron_snapshot_cleanup_failed", { message: err instanceof Error ? err.message : String(err) }));
+    } catch (err) {
+      logger.error("cron_channel_collection_failed", { message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return NextResponse.json({ processed: results.length, advanced, channels, results });
 }

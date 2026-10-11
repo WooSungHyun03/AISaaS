@@ -59,7 +59,7 @@ export const ANALYTICS_LAG_DAYS = 3;
 export const GROWTH_METRIC_LABEL: Record<string, string> = {
   subscriberCount: "구독자 수",
   viewCount: "조회수",
-  matchedPostCount: "검색된 글 수",
+  matchedPostCount: "확인된 글 수",
   postsLast30Days: "최근 30일 게시 수",
   postCount: "게시글 수",
   "yt_analytics.views": "조회수 (기간 합계)",

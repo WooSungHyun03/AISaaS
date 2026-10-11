@@ -6,7 +6,7 @@ import type { YouTubeDataProvider } from "./youtube-types";
 import { collectTistoryRssMetrics } from "./tistory";
 import { collectMockTistoryRssMetrics } from "./tistory-mock";
 import type { TistoryCollector } from "./tistory";
-import { collectNaverBlogMetrics } from "./naver-blog";
+import { collectNaverBlogLive } from "./naver-blog-live";
 import { collectMockNaverBlogMetrics } from "./naver-blog-mock";
 import type { NaverBlogCollector } from "./naver-types";
 import { collectMockYouTubeAnalytics } from "./youtube-analytics-mock";
@@ -27,9 +27,9 @@ export function getTistoryCollector(): TistoryCollector {
   return serverEnv.CHANNEL_DATA_PROVIDER === "live" ? collectTistoryRssMetrics : collectMockTistoryRssMetrics;
 }
 
-/** Picks the active Naver Blog search collector based on CHANNEL_DATA_PROVIDER. */
+/** Picks the active Naver Blog collector based on CHANNEL_DATA_PROVIDER (live: public RSS first, search as a fallback). */
 export function getNaverBlogCollector(): NaverBlogCollector {
-  return serverEnv.CHANNEL_DATA_PROVIDER === "live" ? collectNaverBlogMetrics : collectMockNaverBlogMetrics;
+  return serverEnv.CHANNEL_DATA_PROVIDER === "live" ? collectNaverBlogLive : collectMockNaverBlogMetrics;
 }
 
 /**

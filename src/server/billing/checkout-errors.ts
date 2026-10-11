@@ -5,6 +5,8 @@
  * owner gets a sentence they can act on. Never put an error message from a
  * provider or the database into a URL or a response — only these codes.
  */
+import { isMissingSchemaError } from "@/server/shared/db-errors";
+
 export type CheckoutStartFailureCode =
   | "BILLING_NOT_CONFIGURED"
   | "BILLING_SCHEMA_OUTDATED"
@@ -17,9 +19,6 @@ export interface CheckoutStartFailure {
   detail: string;
 }
 
-/** Postgres "undefined column/table/function" and PostgREST schema-cache misses: the code expects a newer database. */
-const SCHEMA_ERROR_CODES = new Set(["42703", "42P01", "42883", "PGRST200", "PGRST202", "PGRST204", "PGRST205"]);
-
 const CONFIGURATION_MESSAGE =
   /Missing required environment variable|accepts test keys only|모의 결제는 운영 환경|BILLING_PROVIDER|TOSS_SECRET_KEY/;
 
@@ -29,7 +28,7 @@ export function classifyCheckoutStartError(error: unknown): CheckoutStartFailure
     : null;
   const message = error instanceof Error ? error.message : typeof error === "object" && error !== null && typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "";
 
-  if (dbCode && SCHEMA_ERROR_CODES.has(dbCode)) return { code: "BILLING_SCHEMA_OUTDATED", detail: dbCode };
+  if (isMissingSchemaError(error)) return { code: "BILLING_SCHEMA_OUTDATED", detail: dbCode ?? "schema" };
   if (CONFIGURATION_MESSAGE.test(message)) return { code: "BILLING_NOT_CONFIGURED", detail: error instanceof Error ? error.name : "ConfigError" };
   if (dbCode) return { code: "BILLING_DB_ERROR", detail: dbCode };
   return { code: "CHECKOUT_START_FAILED", detail: error instanceof Error ? error.name : "UnknownError" };

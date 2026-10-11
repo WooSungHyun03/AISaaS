@@ -118,6 +118,10 @@ export class MockAIProvider implements AIProvider {
       }
     }
 
+    if (prompt.includes("===DIAGNOSIS_DATA_START===")) {
+      return { text: "지금까지의 활동을 바탕으로 한 예시 설명이에요. 실제 서비스에서는 AI가 채널 상황에 맞춰 구체적으로 써드려요." };
+    }
+
     if (prompt.includes("===WEBPAGE_DATA_START===")) {
       return {
         text: JSON.stringify({

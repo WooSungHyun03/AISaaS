@@ -1,6 +1,7 @@
 import "server-only";
-import { decodeHtmlEntities, DiagnosisError, fetchPublicXml } from "@/server/marketing/diagnosis";
+import { DiagnosisError, fetchPublicXml } from "@/server/marketing/diagnosis";
 import type { DiagnosisErrorCode } from "@/server/marketing/diagnosis";
+import { parseRssPublishDates } from "./rss";
 
 /**
  * ⚠️ 비공식 경로: 티스토리는 `/rss`를 공식 API로 문서화하지 않습니다 — URL 구조나
@@ -20,33 +21,6 @@ export interface TistoryRssMetrics {
   observedCapped: boolean;
   /** null이 아니면 posts는 비어 있고, 이 문자열이 사유(비공개/404/형식오류 등). */
   unavailableReason: string | null;
-}
-
-/** CDATA와 일반 텍스트(HTML 엔티티 이스케이프) 두 형태 다 처리 — 실제 티스토리 블로그는 스킨에 따라 둘 다 씁니다. */
-function extractTag(itemXml: string, tag: string): string | null {
-  const cdata = itemXml.match(new RegExp(`<${tag}[^>]*>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*<\\/${tag}>`, "i"));
-  if (cdata) return decodeHtmlEntities(cdata[1]).trim() || null;
-  const plain = itemXml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i"));
-  return plain ? decodeHtmlEntities(plain[1]).trim() || null : null;
-}
-
-/** RFC 822(pubDate) 텍스트만 뽑아 Date로 변환 — 파싱 실패한 글은 조용히 건너뜀(크래시 대신). */
-function parsePubDate(raw: string | null): string | null {
-  if (!raw) return null;
-  const parsed = Date.parse(raw);
-  return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
-}
-
-function parseRssFeed(xml: string): { posts: Array<{ publishedAt: string }>; observedCapped: boolean } {
-  const blocks = Array.from(xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)).map((match) => match[1]);
-  const limited = blocks.slice(0, MAX_ITEMS);
-  const posts = limited
-    .map((block) => parsePubDate(extractTag(block, "pubDate")))
-    .filter((publishedAt): publishedAt is string => publishedAt !== null)
-    .sort((a, b) => Date.parse(b) - Date.parse(a))
-    .map((publishedAt) => ({ publishedAt }));
-
-  return { posts, observedCapped: blocks.length >= MAX_ITEMS };
 }
 
 function describeUnavailable(code: DiagnosisErrorCode): string {
@@ -82,6 +56,6 @@ export async function collectTistoryRssMetrics(blogUrl: string): Promise<Tistory
     throw cause;
   }
 
-  const { posts, observedCapped } = parseRssFeed(xml);
-  return { posts, observedCapped, unavailableReason: null };
+  const { dates, itemCount } = parseRssPublishDates(xml, MAX_ITEMS);
+  return { posts: dates.map((publishedAt) => ({ publishedAt })), observedCapped: itemCount >= MAX_ITEMS, unavailableReason: null };
 }
