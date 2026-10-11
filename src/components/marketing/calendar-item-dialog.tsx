@@ -58,12 +58,22 @@ function disabledReason(item: CalendarItem): string | null {
 export function CalendarItemDialog({
   item,
   variant = "compact",
+  open: controlledOpen,
+  onOpenChange,
 }: {
   item: CalendarItem;
   variant?: "compact" | "card";
+  /** When given, the dialog is opened from elsewhere (the calendar grid) and renders no trigger of its own. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (value: boolean) => {
+    setInternalOpen(value);
+    onOpenChange?.(value);
+  };
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
   const reason = disabledReason(item);
@@ -152,7 +162,7 @@ export function CalendarItemDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => { if (!isPending) { setOpen(nextOpen); if (!nextOpen) setError(""); } }}>
-      <DialogTrigger asChild>
+      {controlledOpen === undefined ? <DialogTrigger asChild>
         {variant === "compact" ? (
           <button type="button" className={`block w-full cursor-pointer rounded-md border px-2 py-1.5 text-left text-xs leading-4 transition-[filter] hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring ${platformTone(item.platform)}`}>
             <span className="block truncate font-bold">{item.topic}</span>
@@ -168,7 +178,7 @@ export function CalendarItemDialog({
             <span className="mt-1.5 line-clamp-2 block text-sm leading-6 text-muted-foreground">{item.summary}</span>
           </button>
         )}
-      </DialogTrigger>
+      </DialogTrigger> : null}
 
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>

@@ -92,6 +92,52 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["businesses"]["Insert"]>;
         Relationships: [];
       };
+      calendar_events: {
+        Row: {
+          id: string;
+          user_id: string;
+          title: string;
+          description: string | null;
+          starts_at: string;
+          ends_at: string;
+          all_day: boolean;
+          color: string;
+          category: string;
+          recur_freq: "DAILY" | "WEEKLY" | "MONTHLY" | null;
+          recur_interval: number;
+          recur_weekdays: number[] | null;
+          recur_until: string | null;
+          recur_count: number | null;
+          exdates: string[];
+          series_id: string | null;
+          original_date: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          title: string;
+          description?: string | null;
+          starts_at: string;
+          ends_at: string;
+          all_day?: boolean;
+          color?: string;
+          category?: string;
+          recur_freq?: "DAILY" | "WEEKLY" | "MONTHLY" | null;
+          recur_interval?: number;
+          recur_weekdays?: number[] | null;
+          recur_until?: string | null;
+          recur_count?: number | null;
+          exdates?: string[];
+          series_id?: string | null;
+          original_date?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["calendar_events"]["Insert"]>;
+        Relationships: [];
+      };
       automation_templates: {
         Row: {
           id: string;

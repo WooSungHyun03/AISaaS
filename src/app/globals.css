@@ -234,3 +234,58 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- Calendar (FullCalendar) — follows the app's tokens ---- */
+.calendar-surface .fc {
+  --fc-border-color: var(--border);
+  --fc-page-bg-color: var(--card);
+  --fc-neutral-bg-color: var(--muted);
+  --fc-today-bg-color: color-mix(in oklch, var(--brand-soft) 80%, transparent);
+  --fc-now-indicator-color: var(--destructive);
+  --fc-list-event-hover-bg-color: var(--brand-soft);
+  --fc-highlight-color: color-mix(in oklch, var(--primary) 14%, transparent);
+  --fc-event-text-color: #fff;
+  font-size: 14px;
+}
+.calendar-surface .fc .fc-col-header-cell-cushion,
+.calendar-surface .fc .fc-timegrid-axis-cushion,
+.calendar-surface .fc .fc-timegrid-slot-label-cushion {
+  color: var(--muted-foreground);
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  padding: 8px 4px;
+}
+.calendar-surface .fc .fc-day-sun .fc-col-header-cell-cushion,
+.calendar-surface .fc .fc-day-sun .fc-daygrid-day-number { color: var(--destructive); }
+.calendar-surface .fc .fc-day-sat .fc-col-header-cell-cushion,
+.calendar-surface .fc .fc-day-sat .fc-daygrid-day-number { color: var(--primary); }
+.calendar-surface .fc .fc-daygrid-day-number { color: var(--foreground); font-size: 13px; padding: 4px 8px; text-decoration: none; }
+.calendar-surface .fc .fc-dayGridMonth-view .fc-day-today .fc-daygrid-day-number {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-radius: 999px;
+  margin: 4px 4px 0;
+  padding: 0;
+  min-width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.calendar-surface .fc .fc-event { cursor: pointer; border-radius: 6px; font-weight: 600; }
+.calendar-surface .fc .fc-daygrid-more-link { color: var(--primary); font-weight: 600; }
+.calendar-surface .fc .fc-list-event-title a { color: inherit; text-decoration: none; }
+.calendar-surface .fc .fc-list-day-cushion { background: var(--muted); }
+.calendar-surface .fc .ev-plan {
+  background: var(--brand-soft);
+  border: 1px dashed var(--primary);
+  color: var(--secondary-foreground);
+}
+.calendar-surface .fc .ev-plan .fc-event-title,
+.calendar-surface .fc .ev-plan .fc-event-main { color: var(--secondary-foreground); }
+.calendar-surface .fc .ev-plan-done { opacity: 0.65; }
+.calendar-surface .fc .ev-plan-skipped { opacity: 0.5; text-decoration: line-through; }
+@media (max-width: 640px) {
+  .calendar-surface .fc { font-size: 13px; }
+}

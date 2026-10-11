@@ -35,7 +35,7 @@ export const APP_NAV: NavSection[] = [
     items: [
       { href: "/dashboard", label: "대시보드", icon: House, exact: true },
       { href: "/diagnosis", label: "마케팅 진단", icon: Activity, activePaths: ["/marketing/diagnosis"] },
-      { href: "/calendar", label: "마케팅 캘린더", icon: CalendarDays },
+      { href: "/calendar", label: "캘린더", icon: CalendarDays },
       { href: "/blog", label: "블로그", icon: BookOpen },
       { href: "/shorts", label: "숏폼", icon: Video },
       { href: "/usage", label: "이용내역", icon: History, activePaths: ["/automations/history"] },

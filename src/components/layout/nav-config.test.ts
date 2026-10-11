@@ -21,7 +21,7 @@ describe("navigation information architecture", () => {
     expect(items.map((item) => item.label)).toEqual([
       "대시보드",
       "마케팅 진단",
-      "마케팅 캘린더",
+      "캘린더",
       "블로그",
       "숏폼",
       "이용내역",
