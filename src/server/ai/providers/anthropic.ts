@@ -13,7 +13,7 @@ const API_VERSION = "2023-06-01";
 export class AnthropicProvider implements AIProvider {
   readonly name = PROVIDER_NAME;
 
-  async generateText({ system, prompt, maxTokens = 1000, temperature = 0.7 }: GenerateTextParams): Promise<GenerateTextResult> {
+  async generateText({ system, prompt, maxTokens = 1000, temperature = 0.7, tier, images }: GenerateTextParams): Promise<GenerateTextResult> {
     const apiKey = serverEnv.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new AIProviderError("MISSING_API_KEY", PROVIDER_NAME, "ANTHROPIC_API_KEY is not set (see .env.example).");
@@ -29,11 +29,19 @@ export class AnthropicProvider implements AIProvider {
           "anthropic-version": API_VERSION,
         },
         body: JSON.stringify({
-          model: serverEnv.AI_MODEL ?? ANTHROPIC_DEFAULT_MODEL,
+          model: (tier === "quality" ? serverEnv.AI_QUALITY_MODEL : undefined) ?? serverEnv.AI_MODEL ?? ANTHROPIC_DEFAULT_MODEL,
           max_tokens: maxTokens,
           temperature,
           ...(system ? { system } : {}),
-          messages: [{ role: "user", content: prompt }],
+          messages: [{
+            role: "user",
+            content: images && images.length > 0
+              ? [
+                ...images.map((image) => ({ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.base64 } })),
+                { type: "text", text: prompt },
+              ]
+              : prompt,
+          }],
         }),
       },
       { provider: PROVIDER_NAME },

@@ -1,4 +1,5 @@
 import type { AIProvider, GenerateTextParams, GenerateTextResult } from "../provider";
+import { mockBlogOutline, mockBlogSection } from "./mock-blog";
 
 /**
  * Deterministic, no-network provider used for local development, CI, and
@@ -23,7 +24,7 @@ const MOCK_CALENDAR_TOPICS = [
 export class MockAIProvider implements AIProvider {
   readonly name = "mock";
 
-  async generateText({ prompt }: GenerateTextParams): Promise<GenerateTextResult> {
+  async generateText({ prompt, system }: GenerateTextParams): Promise<GenerateTextResult> {
     if (prompt.includes("AUTOBIZ_SHORTS_TOPIC_V1")) {
       return { text: JSON.stringify({ topic: "고객의 시간을 아껴주는 우리 서비스 활용법" }) };
     }
@@ -94,26 +95,8 @@ export class MockAIProvider implements AIProvider {
       const topic = planned ?? "단골 손님이 가장 자주 묻는 질문 정리";
       return { text: JSON.stringify({ topic, title: `${topic}, 한 번에 정리했어요` }) };
     }
-    if (prompt.includes("Write the full marketing blog post body")) {
-      const topic = prompt.match(/for the topic "([^"]+)"/)?.[1] ?? "자주 묻는 질문";
-      const paragraphs = [
-        `${topic}에 대해 손님이 가장 많이 물어보시는 내용을 모아 정리했습니다. 매장에서 직접 대화하며 들은 질문이라 실제로 궁금해하시는 부분 위주로 적었습니다.`,
-        "먼저 이용 방법입니다. 처음 방문하시는 분은 입구에서 간단한 안내를 받으실 수 있고, 미리 연락 주시면 기다리는 시간을 줄일 수 있습니다. 바쁜 시간대에는 조금 더 걸릴 수 있어 여유를 두고 오시길 권합니다.",
-        "다음으로 준비하시면 좋은 것들입니다. 특별히 챙기실 물건은 없지만, 원하시는 방향이 있다면 사진이나 메모를 가져오시면 상담이 훨씬 수월합니다. 모르는 부분은 편하게 물어보셔도 됩니다.",
-        "마지막으로 궁금한 점이 남으셨다면 가게로 연락 주세요. 방문 전에 필요한 내용을 미리 안내해 드리고, 처음이라 어색하실 분들께도 천천히 설명해 드리겠습니다. 가까운 시간에 편하게 들러 주세요.",
-      ];
-      return {
-        text: JSON.stringify({
-          hook: "처음 오시는 분들이 가장 먼저 묻는 이야기부터 풀어볼게요.",
-          excerpt: `${topic}에 대해 자주 받는 질문을 짧게 정리했어요.`,
-          bodyHtml: paragraphs.map((paragraph) => `<p>${paragraph}</p>`).join(""),
-          keywords: ["자주 묻는 질문", "이용 안내"],
-          seoKeywords: ["이용 방법", "방문 전 준비"],
-          callToAction: "궁금한 점은 편하게 문의해 주세요.",
-          imageSuggestion: "도입부 직후: 매장 입구 전경 사진",
-        }),
-      };
-    }
+    if (prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1")) return { text: mockBlogOutline(prompt, system) };
+    if (prompt.includes("AUTOBIZ_BLOG_SECTION_V1")) return { text: mockBlogSection(prompt, system) };
 
     return {
       text: `[MOCK AI RESPONSE]\n\n다음 요청에 대한 예시 결과입니다:\n"${prompt.slice(0, 200)}"\n\n실제 서비스에서는 AI_PROVIDER 환경변수를 openai 또는 gemini로 설정하면 이 자리에 실제 생성 콘텐츠가 표시됩니다.`,

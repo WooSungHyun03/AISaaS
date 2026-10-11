@@ -394,6 +394,26 @@ async function storeDeferredJob(admin: AdminClient, runId: string, deferred: { s
   if (error) throw error;
 }
 
+/**
+ * A calendar item started a deferred run: tie the finished content back to it. (An immediate run is
+ * linked by the Server Action that started it, which has to report the outcome to the owner.)
+ */
+async function linkCalendarItem(
+  admin: AdminClient,
+  calendarItem: { id?: string; businessId?: string } | undefined,
+  automationId: string,
+  contentHistoryId: string | undefined,
+): Promise<void> {
+  if (!calendarItem?.id || !calendarItem.businessId || !contentHistoryId) return;
+  const { error } = await admin
+    .from("calendar_items")
+    .update({ status: "GENERATED", automation_id: automationId, content_history_id: contentHistoryId })
+    .eq("id", calendarItem.id)
+    .eq("business_id", calendarItem.businessId)
+    .eq("status", "PLANNED");
+  if (error) logger.error("calendar_item_link_failed", { calendarItemId: calendarItem.id, message: error.message });
+}
+
 export interface AdvanceDeferredResult {
   runId: string;
   status: "RUNNING" | "SUCCESS" | "FAILED" | "BUSY" | "NOT_DEFERRED";
@@ -464,6 +484,7 @@ export async function advanceDeferredRun(runId: string): Promise<AdvanceDeferred
       return { runId, status: "RUNNING", progress: outcome.deferred.progress };
     }
     const result = await persistSuccess(admin, finish, outcome);
+    await linkCalendarItem(admin, input.calendarItem as { id?: string; businessId?: string } | undefined, automation.id, result.contentHistoryId);
     return { runId, status: "SUCCESS", progress: undefined, errorMessage: result.errorMessage };
   } catch (err) {
     if (isAppError(err) && err.retryable && job.transientErrors + 1 < MAX_TRANSIENT_ERRORS) {

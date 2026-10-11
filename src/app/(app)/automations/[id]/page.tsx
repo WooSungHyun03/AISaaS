@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { templateTitle } from "@/components/automations/template-card";
 import { AutomationStatusBadge, RunStatusBadge } from "@/components/automations/run-badges";
 import { RunNowButton } from "@/components/automations/run-now-button";
+import { readDeferredJob } from "@/server/automations/runner";
 import { AutomationStatusActions } from "@/components/automations/automation-status-actions";
 import { AutomationSettingsDialog } from "@/components/automations/automation-settings-dialog";
 import type { AutomationSchedule } from "@/types/automation";
@@ -50,7 +51,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
       .eq("automation_id", id)
       .order("created_at", { ascending: false })
       .limit(10),
-    supabase.from("automation_runs").select("id").eq("automation_id", id)
+    supabase.from("automation_runs").select("id,output").eq("automation_id", id)
       .in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle(),
   ]);
   if (businessResult.error || businessesResult.error || templateResult.error || runsResult.error || contentResult.error || inFlightResult.error) {
@@ -74,6 +75,8 @@ export default async function AutomationDetailPage({ params }: { params: Promise
     keywords: blogConfig?.keywords ?? business?.keywords ?? [],
     tone: blogConfig?.tone ?? business?.brand_tone ?? "친근하고 전문적인",
     deliveryMode: blogConfig?.deliveryMode ?? "app_draft" as const,
+    platform: blogConfig?.platform,
+    notes: blogConfig?.notes,
     wordpressSiteUrl: blogConfig?.wordpress?.siteUrl,
     wordpressUsername: blogConfig?.wordpress?.username,
     hasStoredWordPress: Boolean(blogConfig?.wordpress),
@@ -92,7 +95,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
         description={<span className="flex flex-wrap items-center gap-x-3 gap-y-1"><AutomationStatusBadge status={automation.status} /><span>{business?.name} · {template ? templateTitle(template.slug, template.name) : "콘텐츠"}</span></span>}
         actions={<>
           <AutomationSettingsDialog key={automation.updated_at} automationId={automation.id} name={automation.name} businessId={automation.business_id} businesses={businesses} schedule={schedule} blogSettings={blogSettings} hasInFlightRun={hasInFlightRun} />
-          <RunNowButton automationId={automation.id} hasInFlightRun={hasInFlightRun} />
+          <RunNowButton automationId={automation.id} hasInFlightRun={hasInFlightRun} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} />
           <AutomationStatusActions automationId={automation.id} status={automation.status} primary={Boolean(blogConfig)} hasInFlightRun={hasInFlightRun} />
         </>}
       />

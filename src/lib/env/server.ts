@@ -20,6 +20,8 @@ const serverSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   // Overrides the selected provider's default model id (e.g. claude-sonnet-5-5) without a deploy of new code.
   AI_MODEL: z.string().min(1).optional(),
+  // Stronger model for long-form writing (blog posts); unset = same as AI_MODEL / the provider default.
+  AI_QUALITY_MODEL: z.string().min(1).optional(),
   // Bounded request timeout + retry count for real AI providers. Retries are
   // only ever applied to transient failures (timeout/429/5xx/network) — never
   // to auth or validation errors, and never unbounded.

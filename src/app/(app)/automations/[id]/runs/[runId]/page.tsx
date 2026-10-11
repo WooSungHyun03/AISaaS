@@ -10,6 +10,9 @@ import { FormMessage } from "@/components/ui/form-message";
 import { PageHeader } from "@/components/layout/page-header";
 import { Mascot } from "@/components/brand/mascot";
 import { ContentEditor } from "@/components/automations/content-editor";
+import { BlogWorkspace } from "@/components/automations/blog-workspace";
+import { RunProgress } from "@/components/automations/run-progress";
+import { looksLikeBlogMarkup } from "@/server/blog/markup";
 
 const formatter = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
@@ -67,8 +70,9 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
           <Mascot pose="cheer" size={72} className="mascot-bob shrink-0" />
           <div>
             <p className="flex items-center gap-2 font-bold"><LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{run.status === "RUNNING" ? "콘텐츠를 만드는 중이에요" : "순서를 기다리고 있어요"}</p>
-            <p className="mt-1 text-sm text-muted-foreground">끝나면 새로고침해서 결과를 확인하세요.</p>
+            <p className="mt-1 text-sm text-muted-foreground">이 화면을 열어두면 끝났을 때 자동으로 결과가 나타나요. 닫아도 계속 만들어져요.</p>
           </div>
+          {run.status === "RUNNING" ? <RunProgress automationId={automation.id} /> : null}
         </div>
       ) : null}
 
@@ -77,19 +81,21 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
           <h2 id="result-heading" className="text-lg font-extrabold tracking-[-0.03em]">결과</h2>
           {!output ? <p className="rounded-2xl bg-muted px-5 py-6 text-[15px] text-muted-foreground">이번에는 보여줄 결과가 없어요.</p> : (
             <div className="space-y-6 rounded-2xl border bg-card px-5 py-6 sm:px-8">
-              {workingCopy?.content ? (
+              {workingCopy?.content && looksLikeBlogMarkup(workingCopy.content) ? (
+                <BlogWorkspace contentId={workingCopy.id} title={workingCopy.title ?? output.title ?? ""} markup={workingCopy.content} editedAt={workingCopy.edited_at} platform={output.platform ?? "naver"} notes={output.qualityNotes} />
+              ) : workingCopy?.content ? (
                 <ContentEditor contentId={workingCopy.id} title={workingCopy.title ?? output.title ?? ""} content={workingCopy.content} editedAt={workingCopy.edited_at} />
               ) : output.title ? <div><p className={label}>제목</p><p className="mt-1 text-xl font-extrabold leading-8 tracking-[-0.03em]">{output.title}</p></div> : null}
               {output.topic ? <div><p className={label}>주제</p><p className="mt-1 text-[15px] leading-7">{output.topic}</p></div> : null}
-              {output.hook ? <div><p className={label}>도입부 후킹 문장</p><p className="mt-1 text-[15px] leading-7">{output.hook}</p></div> : null}
-              {output.summary ? <div><p className={label}>요약</p><p className="mt-1 whitespace-pre-wrap text-[15px] leading-7">{output.summary}</p></div> : null}
+              {output.hook && !(workingCopy?.content && looksLikeBlogMarkup(workingCopy.content)) ? <div><p className={label}>도입부 후킹 문장</p><p className="mt-1 text-[15px] leading-7">{output.hook}</p></div> : null}
+              {output.summary && !(workingCopy?.content && looksLikeBlogMarkup(workingCopy.content)) ? <div><p className={label}>요약</p><p className="mt-1 whitespace-pre-wrap text-[15px] leading-7">{output.summary}</p></div> : null}
               {output.body && !workingCopy?.content ? (
                 <div>
                   <p className={label}>본문</p>
                   <div className="mt-2 max-h-[520px] overflow-y-auto rounded-xl bg-muted px-5 py-4 text-[15px] leading-8 whitespace-pre-wrap">{output.body}</div>
                 </div>
               ) : null}
-              {output.imageSuggestion ? <div><p className={label}>이미지 제안</p><p className="mt-1 text-[15px] leading-7">{output.imageSuggestion}</p></div> : null}
+              {output.imageSuggestion && !(workingCopy?.content && looksLikeBlogMarkup(workingCopy.content)) ? <div><p className={label}>이미지 제안</p><p className="mt-1 text-[15px] leading-7">{output.imageSuggestion}</p></div> : null}
               {output.callToAction ? <div><p className={label}>행동 유도 문구</p><p className="mt-1 text-[15px] leading-7">{output.callToAction}</p></div> : null}
               {output.keywords.length ? <div><p className={label}>키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.keywords.map((keyword) => <Badge key={keyword} variant="brand">{keyword}</Badge>)}</div></div> : null}
               {output.seoKeywords.length ? <div><p className={label}>SEO 키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.seoKeywords.map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>)}</div></div> : null}

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Automation, Business } from "@/types/domain";
-import type { AutomationRunContext } from "@/types/automation";
+import type { AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
 
 const { generateStructuredMock } = vi.hoisted(() => ({ generateStructuredMock: vi.fn() }));
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
@@ -28,6 +28,7 @@ vi.mock("@/server/connectors/integrations", () => ({ getConnection: getConnectio
 vi.mock("@/server/connectors/wordpress/connect", () => ({ loadWordPressConnector: loadWordPressConnectorMock }));
 
 const { blogAutomationHandler } = await import("./blog");
+import { mockBlogOutline, mockBlogSection } from "@/server/ai/providers/mock-blog";
 
 afterEach(() => {
   vi.resetAllMocks();
@@ -75,133 +76,215 @@ const automation = {
   updated_at: "2026-01-01T00:00:00.000Z",
 } as unknown as Automation;
 
-const PARAGRAPHS = [
-  "겨울에만 파는 한정 소금빵이 이번 주부터 진열대에 올라왔습니다. 평소 쓰는 반죽에 게랑드 소금을 조금 더 넣어 짠맛을 또렷하게 살렸습니다. 한입 베어 물면 겉은 바삭하고 속은 쫀득해서 식어도 맛이 크게 변하지 않습니다.",
-  "첫 판은 오전 7시에 나옵니다. 출근 전에 들르는 손님이 많아서 한 번에 열두 개씩만 굽고, 오후에는 품절되는 날도 있습니다. 갓 나온 빵을 드시고 싶다면 오전 시간대를 추천드립니다.",
-  "함께 드실 커피는 산미가 약한 중배전 원두를 권합니다. 빵의 단맛과 소금의 짠맛이 커피 쓴맛에 눌리지 않아서 아침 식사로 잘 어울립니다. 따뜻한 음료와 함께 드시면 겨울 아침이 한결 든든해집니다.",
-  "저녁에 드시고 싶다면 점심 전에 전화로 수량을 말씀해 주세요. 포장 상자는 따로 요청하지 않으셔도 기본으로 드립니다. 마포구 매장에서 기다리고 있겠습니다.",
-];
-const GOOD_BODY_HTML = PARAGRAPHS.map((paragraph) => `<p>${paragraph}</p>`).join("\n");
+type Request = { system: string; prompt: string; tier?: string; schema: { parse(value: unknown): unknown } };
+type Deferred = { deferred: { state: Record<string, unknown>; progress?: string } };
 
-const topicResult = { topic: "겨울철 소금빵 신메뉴 소개", title: "겨울 한정 소금빵이 왔어요" };
-const bodyResult = {
-  hook: "겨울에만 만날 수 있는 소금빵이 궁금하지 않으세요?",
-  excerpt: "겨울 한정 소금빵을 소개합니다.",
-  bodyHtml: GOOD_BODY_HTML,
-  keywords: ["소금빵", "겨울한정"],
-  seoKeywords: ["겨울 소금빵", "마포 베이커리"],
-  callToAction: "지금 매장을 방문해보세요!",
-  imageSuggestion: "도입부 직후: 겨울 한정 소금빵 클로즈업 사진",
-};
+const topicResult = { topic: "소금빵 맛있게 먹는 법", title: "소금빵 맛있게 먹는 법" };
+const config = { objective: "신메뉴 홍보", keywords: ["소금빵", "성수동 빵집"], tone: "친근하게", deliveryMode: "app_draft" as const };
+
+/** Answers every AI call like the mock provider does (topic, outline and sections), recording the requests. */
+function useMockWriter(overrides: { section?: (request: Request, index: number) => unknown } = {}) {
+  let sectionCalls = 0;
+  generateStructuredMock.mockImplementation(async (request: Request) => {
+    if (request.prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1")) return request.schema.parse(JSON.parse(mockBlogOutline(request.prompt, request.system)));
+    if (request.prompt.includes("AUTOBIZ_BLOG_SECTION_V1")) {
+      const index = sectionCalls++;
+      const custom = overrides.section?.(request, index);
+      return request.schema.parse(custom ?? JSON.parse(mockBlogSection(request.prompt, request.system)));
+    }
+    return topicResult;
+  });
+}
 
 function baseContext(overrides: Partial<AutomationRunContext> = {}): AutomationRunContext {
-  return {
-    automation,
-    business,
-    config: {},
-    recentTopics: [],
-    runId: "run-1",
-    ...overrides,
-  };
+  return { automation, business, config: config as never, recentTopics: [], runId: "run-1", ...overrides };
+}
+
+/** Drives a deferred run to the end like the runner does (start, then resume until it returns a result). */
+async function runToEnd(ctx: AutomationRunContext, onStep?: (outcome: Deferred) => void): Promise<AutomationHandlerResult> {
+  let outcome = await blogAutomationHandler.run(ctx);
+  for (let step = 0; step < 20; step++) {
+    if (!("deferred" in outcome)) return outcome;
+    onStep?.(outcome as unknown as Deferred);
+    outcome = await blogAutomationHandler.resume!(ctx, outcome.deferred.state as never);
+  }
+  throw new Error("blog run did not finish");
 }
 
 describe("blogAutomationHandler", () => {
-  it("runs the two-stage pipeline and returns the unified content shape", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
+  it("plans the post, writes it section by section and returns markup, HTML and measured stats", async () => {
+    useMockWriter();
+    const progress: Array<string | undefined> = [];
 
-    const result = await blogAutomationHandler.run(baseContext());
+    const result = await runToEnd(baseContext(), (step) => progress.push(step.deferred.progress));
 
-    expect(generateStructuredMock).toHaveBeenCalledTimes(2);
-    expect(result.title).toBe(topicResult.title);
-    expect(result.topic).toBe(topicResult.topic);
-    // content_history gets a plain-text rendering, not raw HTML.
-    expect(result.content).toBe(PARAGRAPHS.join("\n\n"));
+    expect(progress[0]).toContain("0/8");
+    expect(result.contentType).toBe("blog-marketing");
+    expect(result.title).toContain("소금빵 맛있게 먹는 법");
+    expect(result.content).toMatch(/^# /);
+    expect(result.content).toContain("## 🥐");
+    expect(result.content).toContain("[사진]");
+    expect(result.content).toContain("[포인트] 💡 꿀팁");
     expect(result.output).toMatchObject({
-      ...topicResult,
-      ...bodyResult,
+      platform: "naver",
+      stats: { chars: expect.any(Number), sections: 9, photos: expect.any(Number) },
+      bodyHtml: expect.stringContaining("<h2"),
+      callToAction: expect.any(String),
       published: false,
-      wordpressStatus: null,
-      externalUrl: null,
     });
+    const stats = (result.output as { stats: { chars: number; photos: number } }).stats;
+    expect(stats.chars).toBeGreaterThanOrEqual(1_500);
+    expect(stats.photos).toBeGreaterThanOrEqual(4);
+    expect(result.aiGenerationCount).toBe(2 + 8); // topic + outline, then intro, six sections and the closing
   });
 
-  it("rewrites once with concrete fixes when the first draft is too short or full of stock phrases, and keeps the better draft", async () => {
-    const weakDraft = { ...bodyResult, bodyHtml: "<p>안녕하세요, 오늘은 소금빵을 알아보겠습니다!</p>" };
-    generateStructuredMock
-      .mockResolvedValueOnce(topicResult)
-      .mockResolvedValueOnce(weakDraft)
-      .mockResolvedValueOnce(bodyResult);
+  it("writes intro, each section and the closing in order, each seeing what came before", async () => {
+    useMockWriter();
+    await runToEnd(baseContext());
 
-    const result = await blogAutomationHandler.run(baseContext());
-
-    expect(generateStructuredMock).toHaveBeenCalledTimes(3); // topic + draft + exactly one rewrite
-    const rewriteRequest = generateStructuredMock.mock.calls[2][0] as { prompt: string };
-    expect(rewriteRequest.prompt).toContain("너무 짧아요");
-    expect(rewriteRequest.prompt).toContain("상투적인 표현");
-    expect(result.content).toBe(PARAGRAPHS.join("\n\n"));
-    expect(result.aiGenerationCount).toBe(2);
+    const sectionRequests = generateStructuredMock.mock.calls.map((call) => call[0] as Request).filter((request) => request.prompt.includes("AUTOBIZ_BLOG_SECTION_V1"));
+    expect(sectionRequests).toHaveLength(8);
+    expect(sectionRequests[0].prompt).toContain("KIND=intro");
+    expect(sectionRequests[7].prompt).toContain("KIND=closing");
+    expect(sectionRequests[0].prompt).not.toContain("Already written");
+    expect(sectionRequests[3].prompt).toContain("Already written");
+    expect(sectionRequests.every((request) => request.tier === "quality")).toBe(true);
+    const outlineRequest = generateStructuredMock.mock.calls.map((call) => call[0] as Request).find((request) => request.prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1"));
+    expect(outlineRequest?.tier).toBe("quality");
   });
 
-  it("never loops: if the rewrite is no better the original is kept and no third body is requested", async () => {
-    const weak = { ...bodyResult, bodyHtml: "<p>짧은 글.</p>" };
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(weak).mockResolvedValueOnce({ ...weak, hook: "다시 쓴 훅" });
+  it("gives the writer the facts, the owner's notes, the platform style and the anti-AI rules", async () => {
+    useMockWriter();
+    await runToEnd(baseContext({ config: { ...config, platform: "tistory", notes: "시그니처는 저온 숙성 소금빵이에요" } as never }));
 
-    const result = await blogAutomationHandler.run(baseContext());
-
-    expect(generateStructuredMock).toHaveBeenCalledTimes(3);
-    expect(result.content).toBe("짧은 글.");
+    const outlineRequest = generateStructuredMock.mock.calls.map((call) => call[0] as Request).find((request) => request.prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1"))!;
+    expect(outlineRequest.system).toContain("상호: 우리동네 빵집");
+    expect(outlineRequest.system).toContain("위치: 서울 마포구");
+    expect(outlineRequest.system).toContain("시그니처는 저온 숙성 소금빵이에요");
+    expect(outlineRequest.system).toContain("Platform: Tistory");
+    expect(outlineRequest.system).toContain("Never invent prices");
+    expect(outlineRequest.system).toContain("결론적으로");
+    expect(outlineRequest.system).toContain("==highlight==");
   });
 
-  it("stores only escaped <p> paragraphs even if the model returns scripts, iframes or links", async () => {
-    const hostile = { ...bodyResult, bodyHtml: `${GOOD_BODY_HTML}<script>alert(1)</script><iframe src="https://evil.example"></iframe><p onclick="x()">끝<a href="javascript:alert(1)">링크</a></p>` };
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(hostile);
+  it("appends a business info box and hashtags that the app builds, not the AI", async () => {
+    useMockWriter();
+    const result = await runToEnd(baseContext({ business: { ...business, main_offering: "소금빵, 크루아상", website: "https://bakery.example.com" } }));
 
-    const result = await blogAutomationHandler.run(baseContext());
-
-    const stored = (result.output as { bodyHtml: string }).bodyHtml;
-    expect(stored).not.toMatch(/script|iframe|onclick|javascript:|href/i);
-    expect(stored.startsWith("<p>")).toBe(true);
+    expect(result.content).toContain("## 📌 우리동네 빵집 정보");
+    expect(result.content).toContain("[정보] 📍 위치 | 서울 마포구");
+    expect(result.content).toContain("[정보] 🛍️ 대표 메뉴·서비스 | 소금빵, 크루아상");
+    expect(result.content).toMatch(/#소금빵 #성수동빵집/);
+    expect(result.content?.trim().split("\n").at(-1)).toMatch(/^#\S+/);
   });
 
-  it("gives the writer the marketing profile, factual-grounding rules and anti-AI style rules", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
+  it("drops info boxes and dividers the AI tries to add itself", async () => {
+    useMockWriter({
+      section: (request, index) => {
+        const base = JSON.parse(mockBlogSection(request.prompt, request.system)) as { blocks: unknown[] };
+        return index === 1 ? { blocks: [...base.blocks, { type: "info", rows: [{ label: "전화", value: "02-000-0000" }] }, { type: "divider" }] } : base;
+      },
+    });
+    const result = await runToEnd(baseContext());
+    expect(result.content).not.toContain("02-000-0000");
+    expect(result.content).not.toMatch(/^---$/m);
+  });
 
-    await blogAutomationHandler.run(baseContext({ business: { ...business, main_offering: "소금빵과 크루아상", strengths: "직접 로스팅", marketing_goal: "평일 아침 방문" } }));
+  it("rewrites only the sections that fail the quality check, once, with the problems and the old text", async () => {
+    useMockWriter({
+      section: (request, index) => {
+        if (index === 2) {
+          // third section written: a stock phrase, an unprovable claim and an invented price
+          return { blocks: [{ type: "paragraph", text: "결론적으로 저희는 최고의 빵집이고 소금빵은 3,500원입니다 🙂" }, { type: "paragraph", text: "소금빵은 **겉바속촉**이에요 ✨" }] };
+        }
+        return undefined;
+      },
+    });
 
-    const bodyRequest = generateStructuredMock.mock.calls[1][0] as { system: string; prompt: string };
-    expect(bodyRequest.system).toContain("소금빵과 크루아상");
-    expect(bodyRequest.system).toContain("직접 로스팅");
-    expect(bodyRequest.system).toContain("평일 아침 방문");
-    expect(bodyRequest.system).toMatch(/Never invent prices/);
-    expect(bodyRequest.system).toContain("안녕하세요, 오늘은");
+    const result = await runToEnd(baseContext());
+
+    const requests = generateStructuredMock.mock.calls.map((call) => call[0] as Request);
+    const sectionRequests = requests.filter((request) => request.prompt.includes("AUTOBIZ_BLOG_SECTION_V1"));
+    expect(sectionRequests.length).toBeGreaterThan(8);
+    expect(sectionRequests.length).toBeLessThanOrEqual(8 + 4); // at most four rewrites
+    const rewrite = sectionRequests.slice(8).find((request) => request.prompt.includes("It had these problems"))!;
+    expect(rewrite.prompt).toContain("INDEX=1"); // body section 1 = post section 2
+    expect(rewrite.prompt).toContain("결론적으로");
+    expect(rewrite.prompt).toContain("3,500원");
+    expect(rewrite.prompt).toContain("The previous version of this section");
+    expect(result.content).not.toContain("3,500원");
+    expect(result.content).not.toContain("결론적으로");
+  });
+
+  it("keeps the original section when a rewrite fails, and still finishes", async () => {
+    let rewriting = false;
+    useMockWriter({
+      section: (request, index) => {
+        if (request.prompt.includes("It had these problems")) {
+          rewriting = true;
+          throw new Error("AI unavailable");
+        }
+        return index === 1 ? { blocks: [{ type: "paragraph", text: "결론적으로 좋아요" }] } : undefined;
+      },
+    });
+
+    const result = await runToEnd(baseContext());
+
+    expect(rewriting).toBe(true);
+    expect(result.content).toContain("결론적으로 좋아요");
+    expect(result.output).toMatchObject({ qualityNotes: expect.any(Array) });
+  });
+
+  it("spreads the writing over several short steps instead of one long request", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-11T00:00:00.000Z"));
+      useMockWriter();
+      const base = generateStructuredMock.getMockImplementation()!;
+      generateStructuredMock.mockImplementation(async (request: Request) => {
+        vi.setSystemTime(new Date(Date.now() + 15_000)); // each AI call "takes" 15 s
+        return base(request);
+      });
+
+      const steps: number[] = [];
+      await runToEnd(baseContext(), (step) => steps.push(((step.deferred.state as { sections: unknown[] }).sections ?? []).length));
+
+      // start (0 written), then three sections per 40 s step; the third step writes the last two and finishes
+      expect(steps).toEqual([0, 3, 6]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up on a run that has been going too long", async () => {
+    useMockWriter();
+    const started = (await blogAutomationHandler.run(baseContext())) as unknown as Deferred;
+    const stale = { ...started.deferred.state, startedAt: new Date(Date.now() - 26 * 60_000).toISOString() };
+    await expect(blogAutomationHandler.resume!(baseContext(), stale as never)).rejects.toThrow("너무 오래");
   });
 
   it("regenerates the topic exactly once when the first pick is a near-duplicate, then accepts the second", async () => {
-    generateStructuredMock
-      .mockResolvedValueOnce({ topic: "겨울철 난방비 절약 팁", title: "난방비 아끼는 법" }) // near-dup of recent
-      .mockResolvedValueOnce(topicResult) // accepted regardless of its own similarity
-      .mockResolvedValueOnce(bodyResult);
+    useMockWriter();
+    const base = generateStructuredMock.getMockImplementation()!;
+    const topics = [{ topic: "겨울철 난방비 절약 팁", title: "첫 제목" }, { topic: "출근길 소금빵 예약 팁", title: "둘째 제목" }];
+    generateStructuredMock.mockImplementation(async (request: Request) => (request.prompt.includes("Pick one specific blog topic") ? topics.shift() : base(request)));
 
-    const result = await blogAutomationHandler.run(
-      baseContext({ recentTopics: ["겨울철 난방비 절약하는 방법"] }),
-    );
+    const started = (await blogAutomationHandler.run(baseContext({ recentTopics: ["겨울철 난방비 절약하는 방법"] }))) as unknown as Deferred;
 
-    expect(generateStructuredMock).toHaveBeenCalledTimes(3);
-    expect(result.topic).toBe(topicResult.topic);
+    expect(started.deferred.state.topic).toBe("출근길 소금빵 예약 팁");
+    const retry = generateStructuredMock.mock.calls.map((call) => call[0] as Request).filter((request) => request.prompt.includes("Pick one specific blog topic"))[1];
+    expect(retry.prompt).toContain("겨울철 난방비 절약 팁");
   });
 
   it("does not regenerate when the first topic is already distinct from recent history", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
-
-    await blogAutomationHandler.run(baseContext({ recentTopics: ["여름 휴가철 여행지 추천"] }));
-
-    expect(generateStructuredMock).toHaveBeenCalledTimes(2);
+    useMockWriter();
+    await blogAutomationHandler.run(baseContext({ recentTopics: ["여름 휴가지 추천"] }));
+    const picks = generateStructuredMock.mock.calls.map((call) => call[0] as Request).filter((request) => request.prompt.includes("Pick one specific blog topic"));
+    expect(picks).toHaveLength(1);
   });
 
-  it("keeps a calendar topic fixed and injects its goal and CTA into generation", async () => {
-    generateStructuredMock
-      .mockResolvedValueOnce({ topic: "모델이 바꾸려 한 주제", title: "계획 주제에 맞춘 제목" })
-      .mockResolvedValueOnce(bodyResult);
+  it("keeps a calendar topic fixed and injects its goal, brief and CTA into every stage", async () => {
+    useMockWriter();
     const calendarItem = {
       id: "calendar-1",
       businessId: "biz-1",
@@ -214,136 +297,109 @@ describe("blogAutomationHandler", () => {
       cta: "출근길 예약하기",
     };
 
-    const result = await blogAutomationHandler.run(baseContext({ calendarItem }));
+    const result = await runToEnd(baseContext({ calendarItem }));
 
     expect(result.topic).toBe(calendarItem.topic);
-    expect(generateStructuredMock).toHaveBeenCalledTimes(2);
-    const titleRequest = generateStructuredMock.mock.calls[0][0] as { prompt: string; system: string };
-    const bodyRequest = generateStructuredMock.mock.calls[1][0] as { prompt: string; system: string };
-    expect(titleRequest.prompt).toContain(calendarItem.topic);
-    expect(titleRequest.system).toContain(calendarItem.goal);
-    expect(bodyRequest.system).toContain(calendarItem.goal);
-    expect(bodyRequest.system).toContain(calendarItem.cta);
-    // The calendar's content brief must actually reach the writer, not just goal/CTA.
-    expect(titleRequest.system).toContain(calendarItem.summary);
-    expect(bodyRequest.system).toContain(calendarItem.summary);
+    const requests = generateStructuredMock.mock.calls.map((call) => call[0] as Request);
+    const title = requests[0];
+    expect(title.prompt).toContain(calendarItem.topic);
+    expect(title.system).toContain(calendarItem.goal);
+    expect(title.system).toContain(calendarItem.summary);
+    for (const request of requests.slice(1)) {
+      expect(request.system).toContain(calendarItem.goal);
+      expect(request.system).toContain(calendarItem.summary);
+      expect(request.system).toContain(calendarItem.cta);
+    }
   });
 
-  it("publishes to WordPress with the generated excerpt/bodyHtml when configured for it", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
-    publishMock.mockResolvedValueOnce({ externalUrl: "https://blog.example.com/post-1", externalId: "1" });
+  describe("delivery", () => {
+    const wordpress = { ...config, deliveryMode: "wordpress_publish" as const, wordpress: { siteUrl: "https://blog.example.com", username: "admin", encryptedAppPassword: "enc" } };
 
-    const result = await blogAutomationHandler.run(
-      baseContext({
-        config: {
-          objective: "신메뉴 홍보",
-          keywords: ["소금빵"],
-          tone: "친근하게",
-          deliveryMode: "wordpress_publish",
-          wordpress: { siteUrl: "https://blog.example.com", username: "admin", encryptedAppPassword: "enc" },
-        },
-      }),
-    );
+    it("publishes to WordPress with the generated HTML and excerpt once the post is finished", async () => {
+      useMockWriter();
+      publishMock.mockResolvedValueOnce({ externalUrl: "https://blog.example.com/post-1", externalId: "1" });
 
-    expect(publishMock).toHaveBeenCalledWith(
-      { title: topicResult.title, content: bodyResult.bodyHtml, excerpt: bodyResult.excerpt },
-      "publish",
-    );
-    expect(result.externalUrl).toBe("https://blog.example.com/post-1");
-    expect(result.output).toMatchObject({ published: true, wordpressStatus: "publish" });
-  });
+      const result = await runToEnd(baseContext({ config: wordpress as never }));
 
-  it("prefers the business-level Settings connection when one exists", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
-    getConnectionMock.mockResolvedValueOnce({ id: "shared", status: "CONNECTED" });
-    loadWordPressConnectorMock.mockResolvedValueOnce({ publish: publishMock });
-    publishMock.mockResolvedValueOnce({ externalUrl: "https://shared.example.com/post-1" });
+      expect(publishMock).toHaveBeenCalledTimes(1);
+      const [post, status] = publishMock.mock.calls[0] as [{ title: string; content: string; excerpt: string }, string];
+      expect(status).toBe("publish");
+      expect(post.title).toBe(result.title);
+      expect(post.content).toContain("<h2");
+      expect(post.content).not.toMatch(/<script|<iframe/i);
+      expect(post.excerpt.length).toBeGreaterThan(10);
+      expect(result.externalUrl).toBe("https://blog.example.com/post-1");
+      expect(result.output).toMatchObject({ published: true, wordpressStatus: "publish" });
+    });
 
-    const result = await blogAutomationHandler.run(baseContext({
-      config: { objective: "신메뉴 홍보", keywords: ["소금빵"], tone: "친근하게", deliveryMode: "wordpress_publish" },
-    }));
+    it("prefers the business-level Settings connection when one exists", async () => {
+      useMockWriter();
+      getConnectionMock.mockResolvedValue({ id: "shared", status: "CONNECTED" });
+      loadWordPressConnectorMock.mockResolvedValueOnce({ publish: publishMock });
+      publishMock.mockResolvedValueOnce({ externalUrl: "https://shared.example.com/post-1" });
 
-    expect(loadWordPressConnectorMock).toHaveBeenCalled();
-    expect(WordPressConnectorMock).not.toHaveBeenCalled();
-    expect(result.externalUrl).toBe("https://shared.example.com/post-1");
-  });
+      const result = await runToEnd(baseContext({ config: { ...config, deliveryMode: "wordpress_publish" } as never }));
 
-  it("marks a shared connection EXPIRED when WordPress rejects its credentials", async () => {
-    const { ConnectorError } = await import("@/server/shared/errors");
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
-    getConnectionMock.mockResolvedValueOnce({ id: "shared", status: "CONNECTED" });
-    loadWordPressConnectorMock.mockResolvedValueOnce({ publish: publishMock });
-    publishMock.mockRejectedValueOnce(new ConnectorError("wordpress", "AUTH_FAILED", "authentication rejected"));
+      expect(loadWordPressConnectorMock).toHaveBeenCalled();
+      expect(WordPressConnectorMock).not.toHaveBeenCalled();
+      expect(result.externalUrl).toBe("https://shared.example.com/post-1");
+    });
 
-    await expect(blogAutomationHandler.run(baseContext({
-      config: { objective: "신메뉴 홍보", keywords: ["소금빵"], tone: "친근하게", deliveryMode: "wordpress_publish" },
-    }))).rejects.toThrow("authentication rejected");
-    expect(updateConnectionStatusMock).toHaveBeenCalledWith(expect.anything(), "shared", "EXPIRED");
-  });
+    it("marks a shared connection EXPIRED when WordPress rejects its credentials", async () => {
+      const { ConnectorError } = await import("@/server/shared/errors");
+      useMockWriter();
+      getConnectionMock.mockResolvedValue({ id: "shared", status: "CONNECTED" });
+      loadWordPressConnectorMock.mockResolvedValueOnce({ publish: publishMock });
+      publishMock.mockRejectedValueOnce(new ConnectorError("wordpress", "AUTH_FAILED", "authentication rejected"));
 
-  it("falls back to the legacy env-configured WordPress connector when there is no setup-wizard config", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
-    isConfiguredMock.mockReturnValueOnce(true);
-    publishMock.mockResolvedValueOnce({ externalUrl: "https://legacy.example.com/post-1", externalId: "1" });
+      await expect(runToEnd(baseContext({ config: { ...config, deliveryMode: "wordpress_publish" } as never }))).rejects.toThrow("authentication rejected");
+      expect(updateConnectionStatusMock).toHaveBeenCalledWith(expect.anything(), "shared", "EXPIRED");
+    });
 
-    const result = await blogAutomationHandler.run(baseContext());
+    it("falls back to the legacy env-configured WordPress connector when there is no setup-wizard config", async () => {
+      useMockWriter();
+      isConfiguredMock.mockReturnValue(true);
+      publishMock.mockResolvedValueOnce({ externalUrl: "https://legacy.example.com/post-1", externalId: "1" });
 
-    expect(isConfiguredMock).toHaveBeenCalledTimes(1);
-    expect(publishMock).toHaveBeenCalledWith({ title: topicResult.title, content: bodyResult.bodyHtml, excerpt: bodyResult.excerpt });
-    expect(result.externalUrl).toBe("https://legacy.example.com/post-1");
-    expect(result.output).toMatchObject({ published: true, wordpressStatus: "publish" });
-  });
+      const result = await runToEnd(baseContext({ config: {} as never }));
 
-  it("skips WordPress entirely when there is no config and the legacy connector isn't configured", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
-    isConfiguredMock.mockReturnValueOnce(false);
+      expect(publishMock).toHaveBeenCalledTimes(1);
+      expect(result.externalUrl).toBe("https://legacy.example.com/post-1");
+      expect(result.output).toMatchObject({ published: true, wordpressStatus: "publish" });
+    });
 
-    const result = await blogAutomationHandler.run(baseContext());
+    it("skips WordPress entirely when there is no config and the legacy connector isn't configured", async () => {
+      useMockWriter();
+      isConfiguredMock.mockReturnValue(false);
 
-    expect(publishMock).not.toHaveBeenCalled();
-    expect(result.externalUrl).toBeUndefined();
-    expect(result.output).toMatchObject({ published: false, wordpressStatus: null, externalUrl: null });
-  });
+      const result = await runToEnd(baseContext({ config: {} as never }));
 
-  it("never calls WordPress for an explicit app_draft config — generation-only going forward", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
+      expect(publishMock).not.toHaveBeenCalled();
+      expect(result.output).toMatchObject({ published: false, wordpressStatus: null, externalUrl: null });
+    });
 
-    const result = await blogAutomationHandler.run(
-      baseContext({
-        config: { objective: "신메뉴 홍보", keywords: ["소금빵"], tone: "친근하게", deliveryMode: "app_draft" },
-      }),
-    );
-
-    expect(publishMock).not.toHaveBeenCalled();
-    expect(isConfiguredMock).not.toHaveBeenCalled();
-    expect(result.content).toBeTruthy();
-    expect(result.output).toMatchObject({ published: false, wordpressStatus: null, externalUrl: null });
-  });
-
-  it("includes the new hook/seoKeywords/imageSuggestion fields in the saved output", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockResolvedValueOnce(bodyResult);
-
-    const result = await blogAutomationHandler.run(
-      baseContext({ config: { objective: "신메뉴 홍보", keywords: ["소금빵"], tone: "친근하게", deliveryMode: "app_draft" } }),
-    );
-
-    expect(result.output).toMatchObject({
-      hook: bodyResult.hook,
-      seoKeywords: bodyResult.seoKeywords,
-      imageSuggestion: bodyResult.imageSuggestion,
+    it("never calls WordPress for an explicit app_draft config — generation-only going forward", async () => {
+      useMockWriter();
+      const result = await runToEnd(baseContext());
+      expect(publishMock).not.toHaveBeenCalled();
+      expect(isConfiguredMock).not.toHaveBeenCalled();
+      expect(result.output).toMatchObject({ published: false, wordpressStatus: null, externalUrl: null });
     });
   });
 
-  it("throws instead of returning a partial result when the topic stage fails", async () => {
-    generateStructuredMock.mockRejectedValueOnce(new Error("AI provider unavailable"));
+  it("throws instead of returning a partial result when a stage fails", async () => {
+    generateStructuredMock.mockRejectedValue(new Error("topic failed"));
+    await expect(blogAutomationHandler.run(baseContext())).rejects.toThrow("topic failed");
 
-    await expect(blogAutomationHandler.run(baseContext())).rejects.toThrow("AI provider unavailable");
-    expect(generateStructuredMock).toHaveBeenCalledTimes(1);
-  });
+    useMockWriter();
+    const base = generateStructuredMock.getMockImplementation()!;
+    generateStructuredMock.mockImplementation(async (request: Request) => {
+      if (request.prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1")) throw new Error("outline failed");
+      return base(request);
+    });
+    await expect(blogAutomationHandler.run(baseContext())).rejects.toThrow("outline failed");
 
-  it("throws instead of returning a partial result when the body stage fails", async () => {
-    generateStructuredMock.mockResolvedValueOnce(topicResult).mockRejectedValueOnce(new Error("body generation failed"));
-
-    await expect(blogAutomationHandler.run(baseContext())).rejects.toThrow("body generation failed");
+    useMockWriter({ section: (_request, index) => { if (index === 2) throw new Error("section failed"); return undefined; } });
+    await expect(runToEnd(baseContext())).rejects.toThrow("section failed");
   });
 });

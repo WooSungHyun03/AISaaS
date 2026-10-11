@@ -1,40 +1,131 @@
 import { describe, expect, it } from "vitest";
-import { assessBlogBody } from "./blog-quality";
+import { assessBlogPost, assignIssues, BLOG_LENGTH } from "./blog-quality";
+import { blogOutlineSchema, blogSectionOutputSchema } from "./prompts/blog";
+import { mockBlogOutline, mockBlogSection } from "./providers/mock-blog";
+import { blogPostSchema, countCharsNoSpaces, postBodyText, type BlogPost } from "@/server/blog/post";
 
-const GOOD = [
-  "성수동에서 카페를 운영하다 보면 아침 손님이 가장 먼저 찾는 메뉴가 분명하게 보입니다. 우리 가게에서는 갓 구운 소금빵이 그 자리를 차지했습니다.",
-  "빵은 오전 7시에 첫 판이 나옵니다. 출근 전에 들르는 손님은 줄을 서지 않도록 전날 예약해 두는 경우가 많고, 예약 픽업 선반은 입구 오른쪽에 따로 마련해 두었습니다.",
-  "원두는 매주 화요일에 로스팅합니다. 빵과 함께 마실 커피는 산미가 약한 중배전을 권하는데, 단맛이 짠맛을 눌러 주기 때문입니다. 주문하실 때 말씀해 주시면 맞춰 내려 드립니다.",
-  "소금빵은 한 번에 열두 개씩만 굽기 때문에 오후에는 품절되는 날이 있습니다. 저녁에 드시고 싶다면 점심 전에 전화로 수량을 미리 말씀해 주세요. 포장 상자는 따로 요청하지 않으셔도 기본으로 드립니다.",
-  "처음 오시는 분이라면 소금빵과 아메리카노 조합부터 드셔 보세요. 평일 오전 9시 이전에는 한산해서 자리를 고르기도 편합니다.",
-].map((paragraph) => `<p>${paragraph}</p>`).join("");
+const system = "상호: 우리동네 빵집\n이번 글의 핵심 키워드: 소금빵, 성수동 빵집";
 
-describe("assessBlogBody", () => {
-  it("passes a natural, well-structured post", () => {
-    expect(assessBlogBody({ bodyHtml: GOOD, keywords: ["소금빵", "성수동 카페"] }).join(" | ")).toBe("");
+/** The mock provider's full pipeline output, exactly as the handler would assemble it. */
+function mockPost(): BlogPost {
+  const outline = blogOutlineSchema.parse(JSON.parse(mockBlogOutline('Plan one marketing blog post about "소금빵 맛있게 먹는 법"', system)));
+  const sections = [mockBlogSection("AUTOBIZ_BLOG_SECTION_V1\nKIND=intro", system)];
+  outline.sections.forEach((section, index) => {
+    const prompt = [
+      "AUTOBIZ_BLOG_SECTION_V1",
+      `KIND=body INDEX=${index}`,
+      `Write the section "${section.heading}": 2-3 paragraphs.`,
+      section.photo ? `Include one photo block where it fits best: slot = "${section.photo}", plus a short caption.` : "Include no photo block.",
+      section.extra === "quote" ? "Include one quote block (one memorable line)." : section.extra === "callout" ? 'Include one callout block with a label like "💡 꿀팁".' : section.extra === "list" ? "Include one list block (check or bullet style)." : "",
+    ].join(" ");
+    sections.push(mockBlogSection(prompt, system));
+  });
+  sections.push(mockBlogSection("AUTOBIZ_BLOG_SECTION_V1\nKIND=closing", system));
+  const kinds = ["intro", ...outline.sections.map((section) => section.heading), "closing"];
+  return blogPostSchema.parse({
+    title: outline.title,
+    sections: sections.map((raw, index) => ({
+      heading: index === 0 || index === sections.length - 1 ? undefined : kinds[index],
+      blocks: blogSectionOutputSchema.parse(JSON.parse(raw)).blocks,
+    })),
+    hashtags: ["소금빵", "성수동빵집"],
+  });
+}
+
+const facts = "상호: 우리동네 빵집\n위치: 서울 성동구 성수동\n소개: 매일 아침 직접 굽는 동네 베이커리";
+const keywords = ["소금빵", "성수동 빵집"];
+
+describe("assessBlogPost", () => {
+  it("passes a complete post: long enough, emphasised, emoji, photo spots, quote and callout", () => {
+    const post = mockPost();
+    expect(countCharsNoSpaces(postBodyText(post))).toBeGreaterThanOrEqual(BLOG_LENGTH.minTotal);
+    expect(assessBlogPost({ post, keywords, facts })).toEqual([]);
   });
 
-  it("flags short, single-paragraph posts", () => {
-    const issues = assessBlogBody({ bodyHtml: "<p>짧은 글입니다.</p>", keywords: [] });
-    expect(issues.join(" ")).toContain("너무 짧아요");
-    expect(issues.join(" ")).toContain("문단을");
+  it("flags a thin post and points at the thinnest sections", () => {
+    const post = mockPost();
+    const thin: BlogPost = { ...post, sections: post.sections.map((section, index) => (index === 2 ? { ...section, blocks: [{ type: "paragraph", text: "짧아요." }] } : section)) };
+    const issues = assessBlogPost({ post: thin, keywords, facts });
+    // still long overall, but the section itself is short
+    expect(issues.some((issue) => issue.kind === "length" || issue.section === 2)).toBe(true);
+
+    const tiny: BlogPost = { ...post, sections: post.sections.map((section) => ({ ...section, blocks: section.blocks.slice(0, 1) })) };
+    const tinyIssues = assessBlogPost({ post: tiny, keywords, facts });
+    expect(tinyIssues.some((issue) => issue.section === null && issue.kind === "length")).toBe(true);
+    expect(tinyIssues.filter((issue) => issue.kind === "length" && issue.section !== null).length).toBeGreaterThan(0);
+  });
+
+  it("flags AI-sounding phrases and unprovable claims in the section they appear in", () => {
+    const post = mockPost();
+    const bad: BlogPost = {
+      ...post,
+      sections: post.sections.map((section, index) =>
+        index === 3 ? { ...section, blocks: [{ type: "paragraph", text: "결론적으로 저희는 최고의 빵집이고 압도적인 맛입니다." }, ...section.blocks] } : section),
+    };
+    const issues = assessBlogPost({ post: bad, keywords, facts }).filter((issue) => issue.section === 3);
+    expect(issues.map((issue) => issue.kind)).toEqual(expect.arrayContaining(["wording"]));
+    expect(issues.map((issue) => issue.message).join(" ")).toContain("결론적으로");
+    expect(issues.map((issue) => issue.message).join(" ")).toContain("최고의");
+  });
+
+  it("flags numbers with units that the facts never mentioned, but allows ones they did", () => {
+    const post = mockPost();
+    const invented: BlogPost = {
+      ...post,
+      sections: post.sections.map((section, index) => (index === 2 ? { ...section, blocks: [{ type: "paragraph", text: "매일 오전 7시에 문을 열고 3,500원에 팝니다." }, ...section.blocks] } : section)),
+    };
+    const flagged = assessBlogPost({ post: invented, keywords, facts }).filter((issue) => issue.section === 2 && issue.message.includes("숫자"));
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0].message).toContain("7시");
+    expect(flagged[0].message).toContain("3,500원");
+
+    const allowed = assessBlogPost({ post: invented, keywords, facts: `${facts}\n오전 7시 오픈, 소금빵 3,500원` }).filter((issue) => issue.message.includes("숫자"));
+    expect(allowed).toHaveLength(0);
+  });
+
+  it("requires the structural features of an ad blog: photos, quote, callout, emphasis, emoji headings", () => {
+    const post = mockPost();
+    const plain: BlogPost = {
+      ...post,
+      sections: post.sections.map((section) => ({
+        heading: section.heading?.replace(/^\S+\s/, ""),
+        blocks: section.blocks.filter((block) => block.type === "paragraph").map((block) => ("text" in block ? { ...block, text: block.text.replace(/\*\*|==/g, "").replace(/\p{Extended_Pictographic}/gu, "") } : block)),
+      })),
+    };
+    const kinds = new Set(assessBlogPost({ post: plain, keywords, facts }).map((issue) => issue.kind));
+    for (const kind of ["photos", "quote", "callout", "emphasis", "emoji"] as const) expect(kinds.has(kind)).toBe(true);
   });
 
   it("flags keyword stuffing", () => {
-    const stuffed = `${GOOD}<p>${"소금빵 맛집 소금빵 추천 소금빵 ".repeat(3)}</p>`;
-    expect(assessBlogBody({ bodyHtml: stuffed, keywords: ["소금빵"] }).join(" ")).toContain("반복돼요");
+    const post = mockPost();
+    const stuffed: BlogPost = { ...post, sections: [{ blocks: [{ type: "paragraph", text: `소금빵 ${"소금빵 ".repeat(12)}` }] }, ...post.sections] };
+    expect(assessBlogPost({ post: stuffed, keywords, facts }).some((issue) => issue.kind === "keyword" && issue.message.includes("소금빵"))).toBe(true);
   });
 
-  it("flags stock AI phrasing, exclamations and emoji", () => {
-    const text = `<p>안녕하세요, 오늘은 소금빵을 알아보겠습니다! 최고의 맛! 지금 바로 오세요! 정말요! 😀😀😀</p>${GOOD}`;
-    const joined = assessBlogBody({ bodyHtml: text, keywords: [] }).join(" ");
-    expect(joined).toContain("상투적인 표현");
-    expect(joined).toContain("느낌표");
-    expect(joined).toContain("이모지");
+  it("flags a monotone ending and repeated sentence openings", () => {
+    const post = mockPost();
+    const sentence = (index: number) => `이번 이야기는 정말 조용히 시작되었어요 ${"가나다라마바사".charAt(index % 7)}${index}.`;
+    const monotone: BlogPost = { ...post, sections: [...post.sections, { heading: "😀 반복", blocks: [{ type: "paragraph", text: Array.from({ length: 14 }, (_, index) => sentence(index)).join(" ") }] }] };
+    const messages = assessBlogPost({ post: monotone, keywords, facts }).map((issue) => issue.message).join(" ");
+    expect(messages).toMatch(/문장 끝|비슷한 문장 시작/);
+  });
+});
+
+describe("assignIssues", () => {
+  it("hands whole-post issues to the sections best placed to fix them", () => {
+    const post = mockPost();
+    const stripped: BlogPost = { ...post, sections: post.sections.map((section) => ({ ...section, blocks: section.blocks.filter((block) => block.type !== "photo" && block.type !== "callout" && block.type !== "quote") })) };
+    const assigned = assignIssues(stripped, assessBlogPost({ post: stripped, keywords, facts }));
+    const all = [...assigned.values()].flat().join("\n");
+    expect(all).toContain("[사진]");
+    expect(all).toContain("quote");
+    expect(all).toContain("callout");
+    // issues go to body sections or the intro, never to an index that does not exist
+    for (const index of assigned.keys()) expect(index).toBeLessThan(stripped.sections.length);
   });
 
-  it("flags three sentences in a row starting the same way", () => {
-    const repeated = `${GOOD}<p>우리 가게는 맛있습니다. 우리 가게는 친절합니다. 우리 가게는 깨끗합니다.</p>`;
-    expect(assessBlogBody({ bodyHtml: repeated, keywords: [] }).join(" ")).toContain("문장 시작");
+  it("keeps section-specific issues on their own section", () => {
+    const issues = [{ section: 4, kind: "wording" as const, message: "표현을 빼 주세요" }];
+    expect(assignIssues(mockPost(), issues).get(4)).toEqual(["표현을 빼 주세요"]);
   });
 });

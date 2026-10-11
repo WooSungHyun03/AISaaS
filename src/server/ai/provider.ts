@@ -1,8 +1,21 @@
+/** An image the model should look at (vision). Only the Anthropic adapter supports it today. */
+export interface AIImageInput {
+  mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+  /** Base64 without the data: prefix. */
+  base64: string;
+}
+
 export interface GenerateTextParams {
   system?: string;
   prompt: string;
   maxTokens?: number;
   temperature?: number;
+  /**
+   * `quality` asks for the stronger (slower, pricier) model — long-form writing such as blog
+   * posts. Providers map it to AI_QUALITY_MODEL and fall back to their normal model.
+   */
+  tier?: "fast" | "quality";
+  images?: AIImageInput[];
 }
 
 export interface GenerateTextResult {

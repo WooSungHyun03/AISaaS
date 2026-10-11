@@ -6,6 +6,7 @@ import { AutomationSettingsDialog } from "@/components/automations/automation-se
 import { RunNowButton } from "@/components/automations/run-now-button";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
+import { readDeferredJob } from "@/server/automations/runner";
 import { describeSchedule } from "@/server/automations/schedule-input";
 import type { AutomationSchedule } from "@/types/automation";
 import { blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
@@ -103,7 +104,7 @@ export default async function BlogPage({
       .limit(30),
     supabase
       .from("automation_runs")
-      .select("automation_id")
+      .select("automation_id,output")
       .in("automation_id", automationIds)
       .in("status", ["QUEUED", "RUNNING"]),
     supabase.from("businesses").select("id, name").eq("owner_id", user.id).order("name"),
@@ -119,6 +120,7 @@ export default async function BlogPage({
     contentByAutomation.set(item.automation_id, list);
   }
   const inFlightAutomationIds = new Set((inFlightResult.data ?? []).map((run) => run.automation_id));
+  const progressByAutomation = new Map((inFlightResult.data ?? []).map((run) => [run.automation_id, readDeferredJob(run.output)?.progress ?? null]));
   const businessPickerList = businessOwnerBusinesses.data ?? [];
 
   return (
@@ -135,6 +137,8 @@ export default async function BlogPage({
           keywords: blogConfig?.keywords ?? selectedBusiness.keywords ?? [],
           tone: blogConfig?.tone ?? selectedBusiness.brand_tone ?? "친근하고 전문적인",
           deliveryMode: blogConfig?.deliveryMode ?? ("app_draft" as const),
+          platform: blogConfig?.platform,
+          notes: blogConfig?.notes,
           wordpressSiteUrl: blogConfig?.wordpress?.siteUrl,
           wordpressUsername: blogConfig?.wordpress?.username,
           hasStoredWordPress: Boolean(blogConfig?.wordpress),
@@ -162,7 +166,7 @@ export default async function BlogPage({
                   blogSettings={blogSettings}
                   hasInFlightRun={hasInFlightRun}
                 />
-                <RunNowButton automationId={automation.id} hasInFlightRun={hasInFlightRun} />
+                <RunNowButton automationId={automation.id} hasInFlightRun={hasInFlightRun} progress={progressByAutomation.get(automation.id) ?? null} />
               </div>
             </div>
 

@@ -138,12 +138,11 @@ describe("MockAIProvider character plan", () => {
 });
 
 describe("MockAIProvider (local dev / CI) produces schema-valid output for every pipeline", () => {
-  it("covers the website narrative, blog topic + body and passes the blog quality gate", async () => {
-    const [{ MockAIProvider }, { websiteDiagnosisNarrativeSchema }, { blogTopicSchema, blogBodySchema }, { assessBlogBody }] = await Promise.all([
+  it("covers the website narrative and the blog topic, outline and section stages", async () => {
+    const [{ MockAIProvider }, { websiteDiagnosisNarrativeSchema }, { blogTopicSchema, blogOutlineSchema, blogSectionOutputSchema }] = await Promise.all([
       import("./mock"),
       import("@/server/marketing/diagnosis"),
       import("../prompts/blog"),
-      import("../blog-quality"),
     ]);
     const provider = new MockAIProvider();
 
@@ -155,9 +154,10 @@ describe("MockAIProvider (local dev / CI) produces schema-valid output for every
     const planned = await provider.generateText({ prompt: 'Use exactly this planned topic without replacing it: "봄맞이 메뉴". Create one title.' });
     expect(JSON.parse(planned.text).topic).toBe("봄맞이 메뉴");
 
-    const body = await provider.generateText({ prompt: 'Write the full marketing blog post body for the topic "봄맞이 메뉴" with the title "t".' });
-    const parsed = blogBodySchema.parse(JSON.parse(body.text));
-    expect(assessBlogBody({ bodyHtml: parsed.bodyHtml, keywords: parsed.keywords })).toEqual([]);
+    const outline = await provider.generateText({ system: "상호: 우리 빵집", prompt: 'AUTOBIZ_BLOG_OUTLINE_V1\nPlan one marketing blog post about "봄맞이 메뉴" (working title: "t").' });
+    expect(blogOutlineSchema.parse(JSON.parse(outline.text)).sections.length).toBeGreaterThanOrEqual(5);
+    const section = await provider.generateText({ system: "상호: 우리 빵집", prompt: "AUTOBIZ_BLOG_SECTION_V1\nKIND=intro" });
+    expect(blogSectionOutputSchema.parse(JSON.parse(section.text)).blocks.length).toBeGreaterThan(1);
   });
 });
 
@@ -201,6 +201,49 @@ describe("AnthropicProvider", () => {
       messages: [{ role: "user", content: "질문" }],
     });
     expect(ANTHROPIC_DEFAULT_MODEL).toBe("claude-haiku-4-5-20251001");
+  });
+
+  it("uses AI_QUALITY_MODEL only for the quality tier and falls back to AI_MODEL", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.AI_MODEL = "claude-haiku-4-5-20251001";
+    process.env.AI_QUALITY_MODEL = "claude-sonnet-5-5";
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ type: "text", text: "ok" }] }), { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const { AnthropicProvider } = await import("./anthropic");
+    const provider = new AnthropicProvider();
+
+    await provider.generateText({ prompt: "fast" });
+    await provider.generateText({ prompt: "slow", tier: "quality" });
+    delete process.env.AI_QUALITY_MODEL;
+    vi.resetModules();
+    const { AnthropicProvider: Fresh } = await import("./anthropic");
+    await new Fresh().generateText({ prompt: "slow", tier: "quality" });
+
+    const models = fetchMock.mock.calls.map((call) => (JSON.parse(call[1].body as string) as { model: string }).model);
+    expect(models).toEqual(["claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-haiku-4-5-20251001"]);
+    delete process.env.AI_MODEL;
+  });
+
+  it("sends images as base64 blocks before the prompt text", async () => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
+    delete process.env.AI_MODEL;
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ type: "text", text: "{}" }] }), { status: 200 })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    vi.resetModules();
+    const { AnthropicProvider } = await import("./anthropic");
+
+    await new AnthropicProvider().generateText({ prompt: "이 이미지를 설명해줘", images: [{ mediaType: "image/png", base64: "QUJD" }] });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { messages: Array<{ content: unknown }> };
+    expect(body.messages[0].content).toEqual([
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
+      { type: "text", text: "이 이미지를 설명해줘" },
+    ]);
   });
 
   it("uses AI_MODEL when set, and omits the system field when none is given", async () => {
@@ -255,5 +298,18 @@ describe("getAIProvider", () => {
     process.env.AI_PROVIDER = "anthropic";
     const { getAIProvider } = await import("../index");
     expect(getAIProvider().name).toBe("anthropic");
+  });
+});
+
+describe("providers without vision", () => {
+  it("refuse image input instead of silently dropping it", async () => {
+    process.env.OPENAI_API_KEY = "k";
+    process.env.GEMINI_API_KEY = "k";
+    vi.stubGlobal("fetch", vi.fn());
+    vi.resetModules();
+    const [{ OpenAIProvider }, { GeminiProvider }] = await Promise.all([import("./openai"), import("./gemini")]);
+    const images = [{ mediaType: "image/png" as const, base64: "QUJD" }];
+    await expect(new OpenAIProvider().generateText({ prompt: "x", images })).rejects.toMatchObject({ code: "UNSUPPORTED_INPUT" });
+    await expect(new GeminiProvider().generateText({ prompt: "x", images })).rejects.toMatchObject({ code: "UNSUPPORTED_INPUT" });
   });
 });

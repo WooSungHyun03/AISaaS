@@ -1,0 +1,33 @@
+# Blog posts: how the app writes ad-blog quality articles
+
+Goal: posts that look and read like the best Naver / Tistory business blogs — long enough, sub-headed, emoji and emphasis, photo spots, a quote and a tip box, a business-info box, hashtags — without inventing facts.
+
+## What the research says (2026)
+
+- Naver ranks with C-Rank (blog expertise), D.I.A. (document experience) and AI briefing. Posts that keep readers: **1,500–2,000+ characters**, **5+ original photos**, question-style sub-headings, clear structure (lists, tables, short paragraphs), a representative image ([nblogmaster](https://nblogmaster.com/blog/naver-blog-seo-tips), [TILNOTE](https://tilnote.io/en/pages/6abd32871bc5b55a946de798)).
+- Naver gives no official character/image/keyword counts; what lowers quality is copied or templated text, keyword stuffing (5+ repeats), irrelevant keywords, unmarked ads and AI text that reads the same everywhere ([locaposting checklist](https://locaposting.com/blog/naver-seo-checklist)).
+- Naver's "AI 활용" label is **recommended, not required** for blogs (required for shopping ads) ([MTN](https://news.mtn.co.kr/news-detail/2026072417015682342)).
+- Tistory is read through Google too: semantic h2/h3, an early answer, tidy structure, original content ([JAB-GYVER](https://jab-guyver.co.kr/5300)).
+
+## How the app does it (`src/server/blog`, `src/server/ai/prompts/blog.ts`, `handlers/blog.ts`)
+
+1. **Facts first.** `buildBlogFacts` collects only what the owner gave (profile, goal, keywords, the new *"꼭 넣고 싶은 내용"* note, calendar brief). The writer may state nothing else as true: no invented prices, hours, awards, reviews, "I visited" stories. Numbers with units (원, %, 시, 분 …) that the facts never mention are flagged by the quality check.
+2. **Plan, then write section by section.** Topic → one outline call (title, reader, angle, 5–7 sub-headed sections with points, photo spots, a quote/callout/list slot, closing CTA) → one call per section (intro, each body section, closing) that sees what is already written. This gives length control (~330–480 chars per section → ≈ 2,000+ characters without spaces) and real variety.
+3. **Structured blocks, not raw HTML** (`post.ts`): paragraph, quote, list (check/bullet/number), callout, photo slot, info box, divider; inline `**bold**` and `==highlight==`. Headings start with an emoji, paragraphs end with an occasional emoji.
+4. **Quality gate** (`blog-quality.ts`): length ≥ 1,500 chars (no spaces), 5–8 sub-headings, short paragraphs, 8–45 emoji, ≥ 5 bold + ≥ 2 highlight, ≥ 4 photo spots, a quote and a callout, keyword in the first 400 chars and not stuffed (≤ 8), no AI-tell phrases (`결론적으로`, `알아보겠습니다`, `여러분` …) or unprovable claims (`최고의`, `1등`, `100%` …), no invented numbers, varied sentence endings and openings. Problems are assigned to sections; **only the failing sections (max 4) are rewritten once**, with the old text and the problems in the prompt. A rewrite that fails keeps the original.
+5. **App-built extras:** the business-info box (location, main offering, website — from the profile, never from the AI) and 8–12 hashtags.
+6. **Rendering** (`render.ts`): the same post becomes HTML for Naver (styled paragraphs with inline CSS; the SmartEditor keeps bold/colour/size/background on paste) or Tistory/WordPress (h2, blockquote, table, font stack). All text is escaped; nothing from the model can inject markup.
+7. **Owner workspace** (`blog-workspace.tsx`): live preview, "서식 그대로 복사" (HTML + text on the clipboard), Tistory "HTML 코드 복사", title/text copy, the list of photos to take, and an editor over a readable markup (`# 제목`, `## 소제목`, `> 인용`, `[사진] …`, `[포인트] …`) that round-trips with the blocks (`markup.ts`).
+
+Writing takes several AI calls, so a blog run is a **deferred run** (see `docs/ANIMATED_CHARACTERS.md`): each short step writes sections for ≈ 40 s; the open page and the cron tick advance it.
+
+## Settings
+
+- Per blog automation: **올릴 곳** (네이버 / 티스토리) and **꼭 넣고 싶은 내용**.
+- `AI_QUALITY_MODEL` (optional env): a stronger model for blog planning/writing, e.g. `claude-sonnet-5-5`. Unset = the normal model (Claude Haiku 4.5), which works but writes noticeably flatter Korean. Cost is roughly 9 AI calls per post.
+
+## Limits
+
+- Fonts cannot be chosen: Naver's editor ignores pasted font families. Size, bold, colour and highlight survive paste; if a style is dropped, the plain text and photo spots are still correct.
+- The AI never sees the owner's photos; it writes photo *spots* (what to shoot and where). The owner puts real photos in.
+- Real posts get better with real details: fill in **꼭 넣고 싶은 내용** (signature item, story, event, parking) — that is the only source of specifics.
