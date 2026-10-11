@@ -179,8 +179,18 @@
   (`generatedItems`)에 남아있던 `instagram_reels` 항목도 `youtube_shorts`로 교체(실제로는
   절대 통과할 수 없는 값이 테스트 데이터에 섞여 있던 것 정리). 전체 테스트 939개 +
   typecheck + lint 통과.
-- [ ] **3단계** — 진단 연동: `getLatestChannelDiagnosisSummary` 재사용, `DIAGNOSIS_REQUIRED` 제거,
-  `hasDiagnosis` 갱신 + 테스트
+- [x] **3단계** — 진단 연동: `getLatestDiagnosis`/`diagnosisSchema`/`safeContextValue`/
+  `DIAGNOSIS_CONTEXT_KEYS`/`diagnosisContext()` 전부 삭제. `generateCalendarPlan`과
+  `getMarketingCalendarPageData` 둘 다 1-5의 `getLatestChannelDiagnosisSummary(businessId)`로
+  교체. 새 `channelDiagnosisContext()`가 채널별 `channel/overallScore/findings(최대10)/
+  recommendations(최대10)`만 추출(원문 metrics·id 등은 프롬프트에 안 들어감 — 테스트로 확인).
+  `hasAnyData`가 false면 "채널 진단 결과" 섹션 자체를 프롬프트에서 생략(빈 값으로 안 보냄).
+  `DIAGNOSIS_REQUIRED` 에러 코드 완전히 제거 — 진단 없이도 프로필만으로 생성 진행.
+  `getMarketingCalendarPageData`의 `hasDiagnosis`도 같은 함수의 `hasAnyData` 기준으로 변경.
+  테스트: 기존 "진단 필수" 테스트 제거하고 "진단 없이도 생성됨 + 진단 섹션 자체가 없음" +
+  "채널 진단 findings/점수가 프롬프트에 들어가고 raw metrics는 안 들어감" 테스트로 교체,
+  `getMarketingCalendarPageData`의 `hasDiagnosis` 테스트 2개도 channel summary 기준으로 갱신.
+  전체 테스트 1013개 + typecheck + lint 통과.
 - [ ] **4단계** — `/calendar/page.tsx` 안내 문구/버튼 활성화 변경, `marketing/calendar/actions.ts`
   성공 메시지에 제외/병합 개수 반영
 - [ ] **5단계** — 로컬에서 기존 릴스 `calendar_items` 행을 하나 만들어 `/calendar` 화면에서

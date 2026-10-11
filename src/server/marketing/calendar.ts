@@ -1,12 +1,13 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { generateStructured } from "@/server/ai/generate";
 import { isNearDuplicateTopic } from "@/server/ai/similarity";
 import { logger } from "@/lib/logger";
 import { CHANNEL_LABEL, collectPresentChannels } from "@/server/marketing/scoring";
+import { getLatestChannelDiagnosisSummary } from "@/server/channels";
+import type { ChannelDiagnosisSummary } from "@/server/channels";
 import type { Business, BusinessSnsLinks, CalendarItem, CalendarPlatform } from "@/types/domain";
 
 /**
@@ -30,13 +31,11 @@ const calendarPlanItemSchema = z.object({
 });
 
 export const calendarPlanSchema = z.array(calendarPlanItemSchema).min(1).max(28);
-const diagnosisSchema = z.record(z.string(), z.unknown());
 
 export type GeneratedCalendarPlanItem = z.infer<typeof calendarPlanItemSchema>;
 export type CalendarPlanErrorCode =
   | "INVALID_WEEKS"
   | "PROFILE_REQUIRED"
-  | "DIAGNOSIS_REQUIRED"
   | "INVALID_AI_RESULT"
   | "RATE_LIMITED"
   | "DATABASE_ERROR";
@@ -102,52 +101,25 @@ function isDateInRange(date: string, startDate: string, endDate: string): boolea
 }
 
 /**
- * Diagnosis table ownership belongs to the diagnosis workstream (expected in
- * migration 0028/0029). Keep this dependency read-only and local until that
- * table's generated type lands, rather than duplicating its schema here.
+ * Only the measured, user-visible parts of each tracked channel's latest
+ * diagnosis go into the prompt — never raw metrics or page text. Reuses
+ * ticket 1-5's getLatestChannelDiagnosisSummary (src/server/channels)
+ * rather than reading marketing_diagnoses directly, so the planner sees
+ * the same channel-level findings/recommendations the diagnosis screen
+ * shows the user.
  */
-async function getLatestDiagnosis(supabase: SupabaseClient, businessId: string): Promise<Record<string, unknown> | null> {
-  const { data, error } = await supabase
-    .from("marketing_diagnoses")
-    .select("*")
-    .eq("business_id", businessId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw new CalendarPlanError("DATABASE_ERROR", "마케팅 진단 결과를 불러오지 못했습니다.", { cause: error });
-  if (!data) return null;
-  const parsed = diagnosisSchema.safeParse(data);
-  if (!parsed.success) throw new CalendarPlanError("DATABASE_ERROR", "마케팅 진단 결과 형식을 확인할 수 없습니다.");
-  return parsed.data;
-}
-
-function safeContextValue(value: unknown, depth = 0): unknown {
-  if (depth > 4) return "[생략]";
-  if (typeof value === "string") return value.slice(0, 2000);
-  if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
-  if (Array.isArray(value)) return value.slice(0, 30).map((item) => safeContextValue(item, depth + 1));
-  if (typeof value !== "object") return undefined;
-
-  const blockedKey = /(token|secret|password|credential|authorization|cookie)/i;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key]) => !blockedKey.test(key))
-      .slice(0, 50)
-      .map(([key, item]) => [key, safeContextValue(item, depth + 1)]),
-  );
-}
-
-const DIAGNOSIS_CONTEXT_KEYS = ["score", "missing_channels", "content_status", "sns_activity", "recommendations"] as const;
-
-/** Only the measured, user-visible parts of a diagnosis go into the prompt — not raw page text or ids. */
-function diagnosisContext(diagnosis: Record<string, unknown>) {
-  return safeContextValue(Object.fromEntries(DIAGNOSIS_CONTEXT_KEYS.filter((key) => key in diagnosis).map((key) => [key, diagnosis[key]])));
+function channelDiagnosisContext(summary: ChannelDiagnosisSummary) {
+  return summary.channels.map((channel) => ({
+    channel: channel.channel,
+    overallScore: channel.overallScore,
+    findings: channel.findings.slice(0, 10),
+    recommendations: channel.recommendations.slice(0, 10),
+  }));
 }
 
 function buildCalendarPrompt(
   business: PlanningBusiness,
-  diagnosis: Record<string, unknown>,
+  channelDiagnosis: ChannelDiagnosisSummary,
   weeks: number,
   startDate: string,
   endDate: string,
@@ -187,14 +159,16 @@ function buildCalendarPrompt(
       "platform은 blog, youtube_shorts 중 하나만 사용하세요.",
       "각 날짜는 계획 기간 안의 YYYY-MM-DD 형식이어야 하며 같은 날짜와 플랫폼 조합을 중복하지 마세요.",
       "topic은 서로 확연히 달라야 하고, summary는 글/영상에 꼭 들어가야 할 내용을 2~3문장으로 구체적으로 적으세요(콘텐츠 브리프).",
-      "진단에서 부족하다고 나온 부분(없는 채널, 오래된 콘텐츠)을 채우는 주제를 우선하세요.",
+      channelDiagnosis.hasAnyData ? "채널 진단에서 부족하다고 나온 부분(findings, 낮은 점수)을 채우는 주제를 우선하세요." : null,
       "응답은 date, platform, contentType, topic, goal, summary, cta를 가진 객체 배열이어야 합니다.",
       existingTopics.length
         ? `이미 계획했거나 만든 주제입니다. 같거나 비슷한 주제는 다시 쓰지 마세요: ${JSON.stringify(existingTopics)}`
         : null,
       "",
       `사업 정보:\n${JSON.stringify(businessContext)}`,
-      `최신 마케팅 진단:\n${JSON.stringify(diagnosisContext(diagnosis)).slice(0, 4000)}`,
+      channelDiagnosis.hasAnyData
+        ? `채널 진단 결과:\n${JSON.stringify(channelDiagnosisContext(channelDiagnosis)).slice(0, 4000)}`
+        : null,
     ].filter((line) => line !== null).join("\n"),
   };
 }
@@ -255,6 +229,11 @@ function recentCreatedWithin(items: Array<{ created_at: string }>, ms: number, n
  * the signed-in user. Reads the latest diagnosis as context but deliberately
  * does not create a database relationship to it.
  *
+ * Ticket 1-8: generation is no longer blocked on a diagnosis existing —
+ * the profile alone is enough (the system prompt already tells the AI to
+ * fall back to generic topics when it has no specifics to work from). A
+ * channel diagnosis, when one exists, only makes the plan more targeted.
+ *
  * Regenerating replaces the still-unused part of the previous plan (PLANNED,
  * not linked to a generated piece, dated today or later) instead of stacking
  * a second overlapping plan on top, and never repeats a topic that is already
@@ -274,8 +253,7 @@ export async function generateCalendarPlan(businessId: string, weeks: number) {
   if (businessError) throw new CalendarPlanError("DATABASE_ERROR", "사업 정보를 불러오지 못했습니다.", { cause: businessError });
   if (!business) throw new CalendarPlanError("PROFILE_REQUIRED", "먼저 마케팅할 사업 정보를 등록해주세요.");
 
-  const diagnosis = await getLatestDiagnosis(supabase as unknown as SupabaseClient, businessId);
-  if (!diagnosis) throw new CalendarPlanError("DIAGNOSIS_REQUIRED", "캘린더를 만들기 전에 마케팅 진단을 완료해주세요.");
+  const channelDiagnosis = await getLatestChannelDiagnosisSummary(businessId);
 
   const now = Date.now();
   const startDate = formatKstDate(new Date(now));
@@ -313,7 +291,7 @@ export async function generateCalendarPlan(businessId: string, weeks: number) {
     .map((topic) => topic.slice(0, 80))
     .slice(0, 40);
 
-  const { system, prompt } = buildCalendarPrompt(business, diagnosis, weeks, startDate, endDate, existingTopics);
+  const { system, prompt } = buildCalendarPrompt(business, channelDiagnosis, weeks, startDate, endDate, existingTopics);
   const generated = await generateStructured({ system, prompt, schema: calendarPlanSchema, maxTokens: 6000 });
   const validated = validateGeneratedPlan(generated, weeks, startDate, endDate);
 
@@ -378,7 +356,7 @@ export async function getMarketingCalendarPageData(
   const selectedBusiness = businessList.find((business) => business.id === options.businessId) ?? businessList[0] ?? null;
   if (!selectedBusiness) return { businesses: businessList, selectedBusiness: null, items: [], hasDiagnosis: false };
 
-  const [itemResult, diagnosis] = await Promise.all([
+  const [itemResult, channelDiagnosis] = await Promise.all([
     supabase
       .from("calendar_items")
       .select("*")
@@ -387,7 +365,7 @@ export async function getMarketingCalendarPageData(
       .lte("planned_date", options.endDate)
       .order("planned_date")
       .order("created_at"),
-    getLatestDiagnosis(supabase as unknown as SupabaseClient, selectedBusiness.id),
+    getLatestChannelDiagnosisSummary(selectedBusiness.id),
   ]);
   if (itemResult.error) throw new CalendarPlanError("DATABASE_ERROR", "마케팅 캘린더를 불러오지 못했습니다.", { cause: itemResult.error });
 
@@ -395,6 +373,6 @@ export async function getMarketingCalendarPageData(
     businesses: businessList,
     selectedBusiness,
     items: itemResult.data ?? [],
-    hasDiagnosis: diagnosis !== null,
+    hasDiagnosis: channelDiagnosis.hasAnyData,
   };
 }

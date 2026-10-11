@@ -45,14 +45,23 @@ function listQuery<T>(rows: T[]) {
 }
 
 type ExistingItem = { id: string; topic: string; status: string; planned_date: string; automation_id: string | null; created_at: string };
+type TrackedChannelRow = { id: string; platform: string; external_id: string; url: string };
+type ChannelDiagnosisRow = Record<string, unknown>;
 
+/**
+ * Ticket 1-8: generateCalendarPlan reads channel diagnoses via ticket
+ * 1-5's getLatestChannelDiagnosisSummary, which itself queries
+ * tracked_channels then channel_diagnoses — both default to empty here
+ * (hasAnyData: false), matching "no tracked channels yet" rather than
+ * "a diagnosis exists but is all nulls".
+ */
 function makeClient({
-  diagnosis = { id: "diagnosis-1", score: 62, api_token: "must-not-leak", raw_summary: "page title that is not prompt context" } as Record<string, unknown> | null,
+  trackedChannels = [] as TrackedChannelRow[],
+  channelDiagnoses = [] as ChannelDiagnosisRow[],
   existingItems = [] as ExistingItem[],
   history = [] as Array<{ topic: string | null; title: string | null }>,
 } = {}) {
   const businessQuery = queryReturning({ data: business, error: null });
-  const diagnosisQuery = queryReturning({ data: diagnosis, error: null });
   const insertedRows: Array<Record<string, unknown>> = [];
   const insertSelect = vi.fn(async () => ({
     data: insertedRows.map((row, index) => ({
@@ -73,7 +82,8 @@ function makeClient({
   const deleteIn = vi.fn().mockResolvedValue({ error: null });
   const from = vi.fn((table: string) => {
     if (table === "businesses") return businessQuery;
-    if (table === "marketing_diagnoses") return diagnosisQuery;
+    if (table === "tracked_channels") return listQuery(trackedChannels);
+    if (table === "channel_diagnoses") return listQuery(channelDiagnoses);
     if (table === "content_history") return listQuery(history);
     if (table === "calendar_items") return { select: vi.fn(() => listQuery(existingItems)), insert, delete: vi.fn(() => ({ in: deleteIn })) };
     throw new Error(`Unexpected table: ${table}`);
@@ -124,19 +134,39 @@ describe("generateCalendarPlan", () => {
     expect(createClientMock).not.toHaveBeenCalled();
   });
 
-  it("requires a saved diagnosis before asking the AI", async () => {
-    const { client } = makeClient({ diagnosis: null });
+  it("generates a plan from the profile alone when no channel diagnosis exists yet (ticket 1-8: DIAGNOSIS_REQUIRED removed)", async () => {
+    const { client, insert } = makeClient();
     createClientMock.mockResolvedValue(client);
+    generateStructuredMock.mockResolvedValue(generatedItems);
 
-    const error = await generateCalendarPlan(business.id, 2).catch((caught) => caught);
+    const result = await generateCalendarPlan(business.id, 2);
 
-    expect(error).toBeInstanceOf(CalendarPlanError);
-    expect((error as InstanceType<typeof CalendarPlanError>).code).toBe("DIAGNOSIS_REQUIRED");
-    expect(generateStructuredMock).not.toHaveBeenCalled();
+    expect(result.items).toHaveLength(4);
+    expect(insert).toHaveBeenCalledTimes(1);
+    const request = generateStructuredMock.mock.calls[0][0] as { prompt: string };
+    expect(request.prompt).toContain("성장 카페");
+    expect(request.prompt).not.toContain("채널 진단 결과"); // no diagnosis -> that section is omitted entirely, not sent as empty
   });
 
-  it("uses profile and diagnosis context, validates the plan, and bulk inserts it", async () => {
-    const { client, insertedRows, insert } = makeClient();
+  it("uses channel diagnosis findings/scores as context, validates the plan, and bulk inserts it — without leaking raw metrics", async () => {
+    const { client, insertedRows, insert } = makeClient({
+      trackedChannels: [{ id: "channel-1", platform: "youtube", external_id: "@mychannel", url: "https://youtube.com/@mychannel" }],
+      channelDiagnoses: [
+        {
+          channel_id: "channel-1",
+          overall_score: 62,
+          activity_score: 40,
+          consistency_score: 70,
+          content_score: 75,
+          metrics: { subscriberCount: 1234567 }, // must not leak into the prompt
+          findings: ["최근 30일간 업로드가 없어요."],
+          recommendations: ["주 2회 업로드를 유지하세요."],
+          completeness: "COMPLETE",
+          data_source: "mock",
+          created_at: "2026-02-20T00:00:00.000Z",
+        },
+      ],
+    });
     createClientMock.mockResolvedValue(client);
     generateStructuredMock.mockResolvedValue(generatedItems);
 
@@ -156,9 +186,11 @@ describe("generateCalendarPlan", () => {
     })));
     const request = generateStructuredMock.mock.calls[0][0] as { prompt: string };
     expect(request.prompt).toContain("성장 카페");
-    expect(request.prompt).toContain("\"score\":62");
-    expect(request.prompt).not.toContain("must-not-leak");
-    expect(request.prompt).not.toContain("page title that is not prompt context");
+    expect(request.prompt).toContain("채널 진단 결과");
+    expect(request.prompt).toContain("\"overallScore\":62");
+    expect(request.prompt).toContain("최근 30일간 업로드가 없어요.");
+    expect(request.prompt).toContain("주 2회 업로드를 유지하세요.");
+    expect(request.prompt).not.toContain("1234567"); // raw metrics never reach the prompt
   });
 
   it("includes the marketing profile and the content brief instruction in the prompt", async () => {
@@ -313,13 +345,21 @@ describe("generateCalendarPlan", () => {
 
 /**
  * Builder for getMarketingCalendarPageData's query shapes, distinct from
- * makeClient() above: its businesses/calendar_items queries are awaited
- * directly (no .maybeSingle()), while getLatestDiagnosis still ends in
- * .maybeSingle() — same dual shape runner.test.ts's makeAdmin uses.
+ * makeClient() above only in that every query here (businesses,
+ * calendar_items, and ticket 1-5's getLatestChannelDiagnosisSummary's
+ * tracked_channels/channel_diagnoses) is awaited directly with no
+ * .maybeSingle() anywhere.
  */
-function makePageDataClient(options: { businesses?: unknown[]; items?: unknown[]; diagnosis: Record<string, unknown> | null }) {
+function makePageDataClient(options: {
+  businesses?: unknown[];
+  items?: unknown[];
+  trackedChannels?: TrackedChannelRow[];
+  channelDiagnoses?: ChannelDiagnosisRow[];
+}) {
   const businesses = options.businesses ?? [business];
   const items = options.items ?? [];
+  const trackedChannels = options.trackedChannels ?? [];
+  const channelDiagnoses = options.channelDiagnoses ?? [];
   const from = vi.fn((table: string) => {
     const builder: Record<string, unknown> = {
       select: vi.fn(() => builder),
@@ -328,10 +368,11 @@ function makePageDataClient(options: { businesses?: unknown[]; items?: unknown[]
       lte: vi.fn(() => builder),
       order: vi.fn(() => builder),
       limit: vi.fn(() => builder),
-      maybeSingle: vi.fn(() => Promise.resolve({ data: options.diagnosis, error: null })),
       then: (resolve: (value: { data: unknown; error: null }) => unknown) => {
         if (table === "businesses") return resolve({ data: businesses, error: null });
         if (table === "calendar_items") return resolve({ data: items, error: null });
+        if (table === "tracked_channels") return resolve({ data: trackedChannels, error: null });
+        if (table === "channel_diagnoses") return resolve({ data: channelDiagnoses, error: null });
         throw new Error(`Unexpected table: ${table}`);
       },
     };
@@ -340,22 +381,25 @@ function makePageDataClient(options: { businesses?: unknown[]; items?: unknown[]
   return { from };
 }
 
-describe("getMarketingCalendarPageData — hasDiagnosis reflects marketing_diagnoses directly", () => {
-  it("is true once a diagnosis row exists, using exactly the columns runDiagnosis() (src/app/(app)/diagnosis/actions.ts) writes", async () => {
+describe("getMarketingCalendarPageData — hasDiagnosis reflects ticket 1-5's channel diagnosis summary", () => {
+  it("is true once a tracked channel has a diagnosis", async () => {
     const client = makePageDataClient({
-      diagnosis: {
-        id: "diagnosis-1",
-        business_id: business.id,
-        source_type: "website",
-        source_url: "https://example.com/",
-        score: 70,
-        missing_channels: ["instagram"],
-        content_status: "최근 업데이트가 없습니다.",
-        sns_activity: "SNS 연동이 없습니다.",
-        recommendations: ["인스타그램을 연결하세요."],
-        raw_summary: "성장 카페 — 소개",
-        created_at: "2026-03-01T00:00:00.000Z",
-      },
+      trackedChannels: [{ id: "channel-1", platform: "youtube", external_id: "@mychannel", url: "https://youtube.com/@mychannel" }],
+      channelDiagnoses: [
+        {
+          channel_id: "channel-1",
+          overall_score: 70,
+          activity_score: 70,
+          consistency_score: 70,
+          content_score: 70,
+          metrics: {},
+          findings: [],
+          recommendations: [],
+          completeness: "COMPLETE",
+          data_source: "mock",
+          created_at: "2026-03-01T00:00:00.000Z",
+        },
+      ],
     });
     createClientMock.mockResolvedValue(client);
 
@@ -364,8 +408,8 @@ describe("getMarketingCalendarPageData — hasDiagnosis reflects marketing_diagn
     expect(result.hasDiagnosis).toBe(true);
   });
 
-  it("is false when no diagnosis has been run yet", async () => {
-    const client = makePageDataClient({ diagnosis: null });
+  it("is false when no channel has been diagnosed yet (including when there are no tracked channels at all)", async () => {
+    const client = makePageDataClient({});
     createClientMock.mockResolvedValue(client);
 
     const result = await getMarketingCalendarPageData("user-1", { businessId: business.id, startDate: "2026-03-01", endDate: "2026-03-28" });
