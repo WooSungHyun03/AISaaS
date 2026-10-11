@@ -240,18 +240,56 @@ describe("generateCalendarPlan", () => {
     expect(generateStructuredMock).not.toHaveBeenCalled();
   });
 
-  it("does not save an AI plan containing dates outside the requested range", async () => {
+  it("excludes an out-of-range item but still saves the rest when enough remain (ticket 1-8: exclude, don't reject the whole plan)", async () => {
+    const { client, insert, insertedRows } = makeClient();
+    createClientMock.mockResolvedValue(client);
+    const padded = [
+      ...generatedItems,
+      { date: "2026-03-05", platform: "blog", contentType: "정보형", topic: "셋째 글", goal: "인지", summary: "요약", cta: "상담" },
+      { date: "2026-03-12", platform: "youtube_shorts", contentType: "쇼츠", topic: "셋째 쇼츠", goal: "전환", summary: "요약", cta: "문의" },
+      { date: "2026-04-20", platform: "blog", contentType: "정보형", topic: "범위 밖 글", goal: "인지", summary: "요약", cta: "상담" }, // outside the 2-week window
+    ];
+    generateStructuredMock.mockResolvedValue(padded);
+
+    const result = await generateCalendarPlan(business.id, 2);
+
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(result.excludedOutOfRange).toBe(1);
+    expect(insertedRows.map((row) => row.topic)).not.toContain("범위 밖 글");
+    expect(insertedRows).toHaveLength(6);
+  });
+
+  it("merges a duplicate (date, platform) pair, keeping the first one and counting the merge", async () => {
+    const { client, insert, insertedRows } = makeClient();
+    createClientMock.mockResolvedValue(client);
+    const withDuplicate = [
+      ...generatedItems,
+      { date: "2026-03-01", platform: "blog", contentType: "정보형", topic: "첫 주 블로그(중복, 버려짐)", goal: "인지", summary: "요약", cta: "상담" }, // same date+platform as generatedItems[0]
+      { date: "2026-03-15", platform: "blog", contentType: "정보형", topic: "셋째 주 글", goal: "인지", summary: "요약", cta: "상담" },
+    ];
+    generateStructuredMock.mockResolvedValue(withDuplicate);
+
+    const result = await generateCalendarPlan(business.id, 2);
+
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(result.mergedDuplicates).toBe(1);
+    expect(insertedRows.map((row) => row.topic)).toContain("첫 주 블로그"); // the first one with this (date, platform) wins
+    expect(insertedRows.map((row) => row.topic)).not.toContain("첫 주 블로그(중복, 버려짐)");
+  });
+
+  it("rejects only when too few items remain after excluding out-of-range ones and merging duplicates, with a message naming the shortfall", async () => {
     const { client, insert } = makeClient();
     createClientMock.mockResolvedValue(client);
     generateStructuredMock.mockResolvedValue([
-      ...generatedItems.slice(0, 3),
-      { ...generatedItems[3], date: "2026-04-20" },
+      ...generatedItems.slice(0, 3), // 3 in-range, unique items
+      { ...generatedItems[3], date: "2026-04-20" }, // out of range -> excluded, leaving 3 < weeks*2=4
     ]);
 
     const error = await generateCalendarPlan(business.id, 2).catch((caught) => caught);
 
     expect(error).toBeInstanceOf(CalendarPlanError);
     expect((error as InstanceType<typeof CalendarPlanError>).code).toBe("INVALID_AI_RESULT");
+    expect((error as Error).message).toContain("3개");
     expect(insert).not.toHaveBeenCalled();
   });
 });

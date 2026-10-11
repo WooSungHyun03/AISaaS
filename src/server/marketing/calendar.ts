@@ -189,27 +189,51 @@ function buildCalendarPrompt(
   };
 }
 
+export interface ValidatedPlan {
+  items: GeneratedCalendarPlanItem[];
+  /** Items dropped for having a date outside [startDate, endDate]. */
+  excludedOutOfRange: number;
+  /** Items dropped for repeating a (date, platform) pair already kept — the first one with that pair wins. */
+  mergedDuplicates: number;
+}
+
+/**
+ * "실제 AI 응답에서 실패하기 쉬운 구조"(ticket 1-8)를 고치는 지점: a plan
+ * used to be rejected wholesale for a single out-of-range date or one
+ * duplicate (date, platform) pair, even when the rest of the plan was
+ * perfectly usable. Now only the offending items are dropped — the whole
+ * plan is refused (INVALID_AI_RESULT) only if what's left can't cover at
+ * least 2 items/week. There is no longer an upper bound here:
+ * calendarPlanSchema's own `.max(28)` already caps how many items a
+ * single AI response can contain.
+ */
 function validateGeneratedPlan(
   items: GeneratedCalendarPlanItem[],
   weeks: number,
   startDate: string,
   endDate: string,
-): void {
-  if (items.length < weeks * 2 || items.length > weeks * 7) {
-    throw new CalendarPlanError("INVALID_AI_RESULT", `AI 계획은 ${weeks * 2}~${weeks * 7}개 항목이어야 합니다.`);
+): ValidatedPlan {
+  const inRange = items.filter((item) => isDateInRange(item.date, startDate, endDate));
+  const excludedOutOfRange = items.length - inRange.length;
+
+  const kept: GeneratedCalendarPlanItem[] = [];
+  const seenKeys = new Set<string>();
+  for (const item of inRange) {
+    const key = `${item.date}:${item.platform}`;
+    if (seenKeys.has(key)) continue; // first item with this (date, platform) wins
+    seenKeys.add(key);
+    kept.push(item);
+  }
+  const mergedDuplicates = inRange.length - kept.length;
+
+  if (kept.length < weeks * 2) {
+    throw new CalendarPlanError(
+      "INVALID_AI_RESULT",
+      `AI 계획에서 쓸 수 있는 항목이 ${kept.length}개뿐이에요(최소 ${weeks * 2}개 필요). 다시 시도해주세요.`,
+    );
   }
 
-  const keys = new Set<string>();
-  for (const item of items) {
-    if (!isDateInRange(item.date, startDate, endDate)) {
-      throw new CalendarPlanError("INVALID_AI_RESULT", "AI가 계획 기간을 벗어난 날짜를 생성했습니다.");
-    }
-    const key = `${item.date}:${item.platform}`;
-    if (keys.has(key)) {
-      throw new CalendarPlanError("INVALID_AI_RESULT", "AI가 같은 날짜와 채널의 계획을 중복 생성했습니다.");
-    }
-    keys.add(key);
-  }
+  return { items: kept, excludedOutOfRange, mergedDuplicates };
 }
 
 function recentCreatedWithin(items: Array<{ created_at: string }>, ms: number, now: number): number {
@@ -281,14 +305,14 @@ export async function generateCalendarPlan(businessId: string, weeks: number) {
 
   const { system, prompt } = buildCalendarPrompt(business, diagnosis, weeks, startDate, endDate, existingTopics);
   const generated = await generateStructured({ system, prompt, schema: calendarPlanSchema, maxTokens: 6000 });
-  validateGeneratedPlan(generated, weeks, startDate, endDate);
+  const validated = validateGeneratedPlan(generated, weeks, startDate, endDate);
 
   // Drop topics that repeat an existing one (looser threshold on purpose: the business name that
   // most topics start with is removed first, so it can't make unrelated topics look alike) or
   // that are near-identical to another item of this same plan (first one wins).
   const bare = (topic: string) => topic.split(business.name).join(" ");
   const kept: GeneratedCalendarPlanItem[] = [];
-  for (const item of generated) {
+  for (const item of validated.items) {
     const repeatsExisting = isNearDuplicateTopic(bare(item.topic), existingTopics.map(bare), CALENDAR_DUPLICATE_THRESHOLD);
     const repeatsPlanItem = isNearDuplicateTopic(bare(item.topic), kept.map((entry) => bare(entry.topic)), PLAN_DUPLICATE_THRESHOLD);
     if (repeatsExisting || repeatsPlanItem) continue;
@@ -317,7 +341,15 @@ export async function generateCalendarPlan(businessId: string, weeks: number) {
     if (deleteError) logger.warn("calendar_replace_old_plan_failed", { businessId, count: replaceableIds.length });
   }
 
-  return { items: data, startDate, endDate, replaced: replaceableIds.length, skippedDuplicates: generated.length - kept.length };
+  return {
+    items: data,
+    startDate,
+    endDate,
+    replaced: replaceableIds.length,
+    excludedOutOfRange: validated.excludedOutOfRange,
+    mergedDuplicates: validated.mergedDuplicates,
+    skippedDuplicates: validated.items.length - kept.length,
+  };
 }
 
 export async function getMarketingCalendarPageData(

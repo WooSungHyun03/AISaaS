@@ -162,7 +162,14 @@
   화면으로 확인.
 
 ## 진행 단계
-- [ ] **1단계** — `validateGeneratedPlan` 재설계(제외/병합/최소개수) + 테스트
+- [x] **1단계** — `validateGeneratedPlan` 재설계: 범위 밖 항목 제외(`excludedOutOfRange`),
+  (날짜+플랫폼) 중복은 먼저 나온 것이 남고 나머지 병합(`mergedDuplicates`), 남은 개수가
+  `weeks*2` 미만이면만 거부(에러 메시지에 실제 남은 개수 포함). 상한선(`weeks*7`) 체크는
+  제거 — `calendarPlanSchema.max(28)`가 이미 상한을 걺. `generateCalendarPlan`의 반환값에
+  `excludedOutOfRange`/`mergedDuplicates` 추가(기존 `skippedDuplicates`는 근접 주제 필터링
+  개수로 의미 유지). 새 테스트 3개(제외 후 저장, 병합 확인, 제외+부족으로 거부) + 기존
+  "범위 밖이면 저장 안 함" 테스트가 "제외 후에도 부족해서 거부"로 의미가 바뀐 걸 확인.
+  전체 테스트 937개 + typecheck + lint 통과.
 - [ ] **2단계** — `instagram_reels` 제거(zod 스키마 + 프롬프트) + 테스트(릴스 응답이 거부되는지)
 - [ ] **3단계** — 진단 연동: `getLatestChannelDiagnosisSummary` 재사용, `DIAGNOSIS_REQUIRED` 제거,
   `hasDiagnosis` 갱신 + 테스트
