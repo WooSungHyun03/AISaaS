@@ -17,4 +17,5 @@ export function getBillingProvider(): BillingProvider {
 
 export * from "./provider";
 export * from "./plans";
+export * from "./products";
 export * from "./entitlements";

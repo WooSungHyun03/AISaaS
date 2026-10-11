@@ -14,6 +14,7 @@ import {
   cancelStoredSubscription,
   claimCheckoutSession,
   createCheckoutSession,
+  getLegacyPlanFromCheckout,
   markCheckoutFailed,
   markCheckoutSucceeded,
 } from "../checkout-sessions";
@@ -56,13 +57,14 @@ export class MockBillingProvider implements BillingProvider {
   async completeCheckout({ userId, sessionId }: CompleteCheckoutParams) {
     assertMockBillingAllowed();
     const session = await claimCheckoutSession(sessionId, userId, "mock");
-    if (session.status === "SUCCEEDED") return { plan: session.plan, provider: "mock" };
+    const plan = getLegacyPlanFromCheckout(session);
+    if (session.status === "SUCCEEDED") return { plan, provider: "mock" };
 
     try {
-      await activateSubscription(userId, session.plan, "mock", session.id);
+      await activateSubscription(userId, plan, "mock", session.id);
       await markCheckoutSucceeded(session.id, `mock_pay_${crypto.randomUUID()}`);
-      logger.info("mock_subscription_activated", { userId, plan: session.plan, sessionId });
-      return { plan: session.plan, provider: "mock" };
+      logger.info("mock_subscription_activated", { userId, plan, sessionId });
+      return { plan, provider: "mock" };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Mock checkout failed";
       await markCheckoutFailed(session.id, "MOCK_CHECKOUT_FAILED", message);

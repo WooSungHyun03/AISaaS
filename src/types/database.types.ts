@@ -17,6 +17,9 @@ export type SetupRequestContactMethod = "EMAIL" | "PHONE" | "KAKAO" | "OTHER";
 export type IntegrationProvider = "wordpress" | "instagram" | "email" | "youtube";
 export type ConnectionStatus = "CONNECTED" | "EXPIRED" | "ERROR" | "DISCONNECTED";
 export type BillingCheckoutStatus = "PENDING" | "PROCESSING" | "SUCCEEDED" | "FAILED" | "CANCELED";
+export type BillingOrderStatus = "PENDING" | "PAID" | "CANCELED" | "REFUNDED";
+export type CreditKind = "BLOG" | "SHORTS";
+export type CreditLedgerEvent = "GRANT" | "RESERVE" | "SETTLE" | "RELEASE" | "EXPIRE" | "REFUND";
 export type SubscriberStatus = "ACTIVE" | "UNSUBSCRIBED";
 export type CalendarPlatform = "blog" | "instagram_reels" | "youtube_shorts";
 export type CalendarItemStatus = "PLANNED" | "GENERATED" | "PUBLISHED" | "SKIPPED";
@@ -269,7 +272,7 @@ export interface Database {
         Row: {
           id: string;
           user_id: string;
-          plan: Exclude<SubscriptionPlan, "FREE">;
+          product_id: string;
           provider: "mock" | "toss";
           status: BillingCheckoutStatus;
           customer_key: string;
@@ -286,7 +289,7 @@ export interface Database {
         Insert: {
           id?: string;
           user_id: string;
-          plan: Exclude<SubscriptionPlan, "FREE">;
+          product_id: string;
           provider: "mock" | "toss";
           status?: BillingCheckoutStatus;
           customer_key: string;
@@ -301,6 +304,100 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["billing_checkout_sessions"]["Insert"]>;
+        Relationships: [];
+      };
+      billing_orders: {
+        Row: {
+          id: string;
+          user_id: string;
+          product_id: string;
+          kind: CreditKind;
+          credit_amount: number;
+          price_krw: number;
+          validity_days: number;
+          status: BillingOrderStatus;
+          provider: "mock" | "toss" | "legacy";
+          checkout_session_id: string | null;
+          provider_order_id: string | null;
+          paid_at: string | null;
+          refunded_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          product_id: string;
+          kind: CreditKind;
+          credit_amount: number;
+          price_krw: number;
+          validity_days: number;
+          status?: BillingOrderStatus;
+          provider: "mock" | "toss" | "legacy";
+          checkout_session_id?: string | null;
+          provider_order_id?: string | null;
+          paid_at?: string | null;
+          refunded_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["billing_orders"]["Insert"]>;
+        Relationships: [];
+      };
+      credit_grants: {
+        Row: {
+          id: string;
+          user_id: string;
+          kind: CreditKind;
+          amount: number;
+          remaining: number;
+          expires_at: string;
+          order_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          kind: CreditKind;
+          amount: number;
+          remaining: number;
+          expires_at: string;
+          order_id?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["credit_grants"]["Insert"]>;
+        Relationships: [];
+      };
+      credit_ledger: {
+        Row: {
+          id: string;
+          user_id: string;
+          grant_id: string | null;
+          kind: CreditKind;
+          event_type: CreditLedgerEvent;
+          delta: number;
+          balance_after: number | null;
+          reservation_id: string | null;
+          reference_id: string | null;
+          metadata: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          grant_id?: string | null;
+          kind: CreditKind;
+          event_type: CreditLedgerEvent;
+          delta: number;
+          balance_after?: number | null;
+          reservation_id?: string | null;
+          reference_id?: string | null;
+          metadata?: Json;
+          created_at?: string;
+        };
+        Update: never;
         Relationships: [];
       };
       usage: {
@@ -718,6 +815,37 @@ export interface Database {
       increment_usage: {
         Args: { p_user_id: string; p_period: string; p_runs: number; p_generations: number };
         Returns: void;
+      };
+      grant_credit: {
+        Args: {
+          p_user_id: string;
+          p_kind: CreditKind;
+          p_amount: number;
+          p_expires_at: string;
+          p_order_id?: string | null;
+          p_reference_id?: string | null;
+        };
+        Returns: string;
+      };
+      reserve_credit: {
+        Args: { p_user_id: string; p_kind: CreditKind; p_amount?: number; p_reference_id?: string | null };
+        Returns: string;
+      };
+      settle_credit: {
+        Args: { p_reservation_id: string; p_reference_id?: string | null };
+        Returns: void;
+      };
+      release_credit: {
+        Args: { p_reservation_id: string; p_reason?: string | null };
+        Returns: void;
+      };
+      expire_credits: {
+        Args: { p_now?: string };
+        Returns: number;
+      };
+      refund_order_credits: {
+        Args: { p_order_id: string; p_reason?: string | null };
+        Returns: number;
       };
     };
   };

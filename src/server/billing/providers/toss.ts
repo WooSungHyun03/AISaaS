@@ -19,6 +19,7 @@ import {
   claimCheckoutSession,
   createCheckoutSession,
   getCheckoutSession,
+  getLegacyPlanFromCheckout,
   getLatestSuccessfulCheckout,
   markCheckoutFailed,
   markCheckoutSucceeded,
@@ -63,7 +64,8 @@ export class TossBillingProvider implements BillingProvider {
     }
 
     const session = await claimCheckoutSession(sessionId, userId, "toss");
-    if (session.status === "SUCCEEDED") return { plan: session.plan, provider: "toss" };
+    const planId = getLegacyPlanFromCheckout(session);
+    if (session.status === "SUCCEEDED") return { plan: planId, provider: "toss" };
 
     try {
       const { secretKey } = getTestKeys();
@@ -78,7 +80,7 @@ export class TossBillingProvider implements BillingProvider {
         await saveBillingKey(session.id, billingKey);
       }
 
-      const plan = getPlanConfig(session.plan);
+      const plan = getPlanConfig(planId);
       const payment = await api.chargeBillingKey({
         billingKey,
         customerKey: session.customer_key,
@@ -92,10 +94,10 @@ export class TossBillingProvider implements BillingProvider {
         throw new BillingCheckoutError("PAYMENT_VERIFICATION_FAILED", "결제 승인 결과를 확인할 수 없습니다.");
       }
 
-      await activateSubscription(userId, session.plan, "toss", session.id);
+      await activateSubscription(userId, planId, "toss", session.id);
       await markCheckoutSucceeded(session.id, payment.paymentKey);
-      logger.info("toss_subscription_activated", { userId, plan: session.plan, sessionId });
-      return { plan: session.plan, provider: "toss" };
+      logger.info("toss_subscription_activated", { userId, plan: planId, sessionId });
+      return { plan: planId, provider: "toss" };
     } catch (error) {
       const details = errorDetails(error);
       await markCheckoutFailed(session.id, details.code, details.message);

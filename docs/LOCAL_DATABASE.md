@@ -96,3 +96,13 @@ DEV_DB_PORT_OFFSET=2000 bash scripts/dev-db.sh
 
 Supabase CLI는 `start` 시 migration 적용 후 seed를 실행합니다. 자세한 동작은 [공식 로컬 개발 문서](https://supabase.com/docs/guides/local-development)와 [공식 seeding 문서](https://supabase.com/docs/guides/local-development/seeding-your-database)를 참고하세요.
 
+## 크레딧 원장 DB 검증
+
+로컬 Supabase가 실행 중이고 최신 migration이 적용된 상태에서 다음 명령을 실행합니다.
+
+```bash
+npm run test:credits-db
+```
+
+이 테스트는 임시 사용자를 만든 뒤 5크레딧에 20개 예약 요청을 동시에 보내 정확히 5개만 성공하는지 확인합니다. 일반 사용자 RPC 거부, 예약 확정·반환, 만료, 미사용 주문 환불, 원장 UPDATE 차단까지 실제 DB에서 검증하고 임시 사용자를 삭제합니다.
+

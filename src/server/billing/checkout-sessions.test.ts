@@ -10,6 +10,7 @@ const {
   claimCheckoutSession,
   createCheckoutSession,
   getCheckoutSession,
+  getLegacyPlanFromCheckout,
   getLatestSuccessfulCheckout,
   markCheckoutCanceled,
   markCheckoutFailed,
@@ -41,7 +42,7 @@ function makeBuilder(result: { data: unknown; error: unknown }) {
 const SESSION_ROW = {
   id: "session-1",
   user_id: "user-1",
-  plan: "STARTER" as const,
+  product_id: "STARTER",
   provider: "toss" as const,
   status: "PENDING" as const,
   customer_key: "cus_abc",
@@ -70,7 +71,7 @@ describe("createCheckoutSession", () => {
     expect(fromMock).toHaveBeenCalledWith("billing_checkout_sessions");
     const payload = (inserted.insert as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(payload.user_id).toBe("user-1");
-    expect(payload.plan).toBe("STARTER");
+    expect(payload.product_id).toBe("STARTER");
     expect(payload.provider).toBe("toss");
     expect(payload.customer_key).toMatch(/^cus_/);
     expect(payload.order_id).toMatch(/^order_[0-9a-f]+$/);
@@ -100,6 +101,16 @@ describe("getCheckoutSession", () => {
     const error = await getCheckoutSession("missing", "user-1").catch((caught) => caught);
     expect(error).toBeInstanceOf(BillingCheckoutError);
     expect((error as InstanceType<typeof BillingCheckoutError>).code).toBe("CHECKOUT_NOT_FOUND");
+  });
+});
+
+describe("getLegacyPlanFromCheckout", () => {
+  it("keeps STARTER/PRO checkout sessions compatible with the legacy subscription flow", () => {
+    expect(getLegacyPlanFromCheckout(SESSION_ROW)).toBe("STARTER");
+  });
+
+  it("does not accidentally activate a subscription for a one-time credit product", () => {
+    expect(() => getLegacyPlanFromCheckout({ ...SESSION_ROW, product_id: "BLOG_5" })).toThrow(/구독 상품/);
   });
 });
 
