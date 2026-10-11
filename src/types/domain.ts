@@ -14,6 +14,9 @@ export type ContentHistory = Database["public"]["Tables"]["content_history"]["Ro
 export type CalendarItem = Database["public"]["Tables"]["calendar_items"]["Row"];
 export type Subscription = Database["public"]["Tables"]["subscriptions"]["Row"];
 export type BillingCheckoutSession = Database["public"]["Tables"]["billing_checkout_sessions"]["Row"];
+export type BillingOrder = Database["public"]["Tables"]["billing_orders"]["Row"];
+export type CreditGrant = Database["public"]["Tables"]["credit_grants"]["Row"];
+export type CreditLedgerEntry = Database["public"]["Tables"]["credit_ledger"]["Row"];
 export type Usage = Database["public"]["Tables"]["usage"]["Row"];
 export type SetupRequest = Database["public"]["Tables"]["setup_requests"]["Row"];
 export type DirectoryTool = Database["public"]["Tables"]["directory_tools"]["Row"];
@@ -55,6 +58,9 @@ export type {
   AutomationRunSource,
   SubscriptionPlan,
   SubscriptionStatus,
+  BillingOrderStatus,
+  CreditKind,
+  CreditLedgerEvent,
   SetupRequestStatus,
   SetupRequestContactMethod,
   IntegrationProvider,

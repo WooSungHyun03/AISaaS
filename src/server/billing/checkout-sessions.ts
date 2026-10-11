@@ -2,8 +2,10 @@ import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { BillingCheckoutSession, SubscriptionPlan } from "@/types/domain";
+import type { ProductId } from "./products";
 
 export type PaidPlan = Exclude<SubscriptionPlan, "FREE">;
+export type CheckoutProductId = PaidPlan | ProductId;
 export type BillingProviderName = "mock" | "toss";
 
 export class BillingCheckoutError extends Error {
@@ -18,7 +20,7 @@ export class BillingCheckoutError extends Error {
 
 export async function createCheckoutSession(
   userId: string,
-  plan: PaidPlan,
+  productId: CheckoutProductId,
   provider: BillingProviderName,
 ): Promise<BillingCheckoutSession> {
   const admin = createAdminClient();
@@ -27,7 +29,7 @@ export async function createCheckoutSession(
     .from("billing_checkout_sessions")
     .insert({
       user_id: userId,
-      plan,
+      product_id: productId,
       provider,
       customer_key: `cus_${randomId}`,
       order_id: `order_${randomId.replaceAll("-", "")}`,
@@ -37,6 +39,12 @@ export async function createCheckoutSession(
 
   if (error) throw error;
   return data;
+}
+
+/** Legacy subscription checkout guard while product checkout is introduced. */
+export function getLegacyPlanFromCheckout(session: BillingCheckoutSession): PaidPlan {
+  if (session.product_id === "STARTER" || session.product_id === "PRO") return session.product_id;
+  throw new BillingCheckoutError("NOT_A_SUBSCRIPTION_PRODUCT", "구독 상품 결제 요청이 아닙니다.");
 }
 
 export async function getCheckoutSession(sessionId: string, userId: string): Promise<BillingCheckoutSession> {

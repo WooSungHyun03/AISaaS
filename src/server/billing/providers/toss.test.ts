@@ -23,6 +23,7 @@ const {
   activateSubscriptionMock,
   cancelStoredSubscriptionMock,
   getLatestSuccessfulCheckoutMock,
+  getLegacyPlanFromCheckoutMock,
 } = vi.hoisted(() => ({
   createCheckoutSessionMock: vi.fn(),
   getCheckoutSessionMock: vi.fn(),
@@ -33,6 +34,7 @@ const {
   activateSubscriptionMock: vi.fn(),
   cancelStoredSubscriptionMock: vi.fn(),
   getLatestSuccessfulCheckoutMock: vi.fn(),
+  getLegacyPlanFromCheckoutMock: vi.fn((session: { product_id: string }) => session.product_id),
 }));
 
 vi.mock("../checkout-sessions", async () => {
@@ -48,6 +50,7 @@ vi.mock("../checkout-sessions", async () => {
     activateSubscription: activateSubscriptionMock,
     cancelStoredSubscription: cancelStoredSubscriptionMock,
     getLatestSuccessfulCheckout: getLatestSuccessfulCheckoutMock,
+    getLegacyPlanFromCheckout: getLegacyPlanFromCheckoutMock,
   };
 });
 
@@ -72,7 +75,7 @@ const { TossBillingProvider } = await import("./toss");
 const SESSION_ROW = {
   id: "session-1",
   user_id: "user-1",
-  plan: "STARTER" as const,
+  product_id: "STARTER",
   provider: "toss" as const,
   status: "PROCESSING" as const,
   customer_key: "cus_abc",
