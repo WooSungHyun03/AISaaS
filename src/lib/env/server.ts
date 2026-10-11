@@ -59,6 +59,10 @@ const serverSchema = z.object({
   ANIMATION_PROVIDER: z.enum(["mock", "fal"]).default("mock"),
   FAL_KEY: z.string().optional(),
   ANIMATION_MODEL: z.string().min(1).optional(),
+  // Stronger (pricier) image-to-video endpoint used for plans whose animation quality is "premium".
+  ANIMATION_MODEL_PREMIUM: z.string().min(1).optional(),
+  // Instrumental background-music endpoint (default fal-ai/lyria2, about US$0.10 per 30 s track).
+  MUSIC_MODEL: z.string().min(1).optional(),
 
   // Which backend collects channel diagnosis/growth metrics (src/server/channels).
   // "mock" must never run in production — see instrumentation.ts, which

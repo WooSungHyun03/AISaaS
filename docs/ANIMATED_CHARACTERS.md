@@ -2,7 +2,7 @@
 
 Shorts are built from the owner's **reference images** (up to 8; the 이지 마케팅 mascot with one click, or uploads). The AI looks at what each image shows and makes the matching video — see `docs/AD_SHORTS.md` for the format rules and research. This file covers the shared pipeline: setup, cost and how a run works.
 
-- **character** images are really animated (one 5 s clip per spoken line), voiced by TTS, with a speech bubble.
+- **character** images are really animated (one 5 s clip per spoken line), voiced by TTS, (no captions or bubbles) and a generated background track.
 - **product / place** photos become a promo; at most four scenes are animated, the rest are panned/zoomed photos.
 - Without a reference image the studio does not generate or schedule anything (`NEEDS_CHARACTER` in `src/app/(app)/shorts/actions.ts`, backed by an error in the handler).
 
@@ -18,6 +18,8 @@ Two paid services, both selected by environment variables (Vercel → Settings �
 | `ANIMATION_PROVIDER` | `fal` |
 | `FAL_KEY` | fal.ai API key (https://fal.ai → add prepaid credit → Keys) |
 | `ANIMATION_MODEL` | *(optional)* another fal image-to-video endpoint id; default `fal-ai/kling-video/v2.5-turbo/pro/image-to-video` |
+| `ANIMATION_MODEL_PREMIUM` | *(optional)* endpoint for plans with premium animation (Pro); default `fal-ai/kling-video/v3/pro/image-to-video` |
+| `MUSIC_MODEL` | *(optional)* background-music endpoint; default `fal-ai/lyria2` |
 
 No JSON2Video template is needed any more: the movie is built in code (`json2video-skit.ts`) and posted to `POST /v2/movies`. `NEXT_PUBLIC_SITE_URL` must be the public HTTPS site URL, because the mascot images are fetched from `/shorts-mascot/*.png`. Then redeploy and run `node --env-file=.env.local scripts/check-providers.mjs`.
 
@@ -25,7 +27,7 @@ Without `ANIMATION_PROVIDER=fal` (or without the key) character videos still wor
 
 ## Cost and limits
 
-- Kling 2.5 Turbo Pro on fal.ai: US$0.35 per 5 s clip (verify at https://fal.ai/models). A video has 4–6 scenes → roughly **US$1.4–2.1**, plus the JSON2Video render (≈ 25 credits).
+- Kling 2.5 Turbo Pro on fal.ai: US$0.35 per 5 s clip; Kling 3.0 Pro about US$0.56 (verify at https://fal.ai/models); a music track about US$0.10. A video has 4–6 scenes → roughly **US$1.4–2.1**, plus the JSON2Video render (≈ 25 credits).
 - A promo animates at most 4 scenes (≈ US$1.4); a character video has 4–6 clips. Plans cap animated videos per month (`monthlyAnimatedShortsLimit` in `src/server/billing/plans.ts`: Free 0, Starter 2, Pro 6). Past the cap the video is still made, with the simple motion effect and a note. Change the numbers there only.
 - Clips are a fixed 5 s (the shortest length these models bill); each spoken line is ≤ 28 characters so one clip covers it, and the clip is cut to / looped over the voice.
 - Only the images the owner marked as characters are sent to the animation model. fal retries server failures itself; the app retries a failed clip once with a fresh request, then fails the run.

@@ -144,7 +144,7 @@ export function ShortsStudio({
 
   return (
     <div className="space-y-8">
-      {hasInFlightRun ? <FormMessage variant="info">{progress ? `${progress}. ` : ""}영상 생성 또는 게시가 진행 중이에요. 움직이는 캐릭터 영상은 몇 분 걸릴 수 있고, 이 화면을 닫아도 계속 만들어져요.</FormMessage> : null}
+      {hasInFlightRun ? <FormMessage variant="info">{progress ? `${progress}. ` : ""}영상 생성 또는 게시가 진행 중이에요. 움직이는 영상은 몇 분 걸릴 수 있고, 이 화면을 닫아도 계속 만들어져요.</FormMessage> : null}
       {automationStatus === "ERROR" ? <FormMessage>최근 실행 오류로 예약이 멈췄어요. 연결을 확인한 뒤 아래 예약 설정을 다시 저장해주세요.</FormMessage> : null}
 
       <section aria-labelledby="preview-heading" className="grid gap-6 lg:grid-cols-[minmax(280px,380px)_1fr]">

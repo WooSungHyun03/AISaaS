@@ -15,13 +15,14 @@ import {
 import { isNearDuplicateTopic } from "@/server/ai/similarity";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { publishShortsToPlatforms } from "@/server/automations/shorts-publishing";
-import { getAnimationProvider, isAnimationAvailable, type AnimationClipHandle } from "@/server/connectors/animation";
+import { getAnimationProvider, isAnimationAvailable, type AnimationClipHandle, type AnimationQuality } from "@/server/connectors/animation";
 import { animationClipHandleSchema } from "@/server/connectors/animation/types";
 import {
   buildCharacterMovie,
   buildPromoMovie,
   getMovieRenderStatus,
   startMovieRender,
+  withBackgroundMusic,
   type PromoEndCard,
   type PromoRenderScene,
   type VideoRenderScene,
@@ -149,7 +150,6 @@ const plannedSceneSchema = z.object({
   motion: z.string().optional(),
   action: z.string().optional(),
   // promo format
-  caption: z.string().optional(),
   camera: z.string().optional(),
   animate: z.boolean().optional(),
   motionPrompt: z.string().optional(),
@@ -168,6 +168,13 @@ const clipStateSchema = z.object({
 });
 type ClipState = z.infer<typeof clipStateSchema>;
 
+const musicStateSchema = z.object({
+  handle: animationClipHandleSchema,
+  status: z.enum(["pending", "done", "failed"]),
+  audioUrl: z.string().optional(),
+});
+type MusicState = z.infer<typeof musicStateSchema>;
+
 const jobStateSchema = z.object({
   v: z.literal(1),
   stage: z.enum(["ANIMATING", "COMPOSING"]),
@@ -182,6 +189,10 @@ const jobStateSchema = z.object({
   platforms: z.array(z.enum(["instagram", "youtube"])),
   clips: z.array(clipStateSchema),
   framePaths: z.array(z.string()),
+  /** Background track queued next to the clips; the movie waits for it, but a failed track is simply left out. */
+  music: musicStateSchema.optional(),
+  /** Model tier the plan paid for; reused when a clip is retried. */
+  quality: z.enum(["standard", "premium"]).default("standard"),
   projectId: z.string().optional(),
   startedAt: z.string(),
 });
@@ -207,14 +218,13 @@ function contentForOutput(plan: { hook: string; caption: string; privacy: "priva
   return {
     hook: plan.hook,
     script: scenes.map((scene) => scene.text).join(" "),
-    scenes: scenes.map(({ text, visualPrompt, durationSec, speaker, motion, action, caption, camera, referenceIndex }) => ({
+    scenes: scenes.map(({ text, visualPrompt, durationSec, speaker, motion, action, camera, referenceIndex }) => ({
       text,
       visualPrompt,
       durationSec,
       ...(speaker ? { speaker } : {}),
       ...(motion ? { motion } : {}),
       ...(action ? { action } : {}),
-      ...(caption ? { caption } : {}),
       ...(camera ? { camera } : {}),
       imageIndex: referenceIndex + 1,
     })),
@@ -256,20 +266,31 @@ async function checkAnimation(
   admin: ReturnType<typeof createAdminClient>,
   ctx: AutomationRunContext,
   format: "character" | "promo",
-): Promise<{ animate: boolean; note?: string }> {
+): Promise<{ animate: boolean; note?: string; quality: AnimationQuality }> {
   const fallback = format === "character" ? "기본 움직임 효과" : "사진을 천천히 움직이는 기본 효과";
-  if (!isAnimationAvailable()) return { animate: false, note: `움직이는 영상 서비스가 아직 연결되지 않아 ${fallback}로 만들었어요.` };
+  if (!isAnimationAvailable()) return { animate: false, quality: "standard", note: `움직이는 영상 서비스가 아직 연결되지 않아 ${fallback}로 만들었어요.` };
   const entitlement = await canUseAnimatedShorts(admin, ctx.automation.user_id);
+  const quality = entitlement.animationQuality ?? "standard";
   if (!entitlement.allowed) {
-    return { animate: false, note: `${entitlement.reason ?? "움직이는 영상 한도를 모두 썼어요."} ${fallback}로 만들었어요.` };
+    return { animate: false, quality, note: `${entitlement.reason ?? "움직이는 영상 한도를 모두 썼어요."} ${fallback}로 만들었어요.` };
   }
-  return { animate: true };
+  return { animate: true, quality };
+}
+
+/** Queues the background track. Music is a nice-to-have: any failure here just means a video without it. */
+async function startMusic(direction: string): Promise<MusicState | undefined> {
+  if (!isAnimationAvailable()) return undefined;
+  try {
+    return { handle: await getAnimationProvider().startMusic({ prompt: direction }), status: "pending" };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * Reference-image Shorts. The AI looks at what the owner's images show and plans the matching kind of ad
  * (a character acts it out, or the product / place photos are advertised), then clips are generated where
- * motion helps and JSON2Video assembles voice, captions and clips. Clips and the render take minutes, which
+ * motion helps and JSON2Video assembles voice, music and clips. Clips and the render take minutes, which
  * no single request can wait for, so the run is deferred and advanced in short steps (see runner.ts).
  */
 async function startReferenceRun(ctx: AutomationRunContext, rawSettings: ShortsReferenceSettings): Promise<AutomationHandlerOutcome> {
@@ -293,14 +314,16 @@ async function startReferenceRun(ctx: AutomationRunContext, rawSettings: ShortsR
 
   const previewOnly = Boolean(ctx.shorts?.previewOnly);
   const platforms = previewOnly ? [] : scheduledPlatforms(ctx.config);
-  const base = { v: 1 as const, topic, previewOnly, platforms, startedAt: new Date().toISOString() };
+  // The background track is queued right away so it is ready by the time the clips are.
+  const music = await startMusic(plan.music);
+  const base: RunBase = { v: 1, topic, previewOnly, platforms, startedAt: new Date().toISOString(), music };
   const groups = referenceIndexes(settings.references);
 
   if (plan.format === "promo") return startPromoRun(ctx, admin, settings, owner, plan, groups.photo, base);
   return startCharacterRun(ctx, admin, settings, owner, plan, groups.character, base);
 }
 
-type RunBase = { v: 1; topic: string; previewOnly: boolean; platforms: ShortsPublishPlatform[]; startedAt: string };
+type RunBase = { v: 1; topic: string; previewOnly: boolean; platforms: ShortsPublishPlatform[]; startedAt: string; music?: MusicState };
 
 async function startCharacterRun(
   ctx: AutomationRunContext,
@@ -321,21 +344,14 @@ async function startCharacterRun(
     referenceIndex: clampReferenceIndex(scene.imageIndex, characterIndexes),
   }));
   const content = contentForOutput(plan, scenes);
-  const { animate, note: animationNote } = await checkAnimation(admin, ctx, "character");
+  const { animate, note: animationNote, quality } = await checkAnimation(admin, ctx, "character");
 
   if (!animate) {
-    const urls = await resolveReferenceImageUrls(admin, settings.references, owner);
-    const renderScenes: VideoRenderScene[] = scenes.map((scene) => ({
-      text: scene.text,
-      visualPrompt: scene.visualPrompt,
-      durationSec: scene.durationSec,
-      speaker: scene.speaker,
-      motion: scene.motion as VideoRenderScene["motion"],
-      imageUrl: urls[scene.referenceIndex],
-    }));
-    const projectId = await startMovieRender(buildCharacterMovie(renderScenes));
-    const state: JobState = { ...base, stage: "COMPOSING", format: "character", animationMode: "tween", animationNote, content, scenes, clips: [], framePaths: [], projectId };
-    return deferred(state, "영상을 만드는 중이에요");
+    const waiting: JobState = { ...base, stage: "ANIMATING", format: "character", animationMode: "tween", animationNote, quality, content, scenes, clips: [], framePaths: [] };
+    // With a track on the way, wait for it first; otherwise render right away.
+    if (base.music) return deferred(waiting, "배경음악을 만드는 중이에요");
+    const projectId = await startMovieRender(await characterTweenMovie(admin, ctx, scenes));
+    return deferred({ ...waiting, stage: "COMPOSING", projectId }, "영상을 만드는 중이에요");
   }
 
   // Really animate: one 9:16 frame and one clip per scene.
@@ -348,10 +364,10 @@ async function startCharacterRun(
     const framePath = `${owner.userId}/${owner.automationId}/frames/${ctx.runId}-${sceneIndex}.png`;
     await uploadReferenceImage(admin, framePath, frame, "png");
     framePaths.push(framePath);
-    const handle = await provider.startClip({ imageUrl: await signStoragePath(admin, framePath), prompt: clipPrompt(scene.action ?? "", "character") });
+    const handle = await provider.startClip({ imageUrl: await signStoragePath(admin, framePath), prompt: clipPrompt(scene.action ?? "", "character") }, { quality });
     clips.push({ sceneIndex, handle, status: "pending", attempts: 1, framePath });
   }
-  const state: JobState = { ...base, stage: "ANIMATING", format: "character", animationMode: "video", content, scenes, clips, framePaths };
+  const state: JobState = { ...base, stage: "ANIMATING", format: "character", animationMode: "video", quality, content, scenes, clips, framePaths };
   return deferred(state, `캐릭터를 움직이는 중이에요 (0/${clips.length})`);
 }
 
@@ -365,7 +381,9 @@ async function startPromoRun(
   base: RunBase,
 ): Promise<AutomationHandlerOutcome> {
   const wantsAnimation = plan.scenes.some((scene) => scene.animate);
-  const { animate, note } = wantsAnimation ? await checkAnimation(admin, ctx, "promo") : { animate: false, note: undefined };
+  const { animate, note, quality } = wantsAnimation
+    ? await checkAnimation(admin, ctx, "promo")
+    : { animate: false, note: undefined, quality: "standard" as AnimationQuality };
 
   // People are never animated: their photo is only framed and panned.
   const scenes: PlannedScene[] = plan.scenes.map((scene) => {
@@ -375,7 +393,6 @@ async function startPromoRun(
       text: scene.text,
       visualPrompt: scene.visualPrompt,
       durationSec: scene.durationSec,
-      caption: scene.caption,
       camera: scene.camera,
       animate: animate && scene.animate && !isPerson,
       motionPrompt: scene.motionPrompt,
@@ -401,18 +418,35 @@ async function startPromoRun(
     framePaths.push(framePath);
     scene.framePath = framePath;
     if (scene.animate) {
-      const handle = await provider.startClip({ imageUrl: await signStoragePath(admin, framePath), prompt: clipPrompt(scene.motionPrompt ?? "", "promo") });
+      const handle = await provider.startClip({ imageUrl: await signStoragePath(admin, framePath), prompt: clipPrompt(scene.motionPrompt ?? "", "promo") }, { quality });
       clips.push({ sceneIndex, handle, status: "pending", attempts: 1, framePath });
     }
   }
 
   if (clips.length === 0) {
+    const waiting: JobState = { ...base, stage: "ANIMATING", format: "promo", animationMode: "photos", animationNote: note, quality, content, scenes, clips: [], framePaths };
+    if (base.music) return deferred(waiting, "배경음악을 만드는 중이에요");
     const projectId = await startMovieRender(await promoMovie(admin, ctx, scenes, []));
-    const state: JobState = { ...base, stage: "COMPOSING", format: "promo", animationMode: "photos", animationNote: note, content, scenes, clips: [], framePaths, projectId };
-    return deferred(state, "사진으로 영상을 만드는 중이에요");
+    return deferred({ ...waiting, stage: "COMPOSING", projectId }, "사진으로 영상을 만드는 중이에요");
   }
-  const state: JobState = { ...base, stage: "ANIMATING", format: "promo", animationMode: "video", content, scenes, clips, framePaths };
+  const state: JobState = { ...base, stage: "ANIMATING", format: "promo", animationMode: "video", quality, content, scenes, clips, framePaths };
   return deferred(state, `사진을 움직이는 중이에요 (0/${clips.length})`);
+}
+
+/** The character video without animation: the reference image moved by JSON2Video. */
+async function characterTweenMovie(admin: ReturnType<typeof createAdminClient>, ctx: AutomationRunContext, scenes: PlannedScene[]): Promise<Record<string, unknown>> {
+  const settings = parseShortsReferenceSettings(ctx.config);
+  const owner = { userId: ctx.automation.user_id, automationId: ctx.automation.id };
+  const urls = await resolveReferenceImageUrls(admin, settings.references, owner);
+  const renderScenes: VideoRenderScene[] = scenes.map((scene) => ({
+    text: scene.text,
+    visualPrompt: scene.visualPrompt,
+    durationSec: scene.durationSec,
+    speaker: scene.speaker,
+    motion: scene.motion as VideoRenderScene["motion"],
+    imageUrl: urls[scene.referenceIndex],
+  }));
+  return buildCharacterMovie(renderScenes);
 }
 
 async function promoMovie(
@@ -426,7 +460,6 @@ async function promoMovie(
     const clipUrl = clips.find((clip) => clip.sceneIndex === index)?.videoUrl;
     renderScenes.push({
       text: scene.text,
-      caption: scene.caption,
       camera: scene.camera as PromoRenderScene["camera"],
       ...(clipUrl ? { videoUrl: clipUrl } : { imageUrl: await signStoragePath(admin, scene.framePath ?? "") }),
     });
@@ -460,19 +493,39 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
         clip.handle = await provider.startClip({
           imageUrl: await signStoragePath(admin, clip.framePath),
           prompt: clipPrompt(state.format === "character" ? scene?.action ?? "" : scene?.motionPrompt ?? "", state.format),
-        });
+        }, { quality: state.quality });
         clip.attempts += 1;
       }
     }
+
+    // The background track: a failed or missing one simply means the video is made without music.
+    let music = state.music ? { ...state.music } : undefined;
+    if (music?.status === "pending") {
+      try {
+        const musicStatus = await provider.getMusic(music.handle as AnimationClipHandle);
+        if (musicStatus.state === "done") {
+          music.status = "done";
+          music.audioUrl = musicStatus.audioUrl;
+        } else if (musicStatus.state === "failed") {
+          music = { ...music, status: "failed" };
+        }
+      } catch {
+        music = { ...music, status: "failed" };
+      }
+    }
+
     const done = clips.filter((clip) => clip.status === "done").length;
     const noun = state.format === "character" ? "캐릭터를" : "사진을";
     if (done < clips.length) {
-      return deferred({ ...state, clips }, `${noun} 움직이는 중이에요 (${done}/${clips.length})`);
+      return deferred({ ...state, clips, music }, `${noun} 움직이는 중이에요 (${done}/${clips.length})`);
     }
+    if (music?.status === "pending") return deferred({ ...state, clips, music }, "배경음악을 만드는 중이에요");
 
     let movie: Record<string, unknown>;
     if (state.format === "promo") {
       movie = await promoMovie(admin, ctx, state.scenes, clips);
+    } else if (state.animationMode === "tween") {
+      movie = await characterTweenMovie(admin, ctx, state.scenes);
     } else {
       const renderScenes: VideoRenderScene[] = state.scenes.map((scene, index) => ({
         text: scene.text,
@@ -484,8 +537,9 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
       }));
       movie = buildCharacterMovie(renderScenes);
     }
+    if (music?.status === "done" && music.audioUrl) movie = withBackgroundMusic(movie, music.audioUrl);
     const projectId = await startMovieRender(movie);
-    return deferred({ ...state, stage: "COMPOSING", clips, projectId }, "영상을 합치는 중이에요");
+    return deferred({ ...state, stage: "COMPOSING", clips, music, projectId }, "영상을 합치는 중이에요");
   }
 
   // COMPOSING

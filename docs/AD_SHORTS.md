@@ -14,14 +14,22 @@ The owner adds up to 8 images and, optionally, writes what they want. The AI **l
 1. **Look at each image** (`server/shorts/reference-analysis.ts`, Claude vision, once when it is added): `character` (illustration/mascot/animal), `product` (item, dish, drink), `place` (shop, interior, office), `person` (owner/staff/customer) or `other`, plus a one-sentence summary and any readable text. The owner sees the result under each thumbnail and can correct it. Without vision (another AI provider) an image is `other` with the owner's label.
 2. **Pick the format** (`allowedShortsFormats` + the AI, from the owner's request): style *자동* lets the AI choose; *캐릭터 콩트 / 캐릭터 설명* need a character; *상품·매장 홍보* uses the photos.
    - **character:** a funny skit or explainer where the character really moves (one 5 s clip per line, two voices) — see `ANIMATED_CHARACTERS.md`.
-   - **promo:** 4–7 scenes: hook (≤ 12 characters, also on screen) → the product/place at its best → 2–3 highlights taken only from what is visible, the profile and the request → proof only if given → closing card with the business name, location and offering **from the profile**. One narrator voice, a punchy caption per scene, the business name in a corner.
+   - **promo:** 4–7 scenes: spoken hook (≤ 12 characters) → the product/place at its best → 2–3 highlights taken only from what is visible, the profile and the request → proof only if given → closing card with the business name, location and offering **from the profile**. One narrator voice and the business name in a corner.
+   - **No captions.** Neither format draws subtitles, speech bubbles or caption boxes (owner's decision: shorts usually have none). Only the small business-name tag and the closing card are drawn, so the voice and the picture must carry each scene.
 3. **Photos are never altered by AI.** Each photo is framed to 9:16 (`preparePhotoFrame`: portrait-ish photos are cropped to the interesting part; landscape ones are shown whole over a blurred copy). The plan marks **at most 4** scenes as *animate* where real motion helps (steam, pouring, light, a slow push-in); those frames go to the image-to-video model with a product-preserving prompt (shape, colour, packaging text and logo unchanged, no new objects, no people). The other scenes get a slow pan/zoom (`camera`). **Person photos are never animated.**
 4. **Cost control:** animated promo scenes count against the same monthly allowance as animated characters (`monthlyAnimatedShortsLimit`); past it, or without a fal key, promos still render with panned photos and say so.
 5. **No fabricated claims:** the planner may not state prices, hours, addresses, awards or statistics that were not given, nor unprovable superlatives (최고, 1등 …).
+
+## Sound and models
+
+- **Background music:** the plan picks a mood (`music`: e.g. "playful ukulele" for a skit, "warm acoustic" for a cafe); an instrumental track is generated next to the clips (fal Lyria 2, about US$0.10 per ~30 s track, `MUSIC_MODEL`) and mixed at volume 0.2 under the voice, looped to the movie length with a fade-out. A missing or failed track just means no music.
+- **Model tiers:** plans carry `animationQuality` (`src/server/billing/plans.ts`): Starter uses `ANIMATION_MODEL` (default Kling 2.5 Turbo Pro, about US$0.35 per 5 s clip), Pro uses `ANIMATION_MODEL_PREMIUM` (default Kling 3.0 Pro, about US$0.56 without audio). Each model family's input names are mapped in `connectors/animation/fal.ts`.
+- **Compare before choosing:** `npm run bakeoff:animation -- --image <https url> --prompt "…" [--models a,b] [--music "…"]` runs the same image through several models in parallel and prints time, estimated price and the video URLs (spends real fal credit; needs `FAL_KEY` in `.env.local`).
+- **Not built yet (needs the comparison first):** lip-synced talking characters (Kling 3.0 native audio — Korean support is reported inconsistently), multi-reference generation (Seedance 2.0 reference-to-video), a natural Korean voice (ElevenLabs via JSON2Video — voice IDs must be verified), restyled product backgrounds.
 
 ## Limits
 
 - Product accuracy: image-to-video can still bend small text or logos; keep clips short and review the preview before publishing.
 - Real people are shown, never animated or voiced as the person.
 - The Korean voice is TTS (Azure); lip-sync is not attempted.
-- Music and sound effects are not added yet.
+- Sound effects are not added; the Korean voice is plain TTS.

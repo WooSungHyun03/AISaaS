@@ -14,7 +14,7 @@ vi.mock("@/server/connectors/video", async (importOriginal) => ({
   getMovieRenderStatus: getMovieRenderStatusMock,
 }));
 const { animationProviderMock, isAnimationAvailableMock, canUseAnimatedShortsMock, prepareFrameMock, preparePhotoMock, analyzeMock } = vi.hoisted(() => ({
-  animationProviderMock: { name: "mock", startClip: vi.fn(), getClip: vi.fn() },
+  animationProviderMock: { name: "mock", startClip: vi.fn(), getClip: vi.fn(), startMusic: vi.fn(), getMusic: vi.fn() },
   isAnimationAvailableMock: vi.fn(),
   canUseAnimatedShortsMock: vi.fn(),
   prepareFrameMock: vi.fn(),
@@ -172,6 +172,9 @@ describe("shortsAutomationHandler", () => {
     animationProviderMock.startClip.mockImplementation(async () => handle(`clip-${++clip}`));
     animationProviderMock.getClip.mockImplementation(async (h: { requestId: string }) => ({ state: "done", videoUrl: `https://v3.fal.media/${h.requestId}.mp4` }));
     startMovieRenderMock.mockResolvedValue("project-1");
+    // No background track unless a test asks for one.
+    animationProviderMock.startMusic.mockRejectedValue(new Error("music unavailable"));
+    animationProviderMock.getMusic.mockResolvedValue({ state: "done", audioUrl: "https://v3.fal.media/music.wav" });
   });
 
   it("needs a reference image: without one it stops before any AI call", async () => {
@@ -221,7 +224,7 @@ describe("shortsAutomationHandler", () => {
     expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING", projectId: "project-1" });
     const movie = startMovieRenderMock.mock.calls[0][0] as { scenes: Array<{ elements: Array<{ type: string; src?: string }> }> };
     expect(movie.scenes).toHaveLength(5);
-    expect(movie.scenes[0].elements.map((element) => element.type)).toEqual(["voice", "video", "text"]);
+    expect(movie.scenes[0].elements.map((element) => element.type)).toEqual(["voice", "video"]); // no captions or bubbles
     expect(movie.scenes.every((scene) => scene.elements[1].src?.startsWith("https://v3.fal.media/"))).toBe(true);
   });
 
@@ -294,7 +297,7 @@ describe("shortsAutomationHandler", () => {
     expect(outcome.deferred.state).toMatchObject({ stage: "COMPOSING", animationMode: "tween" });
     expect(String(outcome.deferred.state.animationNote)).toContain("한도");
     const movie = startMovieRenderMock.mock.calls[0][0] as { scenes: Array<{ elements: Array<{ type: string; src?: string }> }> };
-    expect(movie.scenes[0].elements.map((element) => element.type)).toEqual(["voice", "image", "text"]);
+    expect(movie.scenes[0].elements.map((element) => element.type)).toEqual(["voice", "image"]);
     expect(movie.scenes[0].elements[1].src).toBe(imageUrls[1]);
   });
 
@@ -369,10 +372,10 @@ describe("shortsAutomationHandler", () => {
       format: "promo" as const,
       hook: "아직도 모르세요?",
       scenes: [
-        { text: "아직도 모르세요?", caption: "아직도 모르세요?", imageIndex: 1, camera: "push-in" as const, animate: true, motionPrompt: "Slow push-in; steam rises.", durationSec: 3, visualPrompt: "v" },
-        { text: "직접 구운 소금빵을 만나보세요", caption: "직접 구운 소금빵", imageIndex: 2, camera: "pan-left" as const, animate: false, motionPrompt: "", durationSec: 5, visualPrompt: "v" },
-        { text: "사장님이 매일 새벽에 구워요", caption: "매일 새벽에", imageIndex: 3, camera: "pull-out" as const, animate: true, motionPrompt: "Gentle pull-back.", durationSec: 5, visualPrompt: "v" },
-        { text: "오늘 바로 들러 보세요", caption: "오늘 들러 보세요", imageIndex: 9, camera: "tilt-up" as const, animate: false, motionPrompt: "", durationSec: 5, visualPrompt: "v" },
+        { text: "아직도 모르세요?", imageIndex: 1, camera: "push-in" as const, animate: true, motionPrompt: "Slow push-in; steam rises.", durationSec: 3, visualPrompt: "v" },
+        { text: "직접 구운 소금빵을 만나보세요", imageIndex: 2, camera: "pan-left" as const, animate: false, motionPrompt: "", durationSec: 5, visualPrompt: "v" },
+        { text: "사장님이 매일 새벽에 구워요", imageIndex: 3, camera: "pull-out" as const, animate: true, motionPrompt: "Gentle pull-back.", durationSec: 5, visualPrompt: "v" },
+        { text: "오늘 바로 들러 보세요", imageIndex: 9, camera: "tilt-up" as const, animate: false, motionPrompt: "", durationSec: 5, visualPrompt: "v" },
       ],
       caption: "동네 빵집 소개 #동네빵집 #소금빵 #숏폼",
       privacy: "private" as const,
@@ -496,6 +499,85 @@ describe("shortsAutomationHandler", () => {
       generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(promoPlan);
       await start({ config: promoConfig({ references: [...references, ...photos], shortsStyle: "auto" }) });
       expect((generateStructuredMock.mock.calls[1][0] as { prompt: string }).prompt).toContain("Choose \"format\" yourself");
+    });
+  });
+
+  describe("background music and model quality", () => {
+    const musicPlan = { ...plan, music: "Playful, bouncy instrumental with ukulele." };
+
+    it("queues the track the plan asks for next to the clips and mixes it under the whole movie", async () => {
+      animationProviderMock.startMusic.mockResolvedValue(handle("music-1"));
+      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
+
+      const started = await start();
+      expect(animationProviderMock.startMusic).toHaveBeenCalledWith({ prompt: "Playful, bouncy instrumental with ukulele." });
+      expect(started.deferred.state.music).toMatchObject({ status: "pending" });
+
+      const composing = await resume(started.deferred.state);
+      const movie = startMovieRenderMock.mock.calls[0][0] as { elements?: Array<{ type: string; src: string; volume: number; loop: number; duration: number }> };
+      expect(movie.elements).toEqual([expect.objectContaining({ type: "audio", src: "https://v3.fal.media/music.wav", volume: 0.2, loop: -1, duration: -2 })]);
+      expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING", music: { status: "done" } });
+    });
+
+    it("waits for a slow track before rendering, but leaves it out when it fails", async () => {
+      animationProviderMock.startMusic.mockResolvedValue(handle("music-1"));
+      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
+      const started = await start();
+
+      animationProviderMock.getMusic.mockResolvedValueOnce({ state: "pending" });
+      const waiting = await resume(started.deferred.state);
+      expect(waiting.deferred.progress).toContain("배경음악");
+      expect(startMovieRenderMock).not.toHaveBeenCalled();
+
+      animationProviderMock.getMusic.mockResolvedValueOnce({ state: "failed", message: "boom" });
+      const composing = await resume(waiting.deferred.state);
+      expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING", music: { status: "failed" } });
+      expect(startMovieRenderMock.mock.calls[0][0]).not.toHaveProperty("elements");
+    });
+
+    it("makes the video without music when the track cannot even be queued", async () => {
+      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
+      const started = await start();
+      expect(started.deferred.state.music).toBeUndefined();
+      const composing = await resume(started.deferred.state);
+      expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING" });
+      expect(startMovieRenderMock.mock.calls[0][0]).not.toHaveProperty("elements");
+    });
+
+    it("renders a fallback (no clips) video only after the track is ready", async () => {
+      isAnimationAvailableMock.mockReturnValue(false);
+      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
+      // music is only attempted when the animation provider is available, so no track here and an immediate render
+      const started = await start();
+      expect(started.deferred.state).toMatchObject({ stage: "COMPOSING", animationMode: "tween" });
+
+      isAnimationAvailableMock.mockReturnValue(true);
+      canUseAnimatedShortsMock.mockResolvedValue({ allowed: false, reason: "한도를 모두 썼어요." });
+      animationProviderMock.startMusic.mockResolvedValue(handle("music-2"));
+      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
+      startMovieRenderMock.mockClear();
+      const limited = await start();
+      expect(limited.deferred.state).toMatchObject({ stage: "ANIMATING", animationMode: "tween", music: { status: "pending" } });
+      expect(startMovieRenderMock).not.toHaveBeenCalled();
+
+      const composing = await resume(limited.deferred.state);
+      const movie = startMovieRenderMock.mock.calls[0][0] as { scenes: Array<{ elements: Array<{ type: string }> }>; elements?: unknown[] };
+      expect(movie.scenes[0].elements.map((element) => element.type)).toEqual(["voice", "image"]);
+      expect(movie.elements).toHaveLength(1);
+      expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING" });
+    });
+
+    it("uses the model quality of the plan for every clip, including a retry", async () => {
+      canUseAnimatedShortsMock.mockResolvedValue({ allowed: true, animationQuality: "premium" });
+      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(plan);
+
+      const started = await start();
+      for (const call of animationProviderMock.startClip.mock.calls) expect(call[1]).toEqual({ quality: "premium" });
+      expect(started.deferred.state).toMatchObject({ quality: "premium" });
+
+      animationProviderMock.getClip.mockResolvedValueOnce({ state: "failed", message: "x" }).mockResolvedValue({ state: "pending" });
+      await resume(started.deferred.state);
+      expect(animationProviderMock.startClip.mock.calls.at(-1)?.[1]).toEqual({ quality: "premium" });
     });
   });
 });

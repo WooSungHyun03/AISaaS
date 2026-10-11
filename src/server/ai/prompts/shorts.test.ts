@@ -61,10 +61,10 @@ const promoPlan = {
   format: "promo",
   hook: "아직도 모르세요?",
   scenes: [
-    { text: "아직도 모르세요?", caption: "아직도 모르세요?", imageIndex: 1, camera: "push-in", animate: true, motionPrompt: "Slow push-in; steam rises.", durationSec: 3 },
-    { text: "직접 구운 소금빵을 만나보세요", caption: "직접 구운 소금빵", imageIndex: 2, camera: "pan-left", animate: false, durationSec: 5 },
-    { text: "겉은 바삭 속은 촉촉해요", caption: "겉바속촉", imageIndex: 1, camera: "pull-out", animate: true, motionPrompt: "Gentle pull-back; light glints.", durationSec: 5 },
-    { text: "오늘 바로 들러 보세요", caption: "오늘 들러 보세요", imageIndex: 3, camera: "tilt-up", animate: false, durationSec: 5 },
+    { text: "아직도 모르세요?", imageIndex: 1, camera: "push-in", animate: true, motionPrompt: "Slow push-in; steam rises.", durationSec: 3 },
+    { text: "직접 구운 소금빵을 만나보세요", imageIndex: 2, camera: "pan-left", animate: false, durationSec: 5 },
+    { text: "겉은 바삭 속은 촉촉해요", imageIndex: 1, camera: "pull-out", animate: true, motionPrompt: "Gentle pull-back; light glints.", durationSec: 5 },
+    { text: "오늘 바로 들러 보세요", imageIndex: 3, camera: "tilt-up", animate: false, durationSec: 5 },
   ],
   caption: "동네 빵집 소개 #동네빵집 #소금빵 #숏폼",
   privacy: "private",
@@ -113,9 +113,7 @@ describe("makeShortsPlanSchema", () => {
     expect(both.safeParse({ ...characterPlan, caption: "해시태그 없음" }).success).toBe(false);
   });
 
-  it("limits promo narration, captions, animated scenes and requires a motion direction for them", () => {
-    const longCaption = { ...promoPlan, scenes: promoPlan.scenes.map((scene) => ({ ...scene, caption: "가".repeat(21) })) };
-    expect(both.safeParse(longCaption).success).toBe(false);
+  it("limits promo narration and animated scenes and requires a motion direction for them", () => {
     const longNarration = { ...promoPlan, scenes: promoPlan.scenes.map((scene) => ({ ...scene, text: "가".repeat(43) })) };
     expect(both.safeParse(longNarration).success).toBe(false);
     const noDirection = { ...promoPlan, scenes: promoPlan.scenes.map((scene) => (scene.animate ? { ...scene, motionPrompt: "" } : scene)) };
@@ -126,6 +124,12 @@ describe("makeShortsPlanSchema", () => {
     };
     expect(both.safeParse(fiveAnimated).success).toBe(false);
     expect(both.safeParse({ ...promoPlan, scenes: promoPlan.scenes.map((scene) => ({ ...scene, camera: "orbit" })) }).success).toBe(false);
+  });
+
+  it("carries a music direction, with a sensible default when the AI omits it", () => {
+    expect(both.parse(promoPlan).music).toContain("instrumental");
+    expect(both.parse({ ...characterPlan, music: "Playful ukulele." }).music).toBe("Playful ukulele.");
+    expect(both.safeParse({ ...promoPlan, music: "가".repeat(301) }).success).toBe(false);
   });
 
   it("is also a valid classic content shape once the script is added (publishing re-reads it)", () => {
@@ -159,6 +163,8 @@ describe("buildShortsPlanPrompt", () => {
     expect(prompt).toMatch(/push-in, pull-out, pan-left, pan-right, tilt-up, tilt-down/);
     expect(system).toContain("이지 마케팅");
     expect(system).toContain("stop the scroll");
+    expect(system).toContain("there are no captions");
+    expect(prompt).toContain('"music"');
   });
 
   it("pins the format and drops the other format's rules when only one is allowed", () => {

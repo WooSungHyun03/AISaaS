@@ -19,6 +19,8 @@ export interface PlanConfig {
    * character Shorts still render with the simple motion effect. null = unlimited.
    */
   monthlyAnimatedShortsLimit: number | null;
+  /** Which image-to-video model the plan's animated videos use: `premium` is the stronger (pricier) one. */
+  animationQuality: "standard" | "premium";
   /** Automation templates this plan is allowed to use. null = all. */
   allowedTemplateSlugs: string[] | null;
   features: string[];

@@ -71,12 +71,10 @@ export type CharacterScene = z.infer<typeof characterSceneSchema>;
 export const PROMO_CAMERAS = ["push-in", "pull-out", "pan-left", "pan-right", "tilt-up", "tilt-down"] as const;
 export type PromoCamera = (typeof PROMO_CAMERAS)[number];
 
-/** Promo format: one of the owner's photos per scene, narrated, captioned, optionally really animated. */
+/** Promo format: one of the owner's photos per scene, narrated, optionally really animated. There are no on-screen captions. */
 export const promoSceneSchema = z.object({
   /** Narration for this scene (spoken). */
   text: z.string().trim().min(1).max(42),
-  /** Punchy on-screen caption. */
-  caption: z.string().trim().min(1).max(20),
   imageIndex: z.number().int().min(1).max(MAX_SHORTS_REFERENCES),
   /** Slow camera move used when the photo is only panned/zoomed (and as direction for the animator). */
   camera: z.enum(PROMO_CAMERAS),
@@ -89,8 +87,13 @@ export const promoSceneSchema = z.object({
 });
 export type PromoScene = z.infer<typeof promoSceneSchema>;
 
+/** What to play under the voice when no music was chosen. */
+export const DEFAULT_MUSIC_PROMPT = "Warm, upbeat instrumental pop with a light beat, friendly and modern, no vocals.";
+
 const planBase = {
   hook: z.string().trim().min(1).max(80),
+  /** English direction for an instrumental background track that fits the video's mood. */
+  music: z.string().trim().min(1).max(300).default(DEFAULT_MUSIC_PROMPT),
   caption: z
     .string()
     .trim()
@@ -244,7 +247,7 @@ export function buildShortsPlanPrompt(business: Business, topic: string, options
   const system = [
     buildBusinessContext(business),
     "You are now planning a short-form AD video (TikTok / Instagram Reels / YouTube Shorts) from the owner's reference images. Each image is tagged with what it shows: [character], [product], [place], [person] or [other].",
-    "How good ad shorts work: the first 1-2 seconds stop the scroll (a question, a surprising benefit, a relatable problem, a funny line) with the hook ALSO as short on-screen text; one clear message; 15-30 seconds; every scene shows something concrete; the last scene tells the viewer exactly what to do next.",
+    "How good ad shorts work: the first 1-2 seconds stop the scroll with the SPOKEN hook (a question, a surprising benefit, a relatable problem, a funny line); there are no captions, so the voice and the picture carry everything; one clear message; 15-30 seconds; every scene shows something concrete; the last scene tells the viewer exactly what to do next.",
     ...mascotFacts,
     styleHint,
   ].join("\n");
@@ -268,7 +271,7 @@ export function buildShortsPlanPrompt(business: Business, topic: string, options
       [
         'format "promo": 4 to 7 scenes, each shows ONE photo (never a [character] image); one narrator.',
         'Structure: scene 1 = hook (at most 12 Korean characters, 1-3 s: a question, a desire or a problem the viewer feels, no invented numbers) -> show the product or place at its most appealing -> two or three concrete highlights taken ONLY from what the image descriptions, the business information and the owner\'s request say -> proof only if it was given to you -> last scene = call to action with the business name and how to visit or order (only given details).',
-        '"text" is the narration (at most 42 Korean characters per scene, 260 in total, friendly salesperson 요체), "caption" is a punchy on-screen phrase (at most 20 characters) that does not just repeat the narration.',
+        '"text" is the narration (at most 42 Korean characters per scene, 260 in total, friendly salesperson 요체); there are no on-screen captions, so every scene must be understandable from the voice and the picture.',
         `"camera" is the slow move for the photo: ${PROMO_CAMERAS.join(", ")}; vary it. "animate" is true for at most ${MAX_ANIMATED_PROMO_SCENES} scenes where real motion adds value (steam, pouring, sizzling, light glints, a slow push-in on the hero shot) and NEVER for a [person] photo; for those scenes "motionPrompt" is English: first the camera move, then one subtle ambient motion that already belongs in the photo. Never ask the animator to change, add or remove anything in the product, packaging or text.`,
         "Never state a price, discount, opening hours, address, ingredient, award or statistic that was not given to you; never use unprovable claims such as 최고, 1등, 유일, 100%.",
       ].join(" "),
@@ -291,11 +294,12 @@ export function buildShortsPlanPrompt(business: Business, topic: string, options
       "- Scene 1 is the hook: at most 12 Korean characters, durationSec 1-3, it must stop the scroll.",
       "- Order: hook -> problem or first impression -> solution or highlights -> a clear one-line call to action (last scene).",
       "- durationSec is your estimate of the spoken line (about 1 second per 5 Korean characters, minimum 1; promo scenes at least 2); durations add up to 15-32 seconds for character and 15-40 for promo.",
+      '- "music": English direction for the instrumental background track: mood, instruments, tempo that fit this video (funny skit = playful and bouncy, cozy cafe = warm acoustic, tech = clean and modern). Always instrumental, no vocals.',
       "- caption: a natural description followed by 3-6 relevant Korean hashtags.",
       'Use privacy "private" so a person can review the video before it is published.',
       "Return JSON with exactly these fields (scene fields depend on the format):",
-      '{ "format": "character", "hook": "the first line", "scenes": [{ "text": "spoken line", "speaker": "main", "imageIndex": 1, "action": "The robot waves its arm with a cheerful wink.", "motion": "pop", "durationSec": 2 }], "caption": "description and #hashtags", "privacy": "private" }',
-      '{ "format": "promo", "hook": "the first line", "scenes": [{ "text": "narration", "caption": "short caption", "imageIndex": 2, "camera": "push-in", "animate": true, "motionPrompt": "Slow push-in; steam rises gently from the cup.", "durationSec": 4 }], "caption": "description and #hashtags", "privacy": "private" }',
+      '{ "format": "character", "hook": "the first line", "scenes": [{ "text": "spoken line", "speaker": "main", "imageIndex": 1, "action": "The robot waves its arm with a cheerful wink.", "motion": "pop", "durationSec": 2 }], "music": "Playful, bouncy instrumental with ukulele and light drums.", "caption": "description and #hashtags", "privacy": "private" }',
+      '{ "format": "promo", "hook": "the first line", "scenes": [{ "text": "narration", "imageIndex": 2, "camera": "push-in", "animate": true, "motionPrompt": "Slow push-in; steam rises gently from the cup.", "durationSec": 4 }], "music": "Warm acoustic guitar with a soft beat.", "caption": "description and #hashtags", "privacy": "private" }',
     ].filter(Boolean).join("\n"),
   };
 }

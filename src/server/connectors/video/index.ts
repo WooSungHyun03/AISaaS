@@ -22,3 +22,15 @@ export async function startMovieRender(movie: Record<string, unknown>): Promise<
 export async function getMovieRenderStatus(projectId: string) {
   return getVideoRenderProvider().getMovieStatus(projectId);
 }
+
+/** Volume of the background track relative to the voice (JSON2Video has no auto-ducking; 0.2 is its recommended level under narration). */
+export const BACKGROUND_MUSIC_VOLUME = 0.2;
+
+/** Adds one instrumental track under the whole movie: looped to the movie length with a short fade-out. */
+export function withBackgroundMusic(movie: Record<string, unknown>, audioUrl: string): Record<string, unknown> {
+  const existing = Array.isArray(movie.elements) ? (movie.elements as unknown[]) : [];
+  return {
+    ...movie,
+    elements: [...existing, { type: "audio", src: audioUrl, volume: BACKGROUND_MUSIC_VOLUME, loop: -1, duration: -2, "fade-in": 0.5, "fade-out": 1.5 }],
+  };
+}

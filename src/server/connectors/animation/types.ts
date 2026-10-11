@@ -24,10 +24,31 @@ export type AnimationClipStatus =
   | { state: "done"; videoUrl: string }
   | { state: "failed"; message: string };
 
+export type AnimationQuality = "standard" | "premium";
+
+export interface AnimationClipOptions {
+  /** `premium` uses the stronger (pricier) model when one is configured. */
+  quality?: AnimationQuality;
+}
+
+export const musicRequestSchema = z.object({
+  /** English description of the background music: mood, instruments, tempo. Always instrumental. */
+  prompt: z.string().trim().min(1).max(400),
+});
+export type MusicRequest = z.infer<typeof musicRequestSchema>;
+
+export type MusicStatus =
+  | { state: "pending" }
+  | { state: "done"; audioUrl: string }
+  | { state: "failed"; message: string };
+
 export interface AnimationProvider {
   readonly name: "mock" | "fal";
   /** Queues one clip and returns immediately. */
-  startClip(request: AnimationClipRequest): Promise<AnimationClipHandle>;
+  startClip(request: AnimationClipRequest, options?: AnimationClipOptions): Promise<AnimationClipHandle>;
   /** One quick status check; never waits for the clip. */
   getClip(handle: AnimationClipHandle): Promise<AnimationClipStatus>;
+  /** Queues an instrumental background track (same queue and key as the clips). */
+  startMusic(request: MusicRequest): Promise<AnimationClipHandle>;
+  getMusic(handle: AnimationClipHandle): Promise<MusicStatus>;
 }
