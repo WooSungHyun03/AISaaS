@@ -1,5 +1,5 @@
 import type { AIProvider, GenerateTextParams, GenerateTextResult } from "../provider";
-import { mockBlogOutline, mockBlogSection } from "./mock-blog";
+import { mockBlogGuide, mockBlogOutline, mockBlogSection } from "./mock-blog";
 
 /**
  * Deterministic, no-network provider used for local development, CI, and
@@ -42,6 +42,25 @@ export class MockAIProvider implements AIProvider {
               ? "product"
               : "other";
       return { text: JSON.stringify({ subject, summary: label || "상품이 보이는 사진", visibleText: [] }) };
+    }
+
+    if (prompt.includes("AUTOBIZ_SHORTS_PUBLISHING_V1")) {
+      const topic = prompt.match(/^Topic: (.+)$/m)?.[1]?.trim() ?? "숏폼";
+      const hook = prompt.match(/^Spoken hook: (.+)$/m)?.[1]?.trim() ?? topic;
+      const keywords = (prompt.match(/^Owner keywords: (.+)$/m)?.[1] ?? "").split(",").map((item) => item.trim()).filter((item) => item && item !== "(none)");
+      return {
+        text: JSON.stringify({
+          title: hook,
+          alternativeTitles: [`${topic} 핵심만 정리`, `${topic}, 이렇게 해결해요`],
+          description: `${topic}에 대한 이야기를 짧은 영상으로 담았어요. 영상 속 내용 그대로 확인해 보세요.`,
+          keywords: keywords.slice(0, 5),
+          hashtags: keywords.slice(0, 5),
+          callToAction: "궁금한 점은 댓글로 남겨 주세요.",
+          summary: `${topic}을(를) 소개하는 짧은 영상이에요.`,
+          youtubeTitle: hook,
+          instagramHook: hook,
+        }),
+      };
     }
 
     if (prompt.includes("AUTOBIZ_SHORTS_PLAN_V1")) {
@@ -142,6 +161,7 @@ export class MockAIProvider implements AIProvider {
     }
     if (prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1")) return { text: mockBlogOutline(prompt, system) };
     if (prompt.includes("AUTOBIZ_BLOG_SECTION_V1")) return { text: mockBlogSection(prompt, system) };
+    if (prompt.includes("AUTOBIZ_BLOG_GUIDE_V1")) return { text: mockBlogGuide(prompt) };
 
     return {
       text: `[MOCK AI RESPONSE]\n\n다음 요청에 대한 예시 결과입니다:\n"${prompt.slice(0, 200)}"\n\n실제 서비스에서는 AI_PROVIDER 환경변수를 openai 또는 gemini로 설정하면 이 자리에 실제 생성 콘텐츠가 표시됩니다.`,

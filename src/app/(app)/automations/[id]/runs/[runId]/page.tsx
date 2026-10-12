@@ -12,6 +12,12 @@ import { ContentEditor } from "@/components/automations/content-editor";
 import { BlogWorkspace } from "@/components/automations/blog-workspace";
 import { RunProgress } from "@/components/automations/run-progress";
 import { looksLikeBlogMarkup } from "@/server/blog/markup";
+import { blogGuideContext } from "@/server/blog/guide-context";
+import { ShortsPublishingPanel } from "@/components/automations/shorts-publishing-panel";
+import { shortsPublishingSchema } from "@/server/shorts/publishing-metadata";
+import { blogSetupSchema } from "@/types/blog-automation";
+import { parseShortsReferenceSettings } from "@/types/shorts-reference";
+import { promotionFieldValue } from "@/lib/promotion";
 
 const formatter = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
@@ -42,9 +48,27 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
   const { automation, run } = detail;
   const output = run.output;
   // The user's working copy of a generated post (null for runs that saved no text, e.g. a Shorts preview).
-  const { data: workingCopy } = run.status === "SUCCESS" && output?.body
-    ? await supabase.from("content_history").select("id,title,content,edited_at").eq("run_id", run.id).maybeSingle()
+  const { data: workingCopy } = run.status === "SUCCESS" && (output?.body || output?.shortsPublishing)
+    ? await supabase.from("content_history").select("id,title,content,edited_at,publishing").eq("run_id", run.id).maybeSingle()
     : { data: null };
+  // What the blog guide and the Shorts posting text are built around (profile, setup, images already uploaded).
+  const guideInputs = run.status === "SUCCESS" && (output?.publishingGuide || (output?.body && output.platform !== undefined && workingCopy?.content && looksLikeBlogMarkup(workingCopy.content)))
+    ? await Promise.all([
+      supabase.from("businesses").select("name,industry,location,brand_tone,keywords,promotion_type,website,promotion_details").eq("id", automation.business_id).maybeSingle(),
+      supabase.from("automations").select("config").eq("user_id", user.id).eq("business_id", automation.business_id).limit(20),
+    ])
+    : null;
+  const guideBusiness = guideInputs?.[0].data ?? null;
+  const parsedBlogConfig = blogSetupSchema.safeParse(automation.config);
+  const ownedImages = (guideInputs?.[1].data ?? [])
+    .flatMap((row) => parseShortsReferenceSettings(row.config).references)
+    .filter((reference) => reference.kind === "upload" && reference.label)
+    .slice(0, 10)
+    .map((reference) => ({ label: reference.label, subject: reference.subject ?? "other" }));
+  const blogContext = guideBusiness
+    ? blogGuideContext(guideBusiness, { platform: output?.platform ?? (parsedBlogConfig.success ? parsedBlogConfig.data.platform : undefined), keywords: parsedBlogConfig.success ? parsedBlogConfig.data.keywords : [] }, ownedImages)
+    : null;
+  const editedShortsPublishing = shortsPublishingSchema.safeParse(workingCopy?.publishing);
   const field = "bg-card px-5 py-4";
   const label = "text-[13px] font-semibold text-muted-foreground";
 
@@ -81,7 +105,7 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
           {!output ? <p className="rounded-2xl bg-muted px-5 py-6 text-[15px] text-muted-foreground">이번에는 보여줄 결과가 없어요.</p> : (
             <div className="space-y-6 rounded-2xl border bg-card px-5 py-6 sm:px-8">
               {workingCopy?.content && looksLikeBlogMarkup(workingCopy.content) ? (
-                <BlogWorkspace contentId={workingCopy.id} title={workingCopy.title ?? output.title ?? ""} markup={workingCopy.content} editedAt={workingCopy.edited_at} platform={output.platform ?? "naver"} notes={output.qualityNotes} />
+                <BlogWorkspace contentId={workingCopy.id} title={workingCopy.title ?? output.title ?? ""} markup={workingCopy.content} editedAt={workingCopy.edited_at} platform={output.platform ?? "naver"} notes={output.qualityNotes} guide={output.publishingGuide} guideContext={blogContext ?? blogGuideContext({ name: automation.name, industry: null, location: null, brand_tone: null, keywords: output.keywords, promotion_type: null }, { platform: output.platform ?? "naver", keywords: output.keywords }, ownedImages)} />
               ) : workingCopy?.content ? (
                 <ContentEditor contentId={workingCopy.id} title={workingCopy.title ?? output.title ?? ""} content={workingCopy.content} editedAt={workingCopy.edited_at} />
               ) : output.title ? <div><p className={label}>제목</p><p className="mt-1 text-xl font-extrabold leading-8 tracking-[-0.03em]">{output.title}</p></div> : null}
@@ -98,8 +122,17 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
               {output.callToAction ? <div><p className={label}>행동 유도 문구</p><p className="mt-1 text-[15px] leading-7">{output.callToAction}</p></div> : null}
               {output.keywords.length ? <div><p className={label}>키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.keywords.map((keyword) => <Badge key={keyword} variant="brand">{keyword}</Badge>)}</div></div> : null}
               {output.seoKeywords.length ? <div><p className={label}>SEO 키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.seoKeywords.map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>)}</div></div> : null}
-              {output.videoUrl ? <div><p className={label}>영상 미리보기</p><video src={output.videoUrl} controls preload="metadata" playsInline className="mt-2 aspect-[9/16] max-h-[620px] w-full rounded-2xl bg-black object-contain" aria-label="생성된 숏폼 영상 미리보기">브라우저에서 영상 재생을 지원하지 않습니다.</video></div> : null}
-              {output.caption ? <div><p className={label}>게시 문구</p><p className="mt-1 whitespace-pre-wrap text-[15px] leading-7">{output.caption}</p></div> : null}
+              {output.videoUrl ? <div><p className={label}>영상 미리보기</p><video src={output.videoUrl} controls preload="metadata" playsInline className="mt-2 aspect-[9/16] max-h-[620px] w-full rounded-2xl bg-black object-contain" aria-label="생성된 숏폼 영상 미리보기">브라우저에서 영상 재생을 지원하지 않습니다.</video>{output.sampleVideo ? null : <a href={output.videoUrl} download target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-semibold text-primary underline underline-offset-2">영상 파일 다운로드</a>}</div> : null}
+              {output.shortsPublishing && output.videoUrl ? (
+                <ShortsPublishingPanel
+                  key={run.id}
+                  contentId={workingCopy?.id ?? null}
+                  original={output.shortsPublishing}
+                  saved={editedShortsPublishing.success ? editedShortsPublishing.data : null}
+                  link={guideBusiness ? promotionFieldValue(guideBusiness as never, "actionUrl") ?? promotionFieldValue(guideBusiness as never, "website") : null}
+                />
+              ) : null}
+              {output.caption && !output.shortsPublishing ? <div><p className={label}>게시 문구</p><p className="mt-1 whitespace-pre-wrap text-[15px] leading-7">{output.caption}</p></div> : null}
               {output.scenes.length ? <div><p className={label}>장면 구성</p><ol className="mt-2 space-y-2">{output.scenes.map((scene, index) => <li key={`${index}-${scene.text}`} className="flex gap-3 rounded-xl bg-muted px-4 py-3 text-sm"><span className="font-bold text-primary">{index + 1}</span><span className="flex-1">{scene.text}</span><span className="text-muted-foreground">{scene.durationSec}초</span></li>)}</ol></div> : null}
               {Object.keys(output.publicationResults).length ? <div><p className={label}>플랫폼 게시 결과</p><ul className="mt-2 space-y-2">{Object.entries(output.publicationResults).map(([platform, result]) => result ? <li key={platform} className="flex flex-wrap items-center gap-2 rounded-xl bg-success-soft px-4 py-3 text-sm"><Badge variant="success">{platform === "youtube" ? "YouTube Shorts" : "Instagram Reels"}</Badge><span className="min-w-0 flex-1 break-all">ID {result.externalId ?? "확인 중"}{result.privacy === "private" ? " · 비공개" : ""}</span>{result.externalUrl ? <a href={result.externalUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-primary underline underline-offset-2">열기</a> : null}</li> : null)}</ul></div> : null}
             </div>

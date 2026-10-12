@@ -14,6 +14,8 @@ import {
 } from "@/server/ai/prompts/shorts";
 import { isNearDuplicateTopic } from "@/server/ai/similarity";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { generateShortsPublishing } from "@/server/shorts/publishing-generate";
+import { shortsPublishingSchema, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
 import { serverEnv } from "@/lib/env/server";
 import { publishShortsToPlatforms } from "@/server/automations/shorts-publishing";
 import { getAnimationProvider, isAnimationAvailable, type AnimationClipHandle, type AnimationQuality } from "@/server/connectors/animation";
@@ -115,6 +117,13 @@ async function publishExistingPreview(ctx: AutomationRunContext): Promise<Automa
     throw new Error("테스트용 샘플 영상은 게시할 수 없어요. 영상 제작 서비스를 연결한 뒤 다시 만들어주세요.");
   }
 
+  // The owner's edited posting text (saved on the history row) wins over what the AI first wrote.
+  const { data: workingCopy } = await admin.from("content_history").select("publishing").eq("run_id", request.sourceRunId).maybeSingle();
+  const edited = shortsPublishingSchema.safeParse(workingCopy?.publishing);
+  const generated = shortsPublishingSchema.safeParse(output?.publishing);
+  const publishing = edited.success ? edited.data : generated.success ? generated.data : undefined;
+  const link = promotionFieldValue(ctx.business, "actionUrl") ?? promotionFieldValue(ctx.business, "website");
+
   const publicationResults = await publishShortsToPlatforms({
     userId: ctx.automation.user_id,
     businessId: ctx.business.id,
@@ -122,12 +131,15 @@ async function publishExistingPreview(ctx: AutomationRunContext): Promise<Automa
     caption: content.data.caption,
     videoUrl,
     platforms: request.platforms,
+    publishing,
+    link,
   });
   return {
     output: {
       operation: "PUBLISH",
       sourceRunId: request.sourceRunId,
       ...content.data,
+      ...(publishing ? { publishing } : {}),
       topic,
       videoUrl,
       publicationResults,
@@ -198,6 +210,8 @@ const jobStateSchema = z.object({
   framePaths: z.array(z.string()),
   /** Background track queued next to the clips; the movie waits for it, but a failed track is simply left out. */
   music: musicStateSchema.optional(),
+  /** Title, description, keywords and hashtags written from this video's script (see server/shorts/publishing-metadata.ts). */
+  publishing: shortsPublishingSchema.optional(),
   /** Model tier the plan paid for; reused when a clip is retried. */
   quality: z.enum(["standard", "premium"]).default("standard"),
   projectId: z.string().optional(),
@@ -339,14 +353,25 @@ async function startReferenceRun(ctx: AutomationRunContext, rawSettings: ShortsR
   const platforms = previewOnly ? [] : scheduledPlatforms(ctx.config);
   // The background track is queued right away so it is ready by the time the clips are.
   const music = await startMusic(plan.music);
-  const base: RunBase = { v: 1, topic, previewOnly, platforms, startedAt: new Date().toISOString(), music };
+  const { metadata: publishing } = await generateShortsPublishing({
+    promotionType: resolvePromotionType(ctx.business),
+    businessName: ctx.business.name,
+    industry: ctx.business.industry ?? null,
+    location: ctx.business.location ?? null,
+    keywords: ctx.business.keywords,
+    topic,
+    hook: plan.hook,
+    sceneTexts: plan.scenes.map((scene) => scene.text),
+    link: promotionFieldValue(ctx.business, "actionUrl") ?? promotionFieldValue(ctx.business, "website"),
+  });
+  const base: RunBase = { v: 1, topic, previewOnly, platforms, startedAt: new Date().toISOString(), music, publishing };
   const groups = referenceIndexes(settings.references);
 
   if (plan.format === "promo") return startPromoRun(ctx, admin, settings, owner, plan, groups.photo, base);
   return startCharacterRun(ctx, admin, settings, owner, plan, groups.character, base);
 }
 
-type RunBase = { v: 1; topic: string; previewOnly: boolean; platforms: ShortsPublishPlatform[]; startedAt: string; music?: MusicState };
+type RunBase = { v: 1; topic: string; previewOnly: boolean; platforms: ShortsPublishPlatform[]; startedAt: string; music?: MusicState; publishing?: ShortsPublishing };
 
 async function startCharacterRun(
   ctx: AutomationRunContext,
@@ -581,6 +606,8 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
       caption: content.caption,
       videoUrl,
       platforms: state.platforms,
+      publishing: state.publishing,
+      link: promotionFieldValue(ctx.business, "actionUrl") ?? promotionFieldValue(ctx.business, "website"),
     })
     : {};
   await deleteReferenceImages(admin, state.framePaths).catch(() => undefined);
@@ -590,6 +617,7 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
       ...content,
       topic: state.topic,
       videoUrl,
+      ...(state.publishing ? { publishing: state.publishing } : {}),
       format: state.format,
       animationMode: state.animationMode,
       ...(state.animationNote ? { animationNote: state.animationNote } : {}),

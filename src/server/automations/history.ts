@@ -7,7 +7,7 @@ export async function getAutomationRunDetail(userId: string, automationId: strin
   const supabase = await createClient();
   const { data: automation, error: automationError } = await supabase
     .from("automations")
-    .select("id,name")
+    .select("id,name,business_id,config")
     .eq("id", automationId)
     .eq("user_id", userId)
     .maybeSingle();

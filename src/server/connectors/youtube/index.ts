@@ -131,6 +131,7 @@ export class YouTubeConnector implements PlatformConnector {
             title: safeTitle(params.title),
             description: params.content.trim().slice(0, 5_000),
             categoryId: "22",
+            ...(params.tags && params.tags.length > 0 ? { tags: params.tags.slice(0, 30).map((tag) => tag.slice(0, 60)) } : {}),
           },
           status: {
             privacyStatus: "private",

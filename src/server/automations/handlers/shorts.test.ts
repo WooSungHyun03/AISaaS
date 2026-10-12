@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Automation, Business } from "@/types/domain";
 import type { AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
+import { instagramCaption, shortsPublishingSchema } from "@/server/shorts/publishing-metadata";
 
 const { generateStructuredMock } = vi.hoisted(() => ({ generateStructuredMock: vi.fn() }));
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
@@ -268,7 +269,10 @@ describe("shortsAutomationHandler", () => {
 
     const done = (await handler.resume!(baseContext(), composing.deferred.state as never)) as AutomationHandlerResult;
 
-    expect(instagramPublishMock).toHaveBeenCalledWith({ content: plan.caption, mediaType: "REELS", videoUrl: "https://cdn.example.com/skit.mp4" });
+    // The posted caption is the posting text written for this video, composed for Instagram.
+    const posting = shortsPublishingSchema.parse((composing.deferred.state as { publishing: unknown }).publishing);
+    expect(instagramPublishMock).toHaveBeenCalledWith({ content: instagramCaption(posting), mediaType: "REELS", videoUrl: "https://cdn.example.com/skit.mp4" });
+    expect(done.output).toMatchObject({ publishing: { title: expect.any(String), hashtags: expect.any(Array) } });
     expect(done.output).toMatchObject({ publicationResults: { instagram: { externalId: "reel-media-1" } } });
   });
 
@@ -344,7 +348,7 @@ describe("shortsAutomationHandler", () => {
         topic: "신메뉴 소개", goal: "신규 방문", summary: "신메뉴를 소개", cta: "예약하기",
       } as never,
     });
-    expect(generateStructuredMock).toHaveBeenCalledTimes(1);
+    expect(generateStructuredMock).toHaveBeenCalledTimes(2); // the plan, then the posting text
     const request = generateStructuredMock.mock.calls[0][0] as { prompt: string };
     expect(request.prompt).toContain("신메뉴 소개");
     expect(request.prompt).toContain("신규 방문");
@@ -356,14 +360,14 @@ describe("shortsAutomationHandler", () => {
       .mockResolvedValueOnce({ topic: "출근길 소금빵 예약 팁" })
       .mockResolvedValueOnce(plan);
     const outcome = await start({ recentTopics: ["겨울철 난방비 절약하는 방법"] });
-    expect(generateStructuredMock).toHaveBeenCalledTimes(3);
+    expect(generateStructuredMock).toHaveBeenCalledTimes(4); // two topics, the plan, the posting text
     expect(outcome.deferred.state).toMatchObject({ topic: "출근길 소금빵 예약 팁" });
     expect((generateStructuredMock.mock.calls[1][0] as { prompt: string }).prompt).toContain("겨울철 난방비 절약 팁");
 
     generateStructuredMock.mockReset();
     generateStructuredMock.mockResolvedValueOnce({ topic: "출근길 소금빵 예약 팁" }).mockResolvedValueOnce(plan);
     await start({ recentTopics: ["여름 휴가지 추천"] });
-    expect(generateStructuredMock).toHaveBeenCalledTimes(2);
+    expect(generateStructuredMock).toHaveBeenCalledTimes(3);
   });
 
   describe("promo (product / place photos)", () => {

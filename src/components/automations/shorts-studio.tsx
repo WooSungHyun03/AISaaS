@@ -74,6 +74,7 @@ export function ShortsStudio({
   progress,
   nextRunAt,
   referencesSlot,
+  publishingSlot,
   hasImages,
 }: {
   automationId: string;
@@ -89,6 +90,8 @@ export function ShortsStudio({
   nextRunAt: string | null;
   /** The reference-image card; rendered between the preview and the schedule. */
   referencesSlot?: ReactNode;
+  /** Title, description, keywords and hashtags for the latest video (editable; what gets posted). */
+  publishingSlot?: ReactNode;
   /** Without a reference image there is nothing to build a video from yet. */
   hasImages: boolean;
 }) {
@@ -190,9 +193,13 @@ export function ShortsStudio({
             {previewBadge(latestPreview.format, latestPreview.animationMode) ? <div className="flex flex-wrap items-center gap-2"><Badge variant="brand">{previewBadge(latestPreview.format, latestPreview.animationMode)}</Badge></div> : null}
             {latestPreview.animationNote ? <p className="rounded-xl bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">{latestPreview.animationNote}</p> : null}
             <div><p className="text-xs font-semibold text-muted-foreground">후킹 문구</p><p className="mt-1 text-lg font-bold leading-7">{latestPreview.hook ?? "제목 없음"}</p>{latestPreview.topic ? <p className="mt-1 text-sm text-muted-foreground">주제 · {latestPreview.topic}</p> : null}</div>
-            {latestPreview.caption ? <div><p className="text-xs font-semibold text-muted-foreground">게시 문구</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{latestPreview.caption}</p></div> : null}
+            {latestPreview.caption && !publishingSlot ? <div><p className="text-xs font-semibold text-muted-foreground">게시 문구</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{latestPreview.caption}</p></div> : null}
             {latestPreview.scenes.length ? <details className="group"><summary className="cursor-pointer text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring">장면 구성 {latestPreview.scenes.length}개 보기</summary><ol className="mt-3 space-y-2">{latestPreview.scenes.map((scene, index) => <li key={`${index}-${scene.text}`} className="flex gap-3 rounded-xl bg-muted px-3 py-2 text-sm"><span className="font-bold text-primary">{index + 1}</span><span className="flex-1">{scene.text}</span><span className="text-muted-foreground">{scene.durationSec}초</span></li>)}</ol></details> : null}
           </div> : null}
+
+          {latestPreview && !latestPreview.sample ? <p><a href={latestPreview.videoUrl} download target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-primary underline underline-offset-2">영상 파일 다운로드</a></p> : null}
+
+          {publishingSlot}
 
           <div className="rounded-2xl border bg-card p-5 sm:p-6">
             <h3 className="font-bold">게시할 플랫폼</h3>

@@ -31,3 +31,17 @@ Writing takes several AI calls, so a blog run is a **deferred run** (see `docs/A
 - Fonts cannot be chosen: Naver's editor ignores pasted font families. Size, bold, colour and highlight survive paste; if a style is dropped, the plain text and photo spots are still correct.
 - The AI never sees the owner's photos; it writes photo *spots* (what to shoot and where). The owner puts real photos in.
 - Real posts get better with real details: fill in **꼭 넣고 싶은 내용** (signature item, story, event, parking) — that is the only source of specifics.
+
+
+## Publishing guide (style, photo spots, SEO) — `src/server/blog/publishing-guide.ts`
+
+Every post now carries a guide made **in the same run** (one more AI call, no extra credit; the call has a 15 s limit and falls back to rules, so it can never fail the post). It is stored in `automation_runs.output.publishingGuide` (no migration) and shown as three tabs next to the post: 편집 가이드, 이미지 가이드, SEO·태그, plus "전체 게시 가이드 복사".
+
+- **Style**: the model proposes font, sizes, colours, title alignment and an emphasis method for the industry and tone; the app *checks* them — colours need ≥ 4.5:1 contrast on white (body/title ≥ 7:1), at most two accent colours, Naver sizes snap to the SmartEditor list (11, 13, 15, 16, 19, 24, 28, 30, 34, 38), fonts must be in the editor's list, alignment only left/centre. The same values drive the "추천 스타일로 보기·복사" preview/HTML. Pasting is not guaranteed to keep styles (fonts are never kept on Naver); the screen says so.
+- **Images**: positions are **read from the post** (`[사진]` blocks → section, "n번째 문단 다음", excerpt), so they always match the text and follow the owner's edits. The model only adds type / ratio / caption / alt text / reason per spot; without it the type cycles by promotion type (STORE exterior → interior → signature → location; PRODUCT whole → feature → use → detail; PLATFORM screen → feature → steps → result). Images the owner already uploaded for Shorts are named as usable; nothing is generated, and the UI says so.
+- **SEO**: tags and keywords survive only if they are the owner's keywords/name/industry/place+keyword or really appear in the post; titles with unprovable claims are dropped; region keywords only for STORE; tags are offered as `#a #b` (Naver) and `a,b` (Tistory).
+- Older posts (no stored guide) get a rule-based guide built on screen from the post and the profile.
+
+## Shorts posting text — `src/server/shorts/publishing-metadata.ts`
+
+Written from the planned script (after the plan, same run, no extra credit) and stored in `output.publishing`; the owner's edits live in `content_history.publishing` (migration 0072, written by a server action like the blog edit). A title, alternative title or description must share real wording with the video's script (bigram overlap) and may not contain unprovable or sensational words, otherwise the video's own hook is used. YouTube gets title / description (with `#Shorts`, ≤ 5 hashtags) / tags (API field); Instagram gets one caption (first line, text, CTA, ≤ 8 hashtags). "지금 게시" and scheduled posts send the edited text.

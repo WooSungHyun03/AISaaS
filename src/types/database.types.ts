@@ -332,6 +332,8 @@ export interface Database {
           content: string | null;
           external_url: string | null;
           edited_at: string | null;
+          /** The owner's edited posting text for a Short (see migration 0072). */
+          publishing: Json | null;
           created_at: string;
         };
         Insert: {
@@ -345,6 +347,7 @@ export interface Database {
           content?: string | null;
           external_url?: string | null;
           edited_at?: string | null;
+          publishing?: Json | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["content_history"]["Insert"]>;

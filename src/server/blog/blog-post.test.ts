@@ -96,7 +96,7 @@ describe("blog rendering", () => {
   it("renders a plain-text version with photo slots and the hashtag line", () => {
     const text = renderBlogText(post);
     expect(text).toContain("🥐 소금빵이 특별한 이유");
-    expect(text).toContain("[사진 자리] 갓 구운 소금빵 단면 클로즈업");
+    expect(text).toContain("[이미지 1 삽입] 갓 구운 소금빵 단면 클로즈업");
     expect(text).toContain("위치: 서울 성동구 성수동");
     expect(text).not.toContain("**");
     expect(text.trim().endsWith("#성수동빵집 #소금빵")).toBe(true);

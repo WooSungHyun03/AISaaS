@@ -7,6 +7,8 @@ export interface PublishContentParams {
   imageUrl?: string;
   /** Publicly fetchable MP4 URL, when publishing an Instagram Reel. */
   videoUrl?: string;
+  /** Video tags, where the platform has a field for them (YouTube). */
+  tags?: string[];
   /** Instagram media kind. Omitted values retain the legacy IMAGE behavior. */
   mediaType?: "IMAGE" | "REELS";
 }

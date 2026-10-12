@@ -14,6 +14,10 @@ import {
 } from "@/server/ai/prompts/blog";
 import { assessBlogPost, assignIssues } from "@/server/ai/blog-quality";
 import { postToMarkup } from "@/server/blog/markup";
+import { blogGuideContext } from "@/server/blog/guide-context";
+import { generatePublishingGuide } from "@/server/blog/publishing-guide-generate";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { parseShortsReferenceSettings } from "@/types/shorts-reference";
 import { blogSectionSchema, countCharsNoSpaces, postBodyText, stripInlineMarkup, type BlogBlock, type BlogPost, type BlogSection } from "@/server/blog/post";
 import { renderBlogHtml } from "@/server/blog/render";
 import { promotionFieldValue } from "@/lib/promotion";
@@ -196,6 +200,25 @@ function qualityKeywords(ctx: AutomationRunContext, config: BlogAutomationConfig
   return [...(config?.keywords ?? []), ...ctx.business.keywords];
 }
 
+/** Names (never files) of images the owner already uploaded for this business, so the guide can point at them. */
+async function ownedImagesFor(ctx: AutomationRunContext): Promise<Array<{ label: string; subject: string }>> {
+  try {
+    const { data } = await createAdminClient()
+      .from("automations")
+      .select("config")
+      .eq("user_id", ctx.automation.user_id)
+      .eq("business_id", ctx.business.id)
+      .limit(20);
+    return (data ?? [])
+      .flatMap((row) => parseShortsReferenceSettings(row.config).references)
+      .filter((reference) => reference.kind === "upload" && reference.label)
+      .slice(0, 10)
+      .map((reference) => ({ label: reference.label, subject: reference.subject ?? "other" }));
+  } catch {
+    return [];
+  }
+}
+
 async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined, state: JobState): Promise<AutomationHandlerResult> {
   const post = assemble(ctx, config, state, true);
   const bodyHtml = renderBlogHtml(post, "generic");
@@ -205,6 +228,13 @@ async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | 
   const photoSlots = post.sections.flatMap((section) => section.blocks).filter((block) => block.type === "photo").map((block) => ("slot" in block ? block.slot : ""));
   const remaining = assessBlogPost({ post, keywords: qualityKeywords(ctx, config), facts: buildBlogFacts(ctx.business, config).text, promotionType: resolvePromotionType(ctx.business) }).map((issue) => issue.message);
   const markup = postToMarkup(post);
+  // Style, photo notes and SEO are made in the same run (one more AI call, no extra credit) and never fail the post.
+  const { guide, aiCalls: guideCalls } = await generatePublishingGuide({
+    post,
+    context: blogGuideContext(ctx.business, config, await ownedImagesFor(ctx)),
+    facts: buildBlogFacts(ctx.business, config).lines,
+    searchIntentHint: state.outline.searchIntent,
+  });
 
   return {
     output: {
@@ -216,8 +246,9 @@ async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | 
       bodyHtml,
       excerpt,
       hook: excerpt,
-      keywords: qualityKeywords(ctx, config).slice(0, 8),
+      keywords: [...new Set(qualityKeywords(ctx, config))].slice(0, 8),
       seoKeywords: post.hashtags.slice(0, 8),
+      publishingGuide: guide,
       callToAction: state.outline.closing.cta,
       imageSuggestion: photoSlots.join(" / "),
       stats: { chars: countCharsNoSpaces(text), sections: post.sections.length, photos: photoSlots.length },
@@ -227,7 +258,7 @@ async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | 
     topic: state.topic,
     content: markup,
     contentType: "blog-marketing",
-    aiGenerationCount: Math.max(1, state.aiCalls),
+    aiGenerationCount: Math.max(1, state.aiCalls + guideCalls),
   };
 }
 

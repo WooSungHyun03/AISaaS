@@ -3,6 +3,9 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/layout/page-header";
 import { ShortsCreateButton, ShortsStudio } from "@/components/automations/shorts-studio";
+import { ShortsPublishingPanel } from "@/components/automations/shorts-publishing-panel";
+import { shortsPublishingSchema } from "@/server/shorts/publishing-metadata";
+import { promotionFieldValue } from "@/lib/promotion";
 import { ShortsReferencesCard, type ReferenceView } from "@/components/automations/shorts-references";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { REFERENCE_BUCKET, isOwnedReferencePath } from "@/server/shorts/reference-images";
@@ -79,8 +82,23 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const schedule = automation.schedule as unknown as AutomationSchedule;
   const referenceSettings = parseShortsReferenceSettings(automation.config);
   const referenceViews = await referenceViewsFor(referenceSettings.references, user.id, automation.id);
+  // The posting text written for the latest video, and the owner's edited copy of it (older videos have neither).
+  const generatedPublishing = shortsPublishingSchema.safeParse(previewRun?.safe?.shortsPublishing);
+  const { data: workingCopy } = previewRun && generatedPublishing.success
+    ? await supabase.from("content_history").select("id,publishing").eq("run_id", previewRun.id).maybeSingle()
+    : { data: null };
+  const editedPublishing = shortsPublishingSchema.safeParse(workingCopy?.publishing);
+  const publishingSlot = generatedPublishing.success ? (
+    <ShortsPublishingPanel
+      key={previewRun?.id}
+      contentId={workingCopy?.id ?? null}
+      original={generatedPublishing.data}
+      saved={editedPublishing.success ? editedPublishing.data : null}
+      link={promotionFieldValue(selectedBusiness, "actionUrl") ?? promotionFieldValue(selectedBusiness, "website")}
+    />
+  ) : null;
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} hasImages={referenceViews.length > 0} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio publishingSlot={publishingSlot} referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} hasImages={referenceViews.length > 0} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
 }
 
 function PageHeading() {

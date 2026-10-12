@@ -6,7 +6,9 @@ const { generateStructuredMock } = vi.hoisted(() => ({ generateStructuredMock: v
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
 
 const { blogAutomationHandler } = await import("./blog");
-import { mockBlogOutline, mockBlogSection } from "@/server/ai/providers/mock-blog";
+import { mockBlogGuide, mockBlogOutline, mockBlogSection } from "@/server/ai/providers/mock-blog";
+import { aiGuideDraftSchema } from "@/server/ai/prompts/blog-guide";
+import { blogPublishingGuideSchema } from "@/server/blog/publishing-guide";
 
 afterEach(() => {
   vi.resetAllMocks();
@@ -65,6 +67,7 @@ function useMockWriter(overrides: { section?: (request: Request, index: number) 
       const custom = overrides.section?.(request, index);
       return request.schema.parse(custom ?? JSON.parse(mockBlogSection(request.prompt, request.system)));
     }
+    if (request.prompt.includes("AUTOBIZ_BLOG_GUIDE_V1")) return request.schema.parse(JSON.parse(mockBlogGuide(request.prompt)));
     return topicResult;
   });
 }
@@ -107,7 +110,7 @@ describe("blogAutomationHandler", () => {
     const stats = (result.output as { stats: { chars: number; photos: number } }).stats;
     expect(stats.chars).toBeGreaterThanOrEqual(1_500);
     expect(stats.photos).toBeGreaterThanOrEqual(4);
-    expect(result.aiGenerationCount).toBe(2 + 8); // topic + outline, then intro, six sections and the closing
+    expect(result.aiGenerationCount).toBe(2 + 8 + 1); // topic + outline, then intro, six sections and the closing, then the publishing guide
   });
 
   it("writes intro, each section and the closing in order, each seeing what came before", async () => {
@@ -277,7 +280,7 @@ describe("blogAutomationHandler", () => {
     expect(title.prompt).toContain(calendarItem.topic);
     expect(title.system).toContain(calendarItem.goal);
     expect(title.system).toContain(calendarItem.summary);
-    for (const request of requests.slice(1)) {
+    for (const request of requests.slice(1).filter((item) => !item.prompt.includes("AUTOBIZ_BLOG_GUIDE_V1"))) {
       expect(request.system).toContain(calendarItem.goal);
       expect(request.system).toContain(calendarItem.summary);
       expect(request.system).toContain(calendarItem.cta);
@@ -307,5 +310,56 @@ describe("blogAutomationHandler", () => {
 
     useMockWriter({ section: (_request, index) => { if (index === 2) throw new Error("section failed"); return undefined; } });
     await expect(runToEnd(baseContext())).rejects.toThrow("section failed");
+  });
+
+  describe("publishing guide (style, photo spots, SEO)", () => {
+    it("is made in the same run and matches the post: one detail per photo spot, grounded tags, readable colours", async () => {
+      useMockWriter();
+      const result = await runToEnd(baseContext());
+      const output = result.output as { publishingGuide: unknown; stats: { photos: number }; markup: string };
+      const guide = blogPublishingGuideSchema.parse(output.publishingGuide);
+
+      expect(guide.source).toBe("ai");
+      expect(guide.images).toHaveLength(output.stats.photos);
+      expect(guide.style.platform).toBe("naver");
+      expect([11, 13, 15, 16, 19, 24, 28, 30, 34, 38]).toContain(guide.style.body.sizePx);
+      // every tag is something the owner chose or something that is in the post
+      const body = `${output.markup}`.replace(/\s+/g, "");
+      for (const tag of guide.seo.tags) expect(["소금빵", "크루아상", "우리동네빵집", "베이커리"].includes(tag) || body.includes(tag) || /^(서울|마포구)(소금빵|크루아상|우리동네빵집|베이커리)$/.test(tag), tag).toBe(true);
+      expect(guide.seo.regionKeywords.every((term) => term.includes("서울") || term.includes("마포"))).toBe(true);
+    });
+
+    it("never fails or re-bills the post when the guide's AI call fails: it falls back to rules", async () => {
+      useMockWriter();
+      const original = generateStructuredMock.getMockImplementation()!;
+      generateStructuredMock.mockImplementation(async (request: Request) => {
+        if (request.prompt.includes("AUTOBIZ_BLOG_GUIDE_V1")) throw new Error("model unavailable");
+        return original(request);
+      });
+
+      const result = await runToEnd(baseContext());
+      const guide = blogPublishingGuideSchema.parse((result.output as { publishingGuide: unknown }).publishingGuide);
+
+      expect(guide.source).toBe("rules");
+      expect(guide.images.length).toBeGreaterThan(0);
+      expect(guide.seo.tags.length).toBeGreaterThan(0);
+      expect(result.title).toBeTruthy();
+    });
+
+    it("ignores a guide answer that is mostly garbage and still produces a complete guide", async () => {
+      useMockWriter();
+      const original = generateStructuredMock.getMockImplementation()!;
+      generateStructuredMock.mockImplementation(async (request: Request) => {
+        if (request.prompt.includes("AUTOBIZ_BLOG_GUIDE_V1")) return aiGuideDraftSchema.parse({ style: { bodySize: "huge", headingColor: "red" }, seo: { tags: ["광고", 5, "최고의맛집"] } });
+        return original(request);
+      });
+
+      const result = await runToEnd(baseContext());
+      const guide = blogPublishingGuideSchema.parse((result.output as { publishingGuide: unknown }).publishingGuide);
+
+      expect(guide.style.heading.color).toMatch(/^#[0-9A-F]{6}$/);
+      expect(guide.seo.tags).not.toContain("최고의맛집");
+      expect(guide.seo.tags).not.toContain("광고");
+    });
   });
 });

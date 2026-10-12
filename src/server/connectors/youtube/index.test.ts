@@ -84,6 +84,20 @@ describe("YouTubeConnector", () => {
     expect(uploadInit.headers).toMatchObject({ "Content-Type": "video/mp4" });
   });
 
+  it("sends tags in the upload metadata when the owner's posting text has keywords", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(videoResponse())
+      .mockResolvedValueOnce(jsonResponse({ access_token: "fresh-access-token", expires_in: 3600 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200, headers: { Location: "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=upload-2" } }))
+      .mockResolvedValueOnce(jsonResponse({ id: "youtube-video-2", status: { privacyStatus: "private" } }));
+    const connector = new YouTubeConnector(CONNECTION, { fetchFn: fetchMock });
+
+    await connector.publish({ title: "제목", content: "설명", tags: ["소금빵", "성수동빵집"], videoUrl: "https://assets.example.com/rendered/short.mp4" });
+
+    const metadata = JSON.parse(String(fetchMock.mock.calls[2][1]?.body)) as { snippet: { tags?: string[] } };
+    expect(metadata.snippet.tags).toEqual(["소금빵", "성수동빵집"]);
+  });
+
   it("rejects a missing video URL before making a network request", async () => {
     const fetchMock = vi.fn();
     const connector = new YouTubeConnector(CONNECTION, { fetchFn: fetchMock });

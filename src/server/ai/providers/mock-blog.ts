@@ -67,3 +67,46 @@ export function mockBlogSection(prompt: string, system = ""): string {
   }
   return JSON.stringify({ blocks });
 }
+
+/** Local-development answer for the publishing guide: plausible, deterministic and checked like a real one. */
+export function mockBlogGuide(prompt: string): string {
+  const title = prompt.match(/^Post title: (.+)$/m)?.[1]?.trim() ?? "블로그 글";
+  const keywords = (prompt.match(/^Owner keywords: (.+)$/m)?.[1] ?? "").split(",").map((item) => item.trim()).filter((item) => item && item !== "(none)");
+  const photoCount = [...prompt.matchAll(/^(\d+)\. \(/gm)].length;
+  const primary = keywords[0] ?? title.slice(0, 10);
+  return JSON.stringify({
+    style: {
+      fontFamily: "나눔바른고딕",
+      titleColor: "#1F2937",
+      headingColor: "#1D4ED8",
+      bodyColor: "#374151",
+      emphasisColor: "#DC2626",
+      titleSize: 28,
+      headingSize: 24,
+      bodySize: 16,
+      emphasisSize: 19,
+      lineHeight: 1.8,
+      titleAlign: "center",
+      emphasisMethod: "핵심 단어는 굵게, 가장 중요한 문장 하나는 형광펜으로 표시해요.",
+      rationale: "(예시) 개발용 모의 AI가 만든 스타일이에요.",
+    },
+    images: Array.from({ length: photoCount }, (_, index) => ({
+      index: index + 1,
+      type: index === 0 ? "대표 사진" : "설명 사진",
+      ratio: "4:3",
+      caption: `사진 ${index + 1} 설명`,
+      altText: `${primary} 관련 사진 ${index + 1}`,
+      reason: "글의 내용을 눈으로 확인시켜 줘요.",
+    })),
+    seo: {
+      titleCandidates: [`${primary}, 처음이라면 이것부터 확인하세요`, `${primary} 고르기 전에 알아둘 점`],
+      primaryKeyword: primary,
+      secondaryKeywords: keywords.slice(1, 4),
+      regionKeywords: [],
+      searchIntent: "정보 탐색",
+      searchIntentNote: "(예시) 처음 알아보는 사람이 기본 정보를 찾는 검색이에요.",
+      tags: keywords.slice(0, 6),
+      metaDescription: `${primary}에 대해 처음 알아보는 분께 꼭 필요한 내용만 정리했어요. 직접 확인할 수 있는 사실 위주로 담았습니다.`,
+    },
+  });
+}

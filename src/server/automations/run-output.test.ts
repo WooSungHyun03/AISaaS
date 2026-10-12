@@ -46,6 +46,8 @@ describe("toSafeAutomationRunOutput", () => {
       script: null,
       scenes: [],
       platform: null,
+      publishingGuide: null,
+      shortsPublishing: null,
       blogStats: null,
       qualityNotes: [],
       format: null,

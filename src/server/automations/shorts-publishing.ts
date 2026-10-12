@@ -7,6 +7,7 @@ import { getConnection, updateConnectionStatus } from "@/server/connectors/integ
 import { YouTubeConnector } from "@/server/connectors/youtube";
 import { loadYouTubeConnector } from "@/server/connectors/youtube/connect";
 import { isConnectorError } from "@/server/shared/errors";
+import { instagramCaption, youtubeMetadata, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
 import type { ShortsPublishPlatform } from "@/types/automation";
 
 export interface ShortsPublicationResult {
@@ -22,6 +23,10 @@ export interface PublishShortsInput {
   caption: string;
   videoUrl: string;
   platforms: ShortsPublishPlatform[];
+  /** The owner's (possibly edited) posting text. When present it decides each platform's fields; title/caption are the fallback. */
+  publishing?: ShortsPublishing;
+  /** Purchase / sign-up address to add to a YouTube description. */
+  link?: string | null;
 }
 
 /**
@@ -63,7 +68,7 @@ export async function publishShortsToPlatforms(input: PublishShortsInput) {
   try {
     if (instagram) {
       const published = await instagram.publish({
-        content: input.caption,
+        content: input.publishing ? instagramCaption(input.publishing) : input.caption,
         mediaType: "REELS",
         videoUrl: input.videoUrl,
       });
@@ -74,9 +79,11 @@ export async function publishShortsToPlatforms(input: PublishShortsInput) {
       };
     }
     if (youtube) {
+      const yt = input.publishing ? youtubeMetadata(input.publishing, input.link ?? null) : null;
       const published = await youtube.publish({
-        title: input.title,
-        content: input.caption,
+        title: yt?.title ?? input.title,
+        content: yt?.description ?? input.caption,
+        ...(yt ? { tags: yt.tags } : {}),
         videoUrl: input.videoUrl,
       });
       results.youtube = {

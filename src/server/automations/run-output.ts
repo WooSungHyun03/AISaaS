@@ -1,6 +1,8 @@
 import "server-only";
 
 import type { Json } from "@/types/domain";
+import { blogPublishingGuideSchema, type BlogPublishingGuide } from "@/server/blog/publishing-guide";
+import { shortsPublishingSchema, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
 
 export interface SafeAutomationRunOutput {
   title: string | null;
@@ -20,6 +22,10 @@ export interface SafeAutomationRunOutput {
   scenes: Array<{ text: string; durationSec: number }>;
   /** Blog posts: where the post is meant to go, its measured size, and what the quality check still found. */
   platform: "naver" | "tistory" | null;
+  /** Blog: style, photo notes and SEO made with the post. Null for posts from before it existed or when it does not validate. */
+  publishingGuide: BlogPublishingGuide | null;
+  /** Shorts: the posting text written from the video's script. Null for older runs. */
+  shortsPublishing: ShortsPublishing | null;
   blogStats: { chars: number; sections: number; photos: number } | null;
   qualityNotes: string[];
   /** Shorts built from reference images: how the characters were produced. */
@@ -143,6 +149,14 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
       })
       : [],
     platform: output.platform === "naver" || output.platform === "tistory" ? output.platform : null,
+    publishingGuide: (() => {
+      const parsed = blogPublishingGuideSchema.safeParse(output.publishingGuide);
+      return parsed.success ? parsed.data : null;
+    })(),
+    shortsPublishing: (() => {
+      const parsed = shortsPublishingSchema.safeParse(output.publishing);
+      return parsed.success ? parsed.data : null;
+    })(),
     blogStats: safeBlogStats(output.stats),
     qualityNotes: Array.isArray(output.qualityNotes)
       ? output.qualityNotes.filter((item): item is string => typeof item === "string").slice(0, 6).map((item) => item.slice(0, 200))
