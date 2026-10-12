@@ -68,6 +68,66 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["admin_users"]["Insert"]>;
         Relationships: [];
       };
+      budget_items: {
+        Row: {
+          period_key: string;
+          kind: "VIDEO" | "BLOG";
+          run_id: string;
+          state: "CLAIMED" | "COMPLETED" | "RELEASED";
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          period_key: string;
+          kind: "VIDEO" | "BLOG";
+          run_id: string;
+          state: "CLAIMED" | "COMPLETED" | "RELEASED";
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["budget_items"]["Insert"]>;
+        Relationships: [];
+      };
+      budget_spend: {
+        Row: {
+          id: string;
+          period_key: string;
+          kind: "VIDEO" | "BLOG";
+          run_id: string | null;
+          step: string;
+          attempt: number;
+          provider: string;
+          model: string | null;
+          state: "RESERVED" | "SETTLED" | "RELEASED";
+          reserved_usd: number;
+          actual_usd: number | null;
+          usage: Json;
+          idempotency_key: string;
+          note: string | null;
+          created_at: string;
+          settled_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          period_key: string;
+          kind: "VIDEO" | "BLOG";
+          run_id?: string | null;
+          step: string;
+          attempt?: number;
+          provider: string;
+          model?: string | null;
+          state: "RESERVED" | "SETTLED" | "RELEASED";
+          reserved_usd: number;
+          actual_usd?: number | null;
+          usage?: Json;
+          idempotency_key: string;
+          note?: string | null;
+          created_at?: string;
+          settled_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["budget_spend"]["Insert"]>;
+        Relationships: [];
+      };
       admin_audit_log: {
         Row: {
           id: string;
@@ -1015,6 +1075,49 @@ export interface Database {
     };
     Views: Record<string, never>;
     Functions: {
+      budget_claim_item: {
+        Args: { p_period: string; p_kind: string; p_run_id: string; p_item_limit: number };
+        Returns: string;
+      };
+      budget_complete_item: {
+        Args: { p_period: string; p_kind: string; p_run_id: string };
+        Returns: void;
+      };
+      budget_release_item: {
+        Args: { p_period: string; p_kind: string; p_run_id: string };
+        Returns: void;
+      };
+      budget_reserve: {
+        Args: {
+          p_period: string;
+          p_kind: string;
+          p_run_id: string | null;
+          p_step: string;
+          p_attempt: number;
+          p_provider: string;
+          p_model: string | null;
+          p_usd: number;
+          p_idempotency_key: string;
+          p_cap_usd: number;
+          p_item_floor_usd: number;
+          p_item_limit: number;
+          p_item_cap_usd: number | null;
+          p_note?: string | null;
+        };
+        Returns: string;
+      };
+      budget_settle: {
+        Args: { p_id: string; p_actual_usd: number; p_usage?: Json };
+        Returns: number;
+      };
+      budget_release: {
+        Args: { p_id: string; p_note?: string | null };
+        Returns: void;
+      };
+      budget_status: {
+        Args: { p_period: string; p_kind: string };
+        Returns: Json;
+      };
       integration_secret_create: {
         Args: { p_secret: string; p_name?: string | null };
         Returns: string;

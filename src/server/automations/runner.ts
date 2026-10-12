@@ -14,8 +14,9 @@ import {
   releaseCreditByReference,
   reserveCredit,
 } from "@/server/billing/credits";
+import { assertPaidCallsAllowed, BUDGET_MESSAGES_KO, claimBudgetItem, closeFailedRunBudget, closeRunItem, isBudgetError, releaseBudgetItem, settleOpenReservations, withBudgetScope } from "@/server/budget";
 import { isAppError } from "@/server/shared/errors";
-import { isDeferredOutcome, type AutomationHandlerResult, type AutomationRunContext, type AutomationSchedule } from "@/types/automation";
+import { isDeferredOutcome, type AutomationBudgetKind, type AutomationHandlerResult, type AutomationRunContext, type AutomationSchedule } from "@/types/automation";
 import type { Automation, AutomationRunSource, Json } from "@/types/domain";
 import type { Database } from "@/types/database.types";
 import { getHandler } from "./handlers";
@@ -88,18 +89,22 @@ async function recordRefusedRun(
   return { runId: run.id, status: "FAILED", errorMessage: reason };
 }
 
-/** Handles the narrow race where the balance check passed but another run reserved the last credit first. */
+/**
+ * Closes a run that could not start for a reason that is not an error of the automation: the balance check passed but
+ * another run reserved the last credit first, or the spend budget has no room. Nothing was charged, so nothing is parked.
+ */
 async function recordCreditRefusal(
   admin: AdminClient,
   automation: Automation,
   runId: string,
   source: AutomationRunSource,
   advanceSchedule: boolean,
+  reason: string = CREDIT_EXHAUSTED_MESSAGE,
 ): Promise<RunAutomationResult> {
   const now = new Date().toISOString();
   const { error } = await admin
     .from("automation_runs")
-    .update({ status: "FAILED", error_message: CREDIT_EXHAUSTED_MESSAGE, completed_at: now })
+    .update({ status: "FAILED", error_message: reason, completed_at: now })
     .eq("id", runId)
     .eq("status", "RUNNING");
   if (error) throw error;
@@ -118,7 +123,7 @@ async function recordCreditRefusal(
     }
   }
 
-  return { runId, status: "FAILED", errorMessage: CREDIT_EXHAUSTED_MESSAGE };
+  return { runId, status: "FAILED", errorMessage: reason };
 }
 
 interface RunFinishContext {
@@ -128,6 +133,8 @@ interface RunFinishContext {
   source: AutomationRunSource;
   startedAtMs: number;
   creditReferenceId?: string;
+  /** The spend budget this run holds an item slot in. */
+  budgetKind?: AutomationBudgetKind;
 }
 
 /** Marks a finished run SUCCESS and does the bookkeeping that follows (history row, last_run_at, usage). */
@@ -183,6 +190,14 @@ async function persistSuccess(admin: AdminClient, ctx: RunFinishContext, result:
   if (!completed) throw new Error("Automation run was already closed before success could be recorded.");
 
   await incrementUsage(admin, automation.user_id, { automationRuns: 1, aiGenerations: result.aiGenerationCount ?? 1 });
+  if (ctx.budgetKind) {
+    try {
+      await settleOpenReservations(run.id, "run finished with a reservation still open");
+      await closeRunItem(run.id, "COMPLETED");
+    } catch (budgetError) {
+      logger.error("budget_item_complete_failed", { runId: run.id, message: budgetError instanceof Error ? budgetError.message : String(budgetError) });
+    }
+  }
 
   logger.info("automation_run_success", {
     automationId,
@@ -201,7 +216,18 @@ async function persistFailure(admin: AdminClient, ctx: RunFinishContext, err: un
   const automationId = automation.id;
   const run = { id: runIdValue };
   const template = { slug: ctx.templateSlug };
-  const errorMessage = err instanceof Error ? err.message : "Unknown error";
+  // A refusal by the spend budget is shown to the owner as it is (plain Korean); it says nothing about the automation.
+  const budgetRefusal = isBudgetError(err);
+  const errorMessage = budgetRefusal ? BUDGET_MESSAGES_KO[err.code] : err instanceof Error ? err.message : "Unknown error";
+
+  if (ctx.budgetKind) {
+    try {
+      // Money already spent stays counted; the item slot goes back so the owner's retry (and other owners) can use it.
+      await closeFailedRunBudget(run.id, `run failed: ${errorMessage.slice(0, 120)}`);
+    } catch (releaseError) {
+      logger.error("budget_item_release_failed", { runId: run.id, message: releaseError instanceof Error ? releaseError.message : String(releaseError) });
+    }
+  }
 
   if (ctx.creditReferenceId) {
     try {
@@ -235,9 +261,11 @@ async function persistFailure(admin: AdminClient, ctx: RunFinishContext, err: un
   // future cron tick regardless of what next_run_at holds, and
   // reactivating it (activateAutomation()) always recomputes a fresh
   // next_run_at anyway.
-  const { error: markErrorStatusError } = await admin.from("automations").update({ status: "ERROR" }).eq("id", automationId);
-  if (markErrorStatusError) {
-    logger.error("automation_status_update_failed", { automationId, dbError: markErrorStatusError });
+  if (!budgetRefusal) {
+    const { error: markErrorStatusError } = await admin.from("automations").update({ status: "ERROR" }).eq("id", automationId);
+    if (markErrorStatusError) {
+      logger.error("automation_status_update_failed", { automationId, dbError: markErrorStatusError });
+    }
   }
 
   // Any domain's typed error (AIProviderError, ConnectorError, ...) carries
@@ -251,7 +279,7 @@ async function persistFailure(admin: AdminClient, ctx: RunFinishContext, err: un
     source,
     durationMs: Date.now() - startedAtMs,
     errorMessage,
-    ...(isAppError(err) ? { errorDomain: err.domain, errorCode: err.code, retryable: err.retryable } : {}),
+    ...(isAppError(err) ? { errorDomain: err.domain, errorCode: err.code, retryable: err.retryable, ...(budgetRefusal ? { detail: err.message } : {}) } : {}),
   });
   return { runId: run.id, status: "FAILED", errorMessage };
 }
@@ -384,6 +412,16 @@ async function executeAutomation(
     throw insertError ?? new Error("Failed to create automation run");
   }
 
+  const runContext: AutomationRunContext = {
+    automation,
+    business,
+    config: (automation.config as Record<string, never>) ?? {},
+    recentTopics: [],
+    runId: run.id,
+    calendarItem: options.calendarItem,
+    shorts: options.shorts,
+  };
+  const budgetKind = automationHandlerFor(template.slug)?.metered?.(runContext) ?? undefined;
   const finish = {
     automation,
     templateSlug: template.slug,
@@ -391,14 +429,29 @@ async function executeAutomation(
     source,
     startedAtMs,
     ...(consumesCredit ? { creditReferenceId: run.id } : {}),
-  } satisfies RunFinishContext;
+  } satisfies RunFinishContext as RunFinishContext;
 
   try {
+    // The spend budget comes first: a run the period has no room for is refused before a credit is touched.
+    if (budgetKind) {
+      try {
+        assertPaidCallsAllowed();
+        await claimBudgetItem(budgetKind, run.id);
+        finish.budgetKind = budgetKind;
+      } catch (error) {
+        if (isBudgetError(error)) {
+          logger.warn("automation_run_budget_refused", { automationId, runId: run.id, code: error.code, detail: error.message });
+          return recordCreditRefusal(admin, automation, run.id, source, advanceSchedule, BUDGET_MESSAGES_KO[error.code]);
+        }
+        throw error;
+      }
+    }
     if (consumesCredit && creditKind) {
       try {
         await reserveCredit({ userId: automation.user_id, kind: creditKind, referenceId: run.id });
       } catch (error) {
         if (isInsufficientCreditError(error)) {
+          await releaseItemQuietly(finish);
           return recordCreditRefusal(admin, automation, run.id, source, advanceSchedule);
         }
         throw error;
@@ -428,15 +481,8 @@ async function executeAutomation(
       .order("created_at", { ascending: false })
       .limit(20);
 
-    const outcome = await handler.run({
-      automation,
-      business,
-      config: (automation.config as Record<string, never>) ?? {},
-      recentTopics: (recent ?? []).map((r) => r.topic).filter((topic): topic is string => Boolean(topic)),
-      runId: run.id,
-      calendarItem: options.calendarItem,
-      shorts: options.shorts,
-    });
+    const handlerContext: AutomationRunContext = { ...runContext, recentTopics: (recent ?? []).map((r) => r.topic).filter((topic): topic is string => Boolean(topic)) };
+    const outcome = await inBudgetScope(budgetKind, run.id, () => handler.run(handlerContext));
 
     if (isDeferredOutcome(outcome)) {
       await storeDeferredJob(admin, run.id, outcome.deferred);
@@ -447,6 +493,20 @@ async function executeAutomation(
     return await persistSuccess(admin, finish, outcome);
   } catch (err) {
     return persistFailure(admin, finish, err);
+  }
+}
+
+/** Runs `fn` so that every paid call inside it is reserved in the spend ledger for this run. Unbudgeted runs run as they are. */
+function inBudgetScope<T>(kind: AutomationBudgetKind | undefined, runId: string, fn: () => Promise<T>): Promise<T> {
+  return kind ? withBudgetScope({ kind, runId, attempt: 1 }, fn) : fn();
+}
+
+async function releaseItemQuietly(ctx: RunFinishContext): Promise<void> {
+  if (!ctx.budgetKind) return;
+  try {
+    await releaseBudgetItem(ctx.budgetKind, ctx.runId);
+  } catch (error) {
+    logger.error("budget_item_release_failed", { runId: ctx.runId, message: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -473,7 +533,8 @@ export async function runDueAutomation(automationId: string): Promise<RunAutomat
  * does one bounded step through `handler.resume`, and either stores the new
  * state or finishes the run through the same success/failure path as any other.
  */
-const LEASE_SECONDS = 120;
+/** One step may be a single long model call (a whole post from Fable, a plan from Opus: minutes), so the lease outlives it. */
+const LEASE_SECONDS = 330;
 /** Consecutive retryable errors (network blips, 5xx) tolerated before the run is failed. */
 const MAX_TRANSIENT_ERRORS = 4;
 
@@ -561,6 +622,29 @@ export async function advanceDeferredRun(runId: string): Promise<AdvanceDeferred
   const input = run.input && typeof run.input === "object" && !Array.isArray(run.input) ? (run.input as Record<string, Json>) : {};
   const shortsInput = input.shorts as AutomationRunContext["shorts"];
   const consumesCredit = Boolean(getAutomationCreditKind(template?.slug ?? "")) && !shortsInput?.publish;
+  const resumeContext: AutomationRunContext | null = business
+    ? {
+      automation,
+      business,
+      config: (automation.config as Record<string, never>) ?? {},
+      recentTopics: [],
+      runId,
+      calendarItem: input.calendarItem as AutomationRunContext["calendarItem"],
+      shorts: shortsInput,
+      // Saves the state while this step still holds the lease (the revision is the one this step claimed).
+      checkpoint: async (state: Json) => {
+        const { data: saved, error: saveError } = await admin
+          .from("automation_runs")
+          .update({ output: { job: { ...leased, state } } as unknown as Json })
+          .eq("id", runId)
+          .eq("status", "RUNNING")
+          .eq("output->job->>rev", String(claimedRev))
+          .select("id");
+        if (saveError || !saved || saved.length !== 1) throw new Error("작업 상태를 저장하지 못했어요. 잠시 후 다시 시도해주세요.");
+      },
+    }
+    : null;
+  const budgetKind = (resumeContext ? automationHandlerFor(template?.slug ?? "")?.metered?.(resumeContext) : null) ?? undefined;
   const finish: RunFinishContext = {
     automation,
     templateSlug: template?.slug ?? "",
@@ -568,23 +652,13 @@ export async function advanceDeferredRun(runId: string): Promise<AdvanceDeferred
     source: run.source,
     startedAtMs: Date.parse(run.created_at),
     ...(consumesCredit ? { creditReferenceId: runId } : {}),
+    ...(budgetKind ? { budgetKind } : {}),
   };
   try {
-    if (!business || !template) throw new Error("Business or template not found for a deferred run.");
+    if (!business || !template || !resumeContext) throw new Error("Business or template not found for a deferred run.");
     const handler = getHandler(template.slug);
     if (!handler.resume) throw new Error(`The ${template.slug} handler cannot resume a deferred run.`);
-    const outcome = await handler.resume(
-      {
-        automation,
-        business,
-        config: (automation.config as Record<string, never>) ?? {},
-        recentTopics: [],
-        runId,
-        calendarItem: input.calendarItem as AutomationRunContext["calendarItem"],
-        shorts: shortsInput,
-      },
-      job.state,
-    );
+    const outcome = await inBudgetScope(budgetKind, runId, () => handler.resume!(resumeContext, job.state));
 
     if (isDeferredOutcome(outcome)) {
       const next: DeferredJob = { ...job, rev: claimedRev + 1, leaseUntil: null, state: outcome.deferred.state, progress: outcome.deferred.progress, transientErrors: 0 };

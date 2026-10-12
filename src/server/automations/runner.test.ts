@@ -39,7 +39,31 @@ vi.mock("@/server/billing/credits", () => ({
   isInsufficientCreditError: isInsufficientCreditErrorMock,
 }));
 
+const budget = vi.hoisted(() => ({
+  claim: vi.fn(),
+  assertAllowed: vi.fn(),
+  closeRunItem: vi.fn(),
+  closeFailed: vi.fn(),
+  settleOpen: vi.fn(),
+  releaseItem: vi.fn(),
+  scopes: [] as unknown[],
+}));
+vi.mock("@/server/budget", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/budget")>()),
+  claimBudgetItem: budget.claim,
+  assertPaidCallsAllowed: budget.assertAllowed,
+  closeRunItem: budget.closeRunItem,
+  closeFailedRunBudget: budget.closeFailed,
+  settleOpenReservations: budget.settleOpen,
+  releaseBudgetItem: budget.releaseItem,
+  withBudgetScope: (scope: unknown, fn: () => Promise<unknown>) => {
+    budget.scopes.push(scope);
+    return fn();
+  },
+}));
+
 const { runAutomationNow, runDueAutomation } = await import("./runner");
+const { BudgetError } = await import("@/server/budget/errors");
 
 /**
  * A minimal stand-in for the Supabase query builder, dispatched by table
@@ -126,6 +150,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks();
+  budget.scopes.length = 0;
 });
 
 describe("runDueAutomation / runAutomationNow — happy path", () => {
@@ -508,5 +533,118 @@ describe("runDueAutomation / runAutomationNow — exception isolation", () => {
     expect(run).not.toHaveBeenCalled();
     expect(reserveCreditMock).not.toHaveBeenCalled();
     expect(admin.updates.automations).toBeUndefined(); // not parked in ERROR
+  });
+});
+
+
+describe("spend budget", () => {
+  const meteredAdmin = (runId: string) => makeAdmin({
+    automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }],
+    businesses: [{ data: BUSINESS, error: null }],
+    automation_templates: [{ data: TEMPLATE, error: null }],
+    automation_runs: [noInFlight(), { data: { id: runId }, error: null }, { data: null, error: null }],
+    content_history: [{ data: [], error: null }, { data: { id: "content-1" }, error: null }],
+  });
+  const meteredHandler = (run: ReturnType<typeof vi.fn>) => getHandlerMock.mockReturnValue({ templateSlug: "blog-marketing", run, metered: () => "BLOG" });
+
+  it("takes the period's item slot BEFORE reserving the credit, runs the handler inside a budget scope and completes the slot on success", async () => {
+    createAdminClientMock.mockReturnValue(meteredAdmin("run-b1"));
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    meteredHandler(vi.fn().mockResolvedValue({ output: { ok: true }, content: "body", contentType: "blog", title: "T", topic: "Topic" }));
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result.status).toBe("SUCCESS");
+    expect(budget.assertAllowed).toHaveBeenCalled();
+    expect(budget.claim).toHaveBeenCalledWith("BLOG", "run-b1");
+    expect(budget.claim.mock.invocationCallOrder[0]).toBeLessThan(reserveCreditMock.mock.invocationCallOrder[0]);
+    expect(budget.scopes).toEqual([{ kind: "BLOG", runId: "run-b1", attempt: 1 }]);
+    expect(budget.settleOpen).toHaveBeenCalledWith("run-b1", expect.any(String));
+    expect(budget.closeRunItem).toHaveBeenCalledWith("run-b1", "COMPLETED");
+    expect(budget.closeFailed).not.toHaveBeenCalled();
+  });
+
+  it("refuses with the budget's own words when the month has no room, without reserving a credit or parking the automation", async () => {
+    const admin = meteredAdmin("run-b2");
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    const run = vi.fn();
+    meteredHandler(run);
+    budget.claim.mockRejectedValueOnce(new BudgetError("BUDGET_ITEM_LIMIT", "limit"));
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result).toEqual({ runId: "run-b2", status: "FAILED", errorMessage: expect.stringContaining("편수") });
+    expect(result.errorMessage).toContain("이용권은 차감되지 않았어요");
+    expect(run).not.toHaveBeenCalled();
+    expect(reserveCreditMock).not.toHaveBeenCalled();
+    expect(admin.updates.automations).toBeUndefined();
+  });
+
+  it("refuses before claiming when paid calls are switched off or frozen", async () => {
+    createAdminClientMock.mockReturnValue(meteredAdmin("run-b3"));
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    meteredHandler(vi.fn());
+    budget.assertAllowed.mockImplementationOnce(() => { throw new BudgetError("PAID_CALLS_DISABLED", "off"); });
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result.errorMessage).toContain("AI 제작 서비스");
+    expect(budget.claim).not.toHaveBeenCalled();
+    expect(reserveCreditMock).not.toHaveBeenCalled();
+  });
+
+  it("gives the slot back and refunds the credit when the handler fails, and books open reservations as spent", async () => {
+    const admin = meteredAdmin("run-b4");
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    meteredHandler(vi.fn().mockRejectedValue(new Error("AI provider exploded")));
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result.status).toBe("FAILED");
+    expect(budget.closeFailed).toHaveBeenCalledWith("run-b4", expect.stringContaining("AI provider exploded"));
+    expect(releaseCreditByReferenceMock).toHaveBeenCalledWith("run-b4", "AI provider exploded");
+    expect(budget.closeRunItem).not.toHaveBeenCalled();
+  });
+
+  it("shows a budget refusal in the middle of a run in plain Korean and does not park the automation in ERROR", async () => {
+    const admin = meteredAdmin("run-b5");
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    meteredHandler(vi.fn().mockRejectedValue(new BudgetError("BUDGET_CAP_EXCEEDED", "cap")));
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result.errorMessage).toContain("제작 예산");
+    expect(admin.updates.automation_runs[0]).toMatchObject({ status: "FAILED", error_message: expect.stringContaining("제작 예산") });
+    expect(admin.updates.automations ?? []).not.toContainEqual({ status: "ERROR" });
+    expect(releaseCreditByReferenceMock).toHaveBeenCalled();
+  });
+
+  it("gives the slot back when the last credit is lost in a race", async () => {
+    createAdminClientMock.mockReturnValue(meteredAdmin("run-b6"));
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    meteredHandler(vi.fn());
+    reserveCreditMock.mockRejectedValueOnce({ code: "P0001", message: "insufficient BLOG credits: missing 1" });
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result.status).toBe("FAILED");
+    expect(budget.releaseItem).toHaveBeenCalledWith("BLOG", "run-b6");
+  });
+
+  it("does not touch the ledger for a handler that costs nothing (a mock provider, a re-publish)", async () => {
+    createAdminClientMock.mockReturnValue(meteredAdmin("run-b7"));
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    okHandler({ output: { ok: true }, content: "body", contentType: "blog", title: "T", topic: "Topic" });
+    getHandlerMock.mockReturnValue({ templateSlug: "blog-marketing", run: vi.fn().mockResolvedValue({ output: { ok: true } }), metered: () => null });
+
+    await runAutomationNow("auto-1");
+
+    expect(budget.claim).not.toHaveBeenCalled();
+    expect(budget.assertAllowed).not.toHaveBeenCalled();
+    expect(budget.closeRunItem).not.toHaveBeenCalled();
+    expect(budget.scopes).toEqual([]);
   });
 });

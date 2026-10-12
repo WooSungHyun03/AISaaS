@@ -2,16 +2,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Automation, Business } from "@/types/domain";
 import type { AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
 
-const { generateStructuredMock } = vi.hoisted(() => ({ generateStructuredMock: vi.fn() }));
+const { generateStructuredMock, summarizeRunSpendMock } = vi.hoisted(() => ({ generateStructuredMock: vi.fn(), summarizeRunSpendMock: vi.fn() }));
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
+vi.mock("@/server/budget", () => ({ summarizeRunSpend: summarizeRunSpendMock }));
 
 const { blogAutomationHandler } = await import("./blog");
-import { mockBlogGuide, mockBlogOutline, mockBlogSection } from "@/server/ai/providers/mock-blog";
+import { mockBlogDraft, mockBlogFix, mockBlogGuide, mockBlogPlan, mockBlogReview } from "@/server/ai/providers/mock-blog";
+import { serverEnv } from "@/lib/env/server";
 import { aiGuideDraftSchema } from "@/server/ai/prompts/blog-guide";
 import { blogPublishingGuideSchema } from "@/server/blog/publishing-guide";
 
 afterEach(() => {
   vi.resetAllMocks();
+  summarizeRunSpendMock.mockResolvedValue({ totalUsd: 0, steps: [] });
 });
 
 const business: Business = {
@@ -51,26 +54,35 @@ const automation = {
   updated_at: "2026-01-01T00:00:00.000Z",
 } as unknown as Automation;
 
-type Request = { system: string; prompt: string; tier?: string; schema: { parse(value: unknown): unknown } };
+type Request = { system: string; prompt: string; role?: string; purpose?: string; schema: { parse(value: unknown): unknown } };
 type Deferred = { deferred: { state: Record<string, unknown>; progress?: string } };
+type Overrides = Partial<Record<"plan" | "draft" | "fix" | "review" | "guide", (request: Request, call: number) => unknown>>;
 
-const topicResult = { topic: "소금빵 맛있게 먹는 법", title: "소금빵 맛있게 먹는 법" };
 const config = { objective: "신메뉴 홍보", keywords: ["소금빵", "성수동 빵집"], tone: "친근하게", deliveryMode: "app_draft" as const };
 
-/** Answers every AI call like the mock provider does (topic, outline and sections), recording the requests. */
-function useMockWriter(overrides: { section?: (request: Request, index: number) => unknown } = {}) {
-  let sectionCalls = 0;
+/** Answers every AI call like the mock provider does, recording the requests. An override may return or throw instead. */
+function useMockModels(overrides: Overrides = {}) {
+  const calls: Record<string, number> = {};
   generateStructuredMock.mockImplementation(async (request: Request) => {
-    if (request.prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1")) return request.schema.parse(JSON.parse(mockBlogOutline(request.prompt, request.system)));
-    if (request.prompt.includes("AUTOBIZ_BLOG_SECTION_V1")) {
-      const index = sectionCalls++;
-      const custom = overrides.section?.(request, index);
-      return request.schema.parse(custom ?? JSON.parse(mockBlogSection(request.prompt, request.system)));
-    }
-    if (request.prompt.includes("AUTOBIZ_BLOG_GUIDE_V1")) return request.schema.parse(JSON.parse(mockBlogGuide(request.prompt)));
-    return topicResult;
+    const kind = request.prompt.includes("AUTOBIZ_BLOG_PLAN_V2") ? "plan"
+      : request.prompt.includes("AUTOBIZ_BLOG_DRAFT_V2") ? "draft"
+      : request.prompt.includes("AUTOBIZ_BLOG_FIX_V2") ? "fix"
+      : request.prompt.includes("AUTOBIZ_BLOG_REVIEW_V2") ? "review"
+      : "guide";
+    const call = (calls[kind] = (calls[kind] ?? 0) + 1) - 1;
+    const custom = overrides[kind]?.(request, call);
+    if (custom !== undefined) return request.schema.parse(custom);
+    const raw = kind === "plan" ? mockBlogPlan(request.prompt, request.system)
+      : kind === "draft" ? mockBlogDraft(request.prompt, request.system)
+      : kind === "fix" ? mockBlogFix(request.prompt, request.system)
+      : kind === "review" ? mockBlogReview()
+      : mockBlogGuide(request.prompt);
+    return request.schema.parse(JSON.parse(raw));
   });
 }
+
+const requests = () => generateStructuredMock.mock.calls.map((call) => call[0] as Request);
+const ofKind = (marker: string) => requests().filter((request) => request.prompt.includes(marker));
 
 function baseContext(overrides: Partial<AutomationRunContext> = {}): AutomationRunContext {
   return { automation, business, config: config as never, recentTopics: [], runId: "run-1", ...overrides };
@@ -87,16 +99,23 @@ async function runToEnd(ctx: AutomationRunContext, onStep?: (outcome: Deferred) 
   throw new Error("blog run did not finish");
 }
 
+/** A draft whose third section breaks the gate: a stock phrase, an unprovable claim and an invented price. */
+function draftWithBadSection(request: Request): unknown {
+  const draft = JSON.parse(mockBlogDraft(request.prompt, request.system)) as { sections: Array<{ blocks: unknown[] }> };
+  draft.sections[2].blocks = [{ type: "paragraph", text: "결론적으로 저희는 최고의 빵집이고 소금빵은 3,500원입니다 🙂" }, { type: "paragraph", text: "소금빵은 **겉바속촉**이에요 ✨" }];
+  return draft;
+}
+
 describe("blogAutomationHandler", () => {
-  it("plans the post, writes it section by section and returns markup, HTML and measured stats", async () => {
-    useMockWriter();
+  it("runs the pipeline in order: Opus plan, Fable draft, Sonnet fact check, Sonnet guide — one model call per step", async () => {
+    useMockModels();
     const progress: Array<string | undefined> = [];
 
     const result = await runToEnd(baseContext(), (step) => progress.push(step.deferred.progress));
 
-    expect(progress[0]).toContain("0/8");
+    expect(requests().map((request) => `${request.role}:${request.purpose}`)).toEqual(["planner:blog.plan", "writer:blog.draft", "reviewer:blog.review", "reviewer:blog.guide"]);
+    expect(progress).toEqual([expect.stringContaining("(2/5)"), expect.stringContaining("(4/5)"), expect.stringContaining("(5/5)")]);
     expect(result.contentType).toBe("blog-marketing");
-    expect(result.title).toContain("소금빵 맛있게 먹는 법");
     expect(result.content).toMatch(/^# /);
     expect(result.content).toContain("## 🥐");
     expect(result.content).toContain("[사진]");
@@ -106,44 +125,43 @@ describe("blogAutomationHandler", () => {
       stats: { chars: expect.any(Number), sections: 9, photos: expect.any(Number) },
       bodyHtml: expect.stringContaining("<h2"),
       callToAction: expect.any(String),
+      factCheck: { ran: true, flagged: 0, fixed: false },
     });
     const stats = (result.output as { stats: { chars: number; photos: number } }).stats;
     expect(stats.chars).toBeGreaterThanOrEqual(1_500);
     expect(stats.photos).toBeGreaterThanOrEqual(4);
-    expect(result.aiGenerationCount).toBe(2 + 8 + 1); // topic + outline, then intro, six sections and the closing, then the publishing guide
+    expect(result.aiGenerationCount).toBe(4);
   });
 
-  it("writes intro, each section and the closing in order, each seeing what came before", async () => {
-    useMockWriter();
+  it("gives the models enough room to think: no sampling parameters, generous max tokens", async () => {
+    useMockModels();
     await runToEnd(baseContext());
-
-    const sectionRequests = generateStructuredMock.mock.calls.map((call) => call[0] as Request).filter((request) => request.prompt.includes("AUTOBIZ_BLOG_SECTION_V1"));
-    expect(sectionRequests).toHaveLength(8);
-    expect(sectionRequests[0].prompt).toContain("KIND=intro");
-    expect(sectionRequests[7].prompt).toContain("KIND=closing");
-    expect(sectionRequests[0].prompt).not.toContain("Already written");
-    expect(sectionRequests[3].prompt).toContain("Already written");
-    expect(sectionRequests.every((request) => request.tier === "quality")).toBe(true);
-    const outlineRequest = generateStructuredMock.mock.calls.map((call) => call[0] as Request).find((request) => request.prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1"));
-    expect(outlineRequest?.tier).toBe("quality");
+    for (const request of requests()) expect(request).not.toHaveProperty("temperature");
+    const [plan, draft] = requests() as unknown as Array<{ maxTokens: number }>;
+    expect(plan.maxTokens).toBeGreaterThanOrEqual(6_000);
+    expect(draft.maxTokens).toBeGreaterThanOrEqual(12_000);
   });
 
   it("gives the writer the facts, the owner's notes, the platform style and the anti-AI rules", async () => {
-    useMockWriter();
+    useMockModels();
     await runToEnd(baseContext({ config: { ...config, platform: "tistory", notes: "시그니처는 저온 숙성 소금빵이에요" } as never }));
 
-    const outlineRequest = generateStructuredMock.mock.calls.map((call) => call[0] as Request).find((request) => request.prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1"))!;
-    expect(outlineRequest.system).toContain("상호: 우리동네 빵집");
-    expect(outlineRequest.system).toContain("위치: 서울 마포구");
-    expect(outlineRequest.system).toContain("시그니처는 저온 숙성 소금빵이에요");
-    expect(outlineRequest.system).toContain("Platform: Tistory");
-    expect(outlineRequest.system).toContain("Never invent prices");
-    expect(outlineRequest.system).toContain("결론적으로");
-    expect(outlineRequest.system).toContain("==highlight==");
+    const plan = ofKind("AUTOBIZ_BLOG_PLAN_V2")[0];
+    expect(plan.system).toContain("상호: 우리동네 빵집");
+    expect(plan.system).toContain("위치: 서울 마포구");
+    expect(plan.system).toContain("시그니처는 저온 숙성 소금빵이에요");
+    expect(plan.system).toContain("Platform: Tistory");
+    expect(plan.system).toContain("Never invent prices");
+    expect(plan.system).toContain("결론적으로");
+    expect(plan.system).toContain("==highlight==");
+    const draft = ofKind("AUTOBIZ_BLOG_DRAFT_V2")[0];
+    expect(draft.system).toBe(plan.system);
+    expect(draft.prompt).toContain("Primary keyword:");
+    expect(draft.prompt).toContain("Sections, in order:");
   });
 
   it("appends a business info box and hashtags that the app builds, not the AI", async () => {
-    useMockWriter();
+    useMockModels();
     const result = await runToEnd(baseContext({ business: { ...business, main_offering: "소금빵, 크루아상", website: "https://bakery.example.com" } }));
 
     expect(result.content).toContain("## 📌 우리동네 빵집 정보");
@@ -154,10 +172,11 @@ describe("blogAutomationHandler", () => {
   });
 
   it("drops info boxes and dividers the AI tries to add itself", async () => {
-    useMockWriter({
-      section: (request, index) => {
-        const base = JSON.parse(mockBlogSection(request.prompt, request.system)) as { blocks: unknown[] };
-        return index === 1 ? { blocks: [...base.blocks, { type: "info", rows: [{ label: "전화", value: "02-000-0000" }] }, { type: "divider" }] } : base;
+    useMockModels({
+      draft: (request) => {
+        const draft = JSON.parse(mockBlogDraft(request.prompt, request.system)) as { sections: Array<{ blocks: unknown[] }> };
+        draft.sections[1].blocks.push({ type: "info", rows: [{ label: "전화", value: "02-000-0000" }] }, { type: "divider" });
+        return draft;
       },
     });
     const result = await runToEnd(baseContext());
@@ -165,101 +184,104 @@ describe("blogAutomationHandler", () => {
     expect(result.content).not.toMatch(/^---$/m);
   });
 
-  it("rewrites only the sections that fail the quality check, once, with the problems and the old text", async () => {
-    useMockWriter({
-      section: (request, index) => {
-        if (index === 2) {
-          // third section written: a stock phrase, an unprovable claim and an invented price
-          return { blocks: [{ type: "paragraph", text: "결론적으로 저희는 최고의 빵집이고 소금빵은 3,500원입니다 🙂" }, { type: "paragraph", text: "소금빵은 **겉바속촉**이에요 ✨" }] };
-        }
-        return undefined;
-      },
-    });
+  it("rewrites only the sections that fail the quality gate, in ONE targeted Fable call, with the problems and the old text", async () => {
+    useMockModels({ draft: draftWithBadSection });
 
     const result = await runToEnd(baseContext());
 
-    const requests = generateStructuredMock.mock.calls.map((call) => call[0] as Request);
-    const sectionRequests = requests.filter((request) => request.prompt.includes("AUTOBIZ_BLOG_SECTION_V1"));
-    expect(sectionRequests.length).toBeGreaterThan(8);
-    expect(sectionRequests.length).toBeLessThanOrEqual(8 + 4); // at most four rewrites
-    const rewrite = sectionRequests.slice(8).find((request) => request.prompt.includes("It had these problems"))!;
-    expect(rewrite.prompt).toContain("INDEX=1"); // body section 1 = post section 2
-    expect(rewrite.prompt).toContain("결론적으로");
-    expect(rewrite.prompt).toContain("3,500원");
-    expect(rewrite.prompt).toContain("The previous version of this section");
+    const fixes = ofKind("AUTOBIZ_BLOG_FIX_V2");
+    expect(fixes).toHaveLength(1);
+    expect(fixes[0].role).toBe("writer");
+    expect(fixes[0].purpose).toBe("blog.fix");
+    expect(fixes[0].prompt).toContain("SECTION 2");
+    expect(fixes[0].prompt).toContain("결론적으로");
+    expect(fixes[0].prompt).toContain("3,500원");
+    expect(fixes[0].prompt).toContain("Current blocks:");
+    expect(fixes[0].prompt.match(/^SECTION \d+/gm)!.length).toBeLessThanOrEqual(4);
+    expect(ofKind("AUTOBIZ_BLOG_DRAFT_V2")).toHaveLength(1); // the post is never rewritten as a whole
     expect(result.content).not.toContain("3,500원");
     expect(result.content).not.toContain("결론적으로");
   });
 
-  it("keeps the original section when a rewrite fails, and still finishes", async () => {
-    let rewriting = false;
-    useMockWriter({
-      section: (request, index) => {
-        if (request.prompt.includes("It had these problems")) {
-          rewriting = true;
-          throw new Error("AI unavailable");
-        }
-        return index === 1 ? { blocks: [{ type: "paragraph", text: "결론적으로 좋아요" }] } : undefined;
-      },
+  it("keeps the original section when the fix fails, tells the owner, and still finishes", async () => {
+    useMockModels({ draft: draftWithBadSection, fix: () => { throw new Error("AI unavailable"); } });
+
+    const result = await runToEnd(baseContext());
+
+    expect(result.content).toContain("결론적으로");
+    expect(result.output).toMatchObject({ qualityNotes: expect.arrayContaining([expect.stringContaining("자동으로 다듬지 못했어요")]) });
+  });
+
+  it("fixes a concrete unsupported claim found by the fact check, once, and keeps low-severity findings as notes", async () => {
+    useMockModels({
+      review: () => ({
+        unsupported: [
+          { section: 3, quote: "매일 새벽 4시에 굽습니다", reason: "제공된 사실에 영업·제조 시간이 없어요", severity: "high" },
+          { section: 4, quote: "인기가 많아요", reason: "근거가 없는 평가에 가까워요", severity: "low" },
+        ],
+      }),
     });
 
     const result = await runToEnd(baseContext());
 
-    expect(rewriting).toBe(true);
-    expect(result.content).toContain("결론적으로 좋아요");
-    expect(result.output).toMatchObject({ qualityNotes: expect.any(Array) });
+    expect(requests().map((request) => request.purpose)).toEqual(["blog.plan", "blog.draft", "blog.review", "blog.factfix", "blog.guide"]);
+    const fix = ofKind("AUTOBIZ_BLOG_FIX_V2")[0];
+    expect(fix.prompt).toContain("SECTION 3");
+    expect(fix.prompt).toContain("매일 새벽 4시에 굽습니다");
+    expect(fix.prompt).not.toContain("SECTION 4");
+    expect(result.output).toMatchObject({
+      factCheck: { ran: true, flagged: 2, fixed: true },
+      qualityNotes: [expect.stringContaining("인기가 많아요")],
+    });
   });
 
-  it("spreads the writing over several short steps instead of one long request", async () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date("2026-10-11T00:00:00.000Z"));
-      useMockWriter();
-      const base = generateStructuredMock.getMockImplementation()!;
-      generateStructuredMock.mockImplementation(async (request: Request) => {
-        vi.setSystemTime(new Date(Date.now() + 15_000)); // each AI call "takes" 15 s
-        return base(request);
-      });
+  it("finishes without a fact check when the reviewer is unavailable, and says so", async () => {
+    useMockModels({ review: () => { throw new Error("budget exhausted"); } });
+    const result = await runToEnd(baseContext());
+    expect(result.output).toMatchObject({ factCheck: { ran: false }, qualityNotes: [expect.stringContaining("사실 검수를 하지 못했어요")] });
+    expect(result.title).toBeTruthy();
+  });
 
-      const steps: number[] = [];
-      await runToEnd(baseContext(), (step) => steps.push(((step.deferred.state as { sections: unknown[] }).sections ?? []).length));
-
-      // start (0 written), then three sections per 40 s step; the third step writes the last two and finishes
-      expect(steps).toEqual([0, 3, 6]);
-    } finally {
-      vi.useRealTimers();
-    }
+  it("records what each model call cost from the spend ledger", async () => {
+    useMockModels();
+    summarizeRunSpendMock.mockResolvedValue({ totalUsd: 0.91, steps: [{ step: "blog.plan", model: "claude-opus-5-5", usd: 0.1 }, { step: "blog.draft", model: "claude-fable-5-1", usd: 0.81 }] });
+    const result = await runToEnd(baseContext());
+    expect(result.output).toMatchObject({ generation: { pipeline: "blog-v2", costUsd: 0.91, steps: [expect.objectContaining({ step: "blog.plan" }), expect.objectContaining({ step: "blog.draft" })] } });
   });
 
   it("gives up on a run that has been going too long", async () => {
-    useMockWriter();
+    useMockModels();
     const started = (await blogAutomationHandler.run(baseContext())) as unknown as Deferred;
-    const stale = { ...started.deferred.state, startedAt: new Date(Date.now() - 26 * 60_000).toISOString() };
+    const stale = { ...started.deferred.state, startedAt: new Date(Date.now() - 41 * 60_000).toISOString() };
     await expect(blogAutomationHandler.resume!(baseContext(), stale as never)).rejects.toThrow("너무 오래");
   });
 
-  it("regenerates the topic exactly once when the first pick is a near-duplicate, then accepts the second", async () => {
-    useMockWriter();
-    const base = generateStructuredMock.getMockImplementation()!;
-    const topics = [{ topic: "겨울철 난방비 절약 팁", title: "첫 제목" }, { topic: "출근길 소금빵 예약 팁", title: "둘째 제목" }];
-    generateStructuredMock.mockImplementation(async (request: Request) => (request.prompt.includes("Pick one specific blog topic") ? topics.shift() : base(request)));
+  it("refuses to continue from the old section-by-section job format with a clear message", async () => {
+    await expect(blogAutomationHandler.resume!(baseContext(), { v: 1, stage: "WRITING" } as never)).rejects.toThrow("읽지 못했어요");
+  });
+
+  it("plans again exactly once when the first topic is a near-duplicate, then accepts the second", async () => {
+    const topics = ["겨울철 난방비 절약 팁", "출근길 소금빵 예약 팁"];
+    useMockModels({ plan: (request, call) => ({ ...JSON.parse(mockBlogPlan(request.prompt, request.system)), topic: topics[call] }) });
 
     const started = (await blogAutomationHandler.run(baseContext({ recentTopics: ["겨울철 난방비 절약하는 방법"] }))) as unknown as Deferred;
 
     expect(started.deferred.state.topic).toBe("출근길 소금빵 예약 팁");
-    const retry = generateStructuredMock.mock.calls.map((call) => call[0] as Request).filter((request) => request.prompt.includes("Pick one specific blog topic"))[1];
-    expect(retry.prompt).toContain("겨울철 난방비 절약 팁");
+    const plans = ofKind("AUTOBIZ_BLOG_PLAN_V2");
+    expect(plans).toHaveLength(2);
+    expect(plans[0].purpose).toBe("blog.plan");
+    expect(plans[1].purpose).toBe("blog.plan.retry");
+    expect(plans[1].prompt).toContain("겨울철 난방비 절약 팁");
   });
 
-  it("does not regenerate when the first topic is already distinct from recent history", async () => {
-    useMockWriter();
+  it("does not plan again when the first topic is already distinct from recent history", async () => {
+    useMockModels();
     await blogAutomationHandler.run(baseContext({ recentTopics: ["여름 휴가지 추천"] }));
-    const picks = generateStructuredMock.mock.calls.map((call) => call[0] as Request).filter((request) => request.prompt.includes("Pick one specific blog topic"));
-    expect(picks).toHaveLength(1);
+    expect(ofKind("AUTOBIZ_BLOG_PLAN_V2")).toHaveLength(1);
   });
 
   it("keeps a calendar topic fixed and injects its goal, brief and CTA into every stage", async () => {
-    useMockWriter();
+    useMockModels();
     const calendarItem = {
       id: "calendar-1",
       businessId: "biz-1",
@@ -275,12 +297,8 @@ describe("blogAutomationHandler", () => {
     const result = await runToEnd(baseContext({ calendarItem }));
 
     expect(result.topic).toBe(calendarItem.topic);
-    const requests = generateStructuredMock.mock.calls.map((call) => call[0] as Request);
-    const title = requests[0];
-    expect(title.prompt).toContain(calendarItem.topic);
-    expect(title.system).toContain(calendarItem.goal);
-    expect(title.system).toContain(calendarItem.summary);
-    for (const request of requests.slice(1).filter((item) => !item.prompt.includes("AUTOBIZ_BLOG_GUIDE_V1"))) {
+    expect(ofKind("AUTOBIZ_BLOG_PLAN_V2")[0].prompt).toContain(`"${calendarItem.topic}"`);
+    for (const request of requests().filter((item) => !item.prompt.includes("AUTOBIZ_BLOG_GUIDE_V1") && !item.prompt.includes("AUTOBIZ_BLOG_REVIEW_V2"))) {
       expect(request.system).toContain(calendarItem.goal);
       expect(request.system).toContain(calendarItem.summary);
       expect(request.system).toContain(calendarItem.cta);
@@ -288,7 +306,7 @@ describe("blogAutomationHandler", () => {
   });
 
   it("only ever writes the post for the owner to review: no delivery, whatever an old setup said", async () => {
-    useMockWriter();
+    useMockModels();
     const legacy = { ...config, deliveryMode: "wordpress_publish", wordpress: { siteUrl: "https://blog.example.com", username: "admin", encryptedAppPassword: "enc" } };
     const result = await runToEnd(baseContext({ config: legacy as never }));
     expect(result.externalUrl).toBeUndefined();
@@ -296,25 +314,35 @@ describe("blogAutomationHandler", () => {
     expect(result.output).not.toHaveProperty("externalUrl");
   });
 
-  it("throws instead of returning a partial result when a stage fails", async () => {
-    generateStructuredMock.mockRejectedValue(new Error("topic failed"));
-    await expect(blogAutomationHandler.run(baseContext())).rejects.toThrow("topic failed");
+  it("throws instead of returning a partial result when the plan or the draft fails", async () => {
+    generateStructuredMock.mockRejectedValue(new Error("plan failed"));
+    await expect(blogAutomationHandler.run(baseContext())).rejects.toThrow("plan failed");
 
-    useMockWriter();
-    const base = generateStructuredMock.getMockImplementation()!;
-    generateStructuredMock.mockImplementation(async (request: Request) => {
-      if (request.prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1")) throw new Error("outline failed");
-      return base(request);
-    });
-    await expect(blogAutomationHandler.run(baseContext())).rejects.toThrow("outline failed");
+    useMockModels({ draft: () => { throw new Error("draft failed"); } });
+    await expect(runToEnd(baseContext())).rejects.toThrow("draft failed");
+  });
 
-    useMockWriter({ section: (_request, index) => { if (index === 2) throw new Error("section failed"); return undefined; } });
-    await expect(runToEnd(baseContext())).rejects.toThrow("section failed");
+  it("is metered against the blog budget only when a real provider is used, and needs Claude for that", () => {
+    const env = serverEnv as { AI_PROVIDER: string };
+    const original = env.AI_PROVIDER;
+    try {
+      env.AI_PROVIDER = "mock";
+      expect(blogAutomationHandler.metered?.(baseContext())).toBeNull();
+      expect(blogAutomationHandler.preflight?.(baseContext())).toBeNull();
+      env.AI_PROVIDER = "anthropic";
+      expect(blogAutomationHandler.metered?.(baseContext())).toBe("BLOG");
+      expect(blogAutomationHandler.preflight?.(baseContext())).toBeNull();
+      env.AI_PROVIDER = "openai";
+      expect(blogAutomationHandler.metered?.(baseContext())).toBe("BLOG");
+      expect(blogAutomationHandler.preflight?.(baseContext())).toContain("Claude");
+    } finally {
+      env.AI_PROVIDER = original;
+    }
   });
 
   describe("publishing guide (style, photo spots, SEO)", () => {
     it("is made in the same run and matches the post: one detail per photo spot, grounded tags, readable colours", async () => {
-      useMockWriter();
+      useMockModels();
       const result = await runToEnd(baseContext());
       const output = result.output as { publishingGuide: unknown; stats: { photos: number }; markup: string };
       const guide = blogPublishingGuideSchema.parse(output.publishingGuide);
@@ -330,7 +358,7 @@ describe("blogAutomationHandler", () => {
     });
 
     it("never fails or re-bills the post when the guide's AI call fails: it falls back to rules", async () => {
-      useMockWriter();
+      useMockModels();
       const original = generateStructuredMock.getMockImplementation()!;
       generateStructuredMock.mockImplementation(async (request: Request) => {
         if (request.prompt.includes("AUTOBIZ_BLOG_GUIDE_V1")) throw new Error("model unavailable");
@@ -347,7 +375,7 @@ describe("blogAutomationHandler", () => {
     });
 
     it("ignores a guide answer that is mostly garbage and still produces a complete guide", async () => {
-      useMockWriter();
+      useMockModels();
       const original = generateStructuredMock.getMockImplementation()!;
       generateStructuredMock.mockImplementation(async (request: Request) => {
         if (request.prompt.includes("AUTOBIZ_BLOG_GUIDE_V1")) return aiGuideDraftSchema.parse({ style: { bodySize: "huge", headingColor: "red" }, seo: { tags: ["광고", 5, "최고의맛집"] } });

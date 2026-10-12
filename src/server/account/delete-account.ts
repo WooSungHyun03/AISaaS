@@ -1,18 +1,18 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { disconnectConnection } from "@/server/connectors/integrations";
-import { REFERENCE_BUCKET } from "@/server/shorts/reference-images";
+import { REFERENCE_BUCKET, VIDEO_BUCKET } from "@/server/shorts/assets";
 import { logger } from "@/lib/logger";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
-/** Storage folders nest as `{userId}/{automationId}/[frames/]file`; this bounds the walk. */
+/** Storage folders nest as `{userId}/{automationId}/[assets/ | {runId}/]file`; this bounds the walk. */
 const MAX_FOLDER_DEPTH = 4;
 const LIST_PAGE_SIZE = 1000;
 
 /** Every object path under `prefix` (Supabase Storage `list` is one level at a time; folders come back with `id: null`). */
-async function listObjectPaths(admin: AdminClient, prefix: string, depth = 0): Promise<string[]> {
-  const { data, error } = await admin.storage.from(REFERENCE_BUCKET).list(prefix, { limit: LIST_PAGE_SIZE });
+async function listObjectPaths(admin: AdminClient, bucket: string, prefix: string, depth = 0): Promise<string[]> {
+  const { data, error } = await admin.storage.from(bucket).list(prefix, { limit: LIST_PAGE_SIZE });
   if (error) {
     // The bucket is created lazily on the first upload; a user who never uploaded has nothing to delete.
     if (/not.?found/i.test(error.message)) return [];
@@ -22,7 +22,7 @@ async function listObjectPaths(admin: AdminClient, prefix: string, depth = 0): P
   for (const entry of data ?? []) {
     const path = `${prefix}/${entry.name}`;
     if (entry.id) paths.push(path);
-    else if (depth < MAX_FOLDER_DEPTH) paths.push(...(await listObjectPaths(admin, path, depth + 1)));
+    else if (depth < MAX_FOLDER_DEPTH) paths.push(...(await listObjectPaths(admin, bucket, path, depth + 1)));
   }
   return paths;
 }
@@ -34,7 +34,7 @@ async function listObjectPaths(admin: AdminClient, prefix: string, depth = 0): P
  * Order matters: things that are NOT removed by the `auth.users` ->
  * `profiles` -> ... cascade go first — integration tokens live in Vault
  * (only `integration_secret_delete` removes them) and uploaded Shorts
- * reference images live in Storage under `{userId}/`. Then deleting the
+ * files and finished videos live in Storage under `{userId}/`. Then deleting the
  * auth user cascades every row the user owns.
  */
 export async function deleteUserAccount(userId: string): Promise<void> {
@@ -46,15 +46,18 @@ export async function deleteUserAccount(userId: string): Promise<void> {
     await disconnectConnection(admin, connection.id);
   }
 
-  try {
-    const paths = await listObjectPaths(admin, userId);
-    if (paths.length > 0) {
-      const { error } = await admin.storage.from(REFERENCE_BUCKET).remove(paths);
-      if (error) throw error;
+  // Uploaded photos, clips and logos, and the videos made from them.
+  for (const bucket of [REFERENCE_BUCKET, VIDEO_BUCKET]) {
+    try {
+      const paths = await listObjectPaths(admin, bucket, userId);
+      if (paths.length > 0) {
+        const { error } = await admin.storage.from(bucket).remove(paths);
+        if (error) throw error;
+      }
+    } catch (cause) {
+      // Orphaned files are private and unreachable once the user is gone; never block the deletion on them.
+      logger.warn("account_delete_storage_cleanup_failed", { bucket, message: cause instanceof Error ? cause.message : String(cause) });
     }
-  } catch (cause) {
-    // Orphaned images are private and unreachable once the user is gone; never block the deletion on them.
-    logger.warn("account_delete_storage_cleanup_failed", { message: cause instanceof Error ? cause.message : String(cause) });
   }
 
   const { error } = await admin.auth.admin.deleteUser(userId);

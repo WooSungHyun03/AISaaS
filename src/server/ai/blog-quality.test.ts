@@ -1,35 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { assessBlogPost, assignIssues, BLOG_LENGTH } from "./blog-quality";
-import { blogOutlineSchema, blogSectionOutputSchema } from "./prompts/blog";
-import { mockBlogOutline, mockBlogSection } from "./providers/mock-blog";
+import { blogDraftSchema, blogPlanSchema } from "./prompts/blog";
+import { mockBlogDraft, mockBlogPlan } from "./providers/mock-blog";
 import { blogPostSchema, countCharsNoSpaces, postBodyText, type BlogPost } from "@/server/blog/post";
 
 const system = "상호: 우리동네 빵집\n이번 글의 핵심 키워드: 소금빵, 성수동 빵집";
 
-/** The mock provider's full pipeline output, exactly as the handler would assemble it. */
+/** The mock provider's plan and draft, exactly as the handler would assemble the post. */
 function mockPost(): BlogPost {
-  const outline = blogOutlineSchema.parse(JSON.parse(mockBlogOutline('Plan one marketing blog post about "소금빵 맛있게 먹는 법"', system)));
-  const sections = [mockBlogSection("AUTOBIZ_BLOG_SECTION_V1\nKIND=intro", system)];
-  outline.sections.forEach((section, index) => {
-    const prompt = [
-      "AUTOBIZ_BLOG_SECTION_V1",
-      `KIND=body INDEX=${index}`,
-      `Write the section "${section.heading}": 2-3 paragraphs.`,
-      section.photo ? `Include one photo block where it fits best: slot = "${section.photo}", plus a short caption.` : "Include no photo block.",
-      section.extra === "quote" ? "Include one quote block (one memorable line)." : section.extra === "callout" ? 'Include one callout block with a label like "💡 꿀팁".' : section.extra === "list" ? "Include one list block (check or bullet style)." : "",
-    ].join(" ");
-    sections.push(mockBlogSection(prompt, system));
-  });
-  sections.push(mockBlogSection("AUTOBIZ_BLOG_SECTION_V1\nKIND=closing", system));
-  const kinds = ["intro", ...outline.sections.map((section) => section.heading), "closing"];
-  return blogPostSchema.parse({
-    title: outline.title,
-    sections: sections.map((raw, index) => ({
-      heading: index === 0 || index === sections.length - 1 ? undefined : kinds[index],
-      blocks: blogSectionOutputSchema.parse(JSON.parse(raw)).blocks,
-    })),
-    hashtags: ["소금빵", "성수동빵집"],
-  });
+  const plan = blogPlanSchema.parse(JSON.parse(mockBlogPlan('AUTOBIZ_BLOG_PLAN_V2\nexactly this planned topic, without replacing it: "소금빵 맛있게 먹는 법".', system)));
+  const brief = plan.sections
+    .map((section, index) => `${index + 1}. ${section.heading} — purpose: x.${section.photo ? ` Photo block: slot = "${section.photo}", plus a short caption.` : ""}${section.extra === "quote" ? " Include one quote block." : section.extra === "callout" ? " Include one callout block." : section.extra === "list" ? " Include one list block." : ""}`)
+    .join("\n");
+  const draft = blogDraftSchema.parse(JSON.parse(mockBlogDraft(`Post title: ${plan.title}\n${brief}`, system)));
+  return blogPostSchema.parse({ title: draft.title, sections: draft.sections, hashtags: ["소금빵", "성수동빵집"] });
 }
 
 const facts = "상호: 우리동네 빵집\n위치: 서울 성동구 성수동\n소개: 매일 아침 직접 굽는 동네 베이커리";

@@ -8,26 +8,32 @@ import { advanceDeferredRun, runAutomationNow } from "@/server/automations/runne
 import { computeNextRunAt } from "@/server/automations/scheduler";
 import { parseScheduleFromForm } from "@/server/automations/schedule-input";
 import { canCreateAutomation } from "@/server/billing/entitlements";
-import { analyzeReferenceImage } from "@/server/shorts/reference-analysis";
+import { getPostprocessProvider } from "@/server/connectors/postprocess";
 import {
-  deleteReferenceImage,
-  detectImageType,
-  isOwnedReferencePath,
-  referenceStoragePath,
-  uploadReferenceImage,
-} from "@/server/shorts/reference-images";
+  assetStoragePath,
+  checkAssetBasics,
+  checkAssetLimits,
+  createAssetUpload,
+  detectAssetType,
+  isOwnedAssetPath,
+  readAssetHead,
+  removeAssets,
+  signAsset,
+  REFERENCE_BUCKET,
+} from "@/server/shorts/assets";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
 import {
+  ASSET_LABEL_MAX_LENGTH,
+  ASSET_LIMITS,
+  ASSET_ROLES,
   MASCOT_POSES,
-  MAX_REFERENCE_UPLOAD_BYTES,
-  MAX_SHORTS_REFERENCES,
-  REFERENCE_LABEL_MAX_LENGTH,
   SHORTS_BRIEF_MAX_LENGTH,
-  SHORTS_STYLES,
-  isReferenceSubject,
-  parseShortsReferenceSettings,
-  type ShortsReference,
-  type ShortsStyle,
+  SHORTS_DURATION,
+  parseShortsSettings,
+  type ShortsAsset,
+  type ShortsAssetKind,
+  type ShortsAssetRole,
+  type VoiceMode,
 } from "@/types/shorts-reference";
 import type { Json } from "@/types/domain";
 
@@ -41,8 +47,12 @@ export interface ShortsActionResult {
   progress?: string;
 }
 
-/** A video is built from the owner's images (a character, a product, a shop …); without one there is nothing to build from. */
-const NEEDS_CHARACTER = "참고 이미지를 먼저 추가해주세요. 이지 마케팅 마스코트를 불러오거나 캐릭터·상품·매장 이미지를 올리면 영상을 만들 수 있어요.";
+/** A video is built from the owner's photos or clips (a product, a shop, a person …); without one there is nothing to build from. */
+const NEEDS_ASSETS = "사진이나 참고 영상을 먼저 추가해주세요. 상품·매장 사진을 올리거나 이지 마케팅 마스코트를 불러오면 광고 영상을 만들 수 있어요.";
+
+function hasVisualAssets(config: unknown): boolean {
+  return parseShortsSettings(config).assets.some((asset) => asset.kind === "image" || asset.kind === "video");
+}
 
 function parsePlatforms(values: string[]): ShortsPublishPlatform[] {
   return [...new Set(values.filter((value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube"))];
@@ -102,7 +112,7 @@ export async function createShortsAutomation(businessId: string): Promise<Shorts
 export async function generateShortsPreview(automationId: string): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
-  if (parseShortsReferenceSettings(owned.automation.config).references.length === 0) return { error: NEEDS_CHARACTER };
+  if (!hasVisualAssets(owned.automation.config)) return { error: NEEDS_ASSETS };
   try {
     const result = await runAutomationNow(automationId, { shorts: { previewOnly: true } });
     if (result.status === "FAILED") return { error: describeAutomationRunError(result.errorMessage), runId: result.runId };
@@ -175,7 +185,7 @@ export async function publishShortsNow(
 export async function saveShortsSchedule(automationId: string, formData: FormData): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
-  if (parseShortsReferenceSettings(owned.automation.config).references.length === 0) return { error: NEEDS_CHARACTER };
+  if (!hasVisualAssets(owned.automation.config)) return { error: NEEDS_ASSETS };
   const schedule = parseScheduleFromForm(formData, "Asia/Seoul");
   if (!schedule) return { error: "주기, 요일(날짜), 시간을 확인해주세요." };
   const platforms = parsePlatforms(formData.getAll("platforms").map(String));
@@ -210,114 +220,180 @@ export async function saveShortsSchedule(automationId: string, formData: FormDat
 
 type OwnedShorts = Exclude<Awaited<ReturnType<typeof ownedShortsAutomation>>, { error: string }>;
 
-const DEFAULT_MASCOT_BRIEF = "이지 마케팅 서비스(마케팅 진단, 콘텐츠 캘린더, 블로그 글, 숏폼 영상을 AI가 만들어 줘요)를 사장님께 소개하는 웃긴 캐릭터 콩트";
+const DEFAULT_MASCOT_BRIEF = "이지 마케팅 서비스(마케팅 진단, 콘텐츠 캘린더, 블로그 글, 광고 영상을 AI가 만들어 줘요)를 사장님께 소개하는 친근한 광고 영상";
 
-/** Writes the reference list / creative settings into `automations.config`, keeping every other key (platforms …). */
-async function writeShortsConfig(
-  owned: OwnedShorts,
-  patch: { references?: ShortsReference[]; shortsStyle?: ShortsStyle; shortsBrief?: string },
-): Promise<string | null> {
+type ConfigPatch = { assets?: ShortsAsset[]; shortsBrief?: string; durationSec?: number; voiceMode?: VoiceMode };
+
+/**
+ * Writes the Shorts settings into `automations.config`, keeping every other key (platforms …). Photos saved by the
+ * older reference list are carried over into `assets` the first time anything is written.
+ */
+async function writeShortsConfig(owned: OwnedShorts, patch: ConfigPatch): Promise<string | null> {
   const current = owned.automation.config && typeof owned.automation.config === "object" && !Array.isArray(owned.automation.config)
     ? owned.automation.config as Record<string, Json | undefined>
     : {};
+  const { references: legacyReferences, ...rest } = current;
+  void legacyReferences;
+  const assets = patch.assets ?? parseShortsSettings(owned.automation.config).assets;
   const { error } = await owned.supabase.from("automations").update({
-    config: { ...current, ...patch } as unknown as Json,
+    config: { ...rest, ...patch, assets } as unknown as Json,
   }).eq("id", owned.automation.id).eq("user_id", owned.user.id);
   if (error) return "설정을 저장하지 못했어요. 잠시 후 다시 시도해주세요.";
   revalidatePath("/shorts");
   return null;
 }
 
-export async function uploadShortsReference(automationId: string, formData: FormData): Promise<ShortsActionResult> {
+export interface ShortsUploadTicket extends ShortsActionResult {
+  assetId?: string;
+  path?: string;
+  token?: string;
+  bucket?: string;
+}
+
+function extensionOf(fileName: string): string {
+  return fileName.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+}
+
+/**
+ * Step 1 of adding a file: checks what the owner is about to send and hands the browser a one-time URL to upload to
+ * directly (a video does not fit through a Server Action). The file is not part of the settings until step 2.
+ */
+export async function createShortsAssetUpload(
+  automationId: string,
+  input: { kind: string; fileName: string; mime: string; bytes: number },
+): Promise<ShortsUploadTicket> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
-  const settings = parseShortsReferenceSettings(owned.automation.config);
-  if (settings.references.length >= MAX_SHORTS_REFERENCES) return { error: `참고 이미지는 최대 ${MAX_SHORTS_REFERENCES}장까지 쓸 수 있어요.` };
+  if (!(input.kind in ASSET_LIMITS)) return { error: "올릴 파일의 종류를 확인해주세요." };
+  const kind = input.kind as ShortsAssetKind;
+  const limits = ASSET_LIMITS[kind];
+  const extension = extensionOf(input.fileName);
+  if (!(limits.extensions as readonly string[]).includes(extension)) return { error: `이 칸에는 ${limits.label} 파일만 올릴 수 있어요.` };
+  if (input.mime && !(limits.mimes as readonly string[]).includes(input.mime)) return { error: `이 칸에는 ${limits.label} 파일만 올릴 수 있어요.` };
+  const settings = parseShortsSettings(owned.automation.config);
+  // Count and size are known now; the length of a video or an audio file only after the upload (registerShortsAsset).
+  const early = checkAssetBasics({ kind, size: Math.max(1, Math.floor(input.bytes)), existing: settings.assets });
+  if (early) return { error: early };
 
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) return { error: "이미지 파일을 선택해주세요." };
-  if (file.size > MAX_REFERENCE_UPLOAD_BYTES) return { error: "이미지가 너무 커요. 3MB 이하로 줄여서 올려주세요." };
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const type = detectImageType(bytes);
-  if (!type) return { error: "PNG 또는 JPG 이미지만 올릴 수 있어요." };
-  const label = String(formData.get("label") ?? "").trim().slice(0, REFERENCE_LABEL_MAX_LENGTH);
-
-  const id = crypto.randomUUID();
-  const path = referenceStoragePath(owned.user.id, automationId, id, type);
-  const admin = createAdminClient();
+  const assetId = crypto.randomUUID();
+  const path = assetStoragePath(owned.user.id, automationId, assetId, extension === "jpeg" ? "jpg" : extension);
   try {
-    await uploadReferenceImage(admin, path, bytes, type);
+    const ticket = await createAssetUpload(createAdminClient(), path);
+    return { success: true, assetId, path: ticket.path, token: ticket.token, bucket: REFERENCE_BUCKET };
   } catch {
-    return { error: "이미지를 저장하지 못했어요. 잠시 후 다시 시도해주세요." };
+    return { error: "업로드를 준비하지 못했어요. 잠시 후 다시 시도해주세요." };
   }
-  // The AI looks at the image once so the video planner knows what it shows (never fails the upload).
-  const analysis = await analyzeReferenceImage(bytes, label);
-  const failure = await writeShortsConfig(owned, { references: [...settings.references, { id, kind: "upload", source: path, label, subject: analysis.subject, summary: analysis.summary }] });
-  if (failure) {
-    await deleteReferenceImage(admin, path);
-    return { error: failure };
+}
+
+/** Step 2: the file is in Storage. Recognise it by its bytes, measure it, check the limits, then add it to the settings. */
+export async function registerShortsAsset(
+  automationId: string,
+  input: { assetId: string; path: string; kind: string; label?: string; role?: string },
+): Promise<ShortsActionResult> {
+  const owned = await ownedShortsAutomation(automationId);
+  if ("error" in owned) return { error: owned.error };
+  if (!(input.kind in ASSET_LIMITS)) return { error: "올릴 파일의 종류를 확인해주세요." };
+  const kind = input.kind as ShortsAssetKind;
+  const prefix = `${owned.user.id}/${automationId}/assets/${input.assetId}.`;
+  if (!input.path.startsWith(prefix) || input.path.includes("..") || !/^[0-9a-f-]{36}$/.test(input.assetId)) return { error: "올린 파일 정보가 올바르지 않아요. 다시 올려주세요." };
+
+  const admin = createAdminClient();
+  const discard = async (error: string): Promise<ShortsActionResult> => {
+    await removeAssets(admin, [input.path]).catch(() => undefined);
+    return { error };
+  };
+  const stored = await readAssetHead(admin, input.path);
+  if (!stored) return { error: "올린 파일을 찾지 못했어요. 다시 올려주세요." };
+  const type = detectAssetType(stored.head, kind);
+  if (!type) return discard(`${ASSET_LIMITS[kind].label} 파일이 아니에요. 파일 형식을 확인해주세요.`);
+
+  const settings = parseShortsSettings(owned.automation.config);
+  let probe;
+  if (kind === "video" || kind === "audio") {
+    try {
+      probe = await getPostprocessProvider().probe(await signAsset(admin, REFERENCE_BUCKET, input.path, 300));
+    } catch {
+      return discard("파일 정보를 읽지 못했어요. 다른 파일로 다시 올려주세요.");
+    }
   }
+  const limit = checkAssetLimits({ kind, size: stored.size, existing: settings.assets, probe });
+  if (limit) return discard(limit);
+
+  const role = input.role && input.role in ASSET_ROLES ? (input.role as ShortsAssetRole) : undefined;
+  const asset: ShortsAsset = {
+    id: input.assetId,
+    kind,
+    origin: "upload",
+    source: input.path,
+    label: (input.label ?? "").trim().slice(0, ASSET_LABEL_MAX_LENGTH),
+    mime: type.mime,
+    bytes: stored.size,
+    ...(probe ? { durationSec: probe.durationSec, ...(probe.width ? { width: probe.width } : {}), ...(probe.height ? { height: probe.height } : {}), ...(probe.fps ? { fps: probe.fps } : {}) } : {}),
+    ...(kind === "image" && role ? { role } : {}),
+  };
+  const failure = await writeShortsConfig(owned, { assets: [...settings.assets, asset] });
+  if (failure) return discard(failure);
   return { success: true };
 }
 
 export async function addMascotReferences(automationId: string): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
-  const settings = parseShortsReferenceSettings(owned.automation.config);
-  const have = new Set(settings.references.filter((item) => item.kind === "mascot").map((item) => item.source));
-  const room = MAX_SHORTS_REFERENCES - settings.references.length;
-  const additions: ShortsReference[] = MASCOT_POSES.filter((pose) => !have.has(pose.key)).slice(0, Math.max(0, room)).map((pose) => ({
+  const settings = parseShortsSettings(owned.automation.config);
+  const have = new Set(settings.assets.filter((asset) => asset.origin === "mascot").map((asset) => asset.source));
+  const room = ASSET_LIMITS.image.max - settings.assets.filter((asset) => asset.kind === "image").length;
+  const additions: ShortsAsset[] = MASCOT_POSES.filter((pose) => !have.has(pose.key)).slice(0, Math.max(0, room)).map((pose) => ({
     id: `mascot-${pose.key}`,
-    kind: "mascot",
+    kind: "image",
+    origin: "mascot",
     source: pose.key,
     label: pose.label,
-    subject: "character",
+    role: "character",
   }));
   if (additions.length === 0) {
-    return { error: room <= 0 ? "참고 이미지가 가득 찼어요. 일부를 지운 뒤 마스코트를 불러오세요." : "마스코트 이미지를 이미 모두 불러왔어요." };
+    return { error: room <= 0 ? "사진이 가득 찼어요. 일부를 지운 뒤 마스코트를 불러오세요." : "마스코트 이미지를 이미 모두 불러왔어요." };
   }
-  const failure = await writeShortsConfig(owned, {
-    references: [...settings.references, ...additions],
-    ...(settings.brief ? {} : { shortsBrief: DEFAULT_MASCOT_BRIEF }),
-  });
+  const failure = await writeShortsConfig(owned, { assets: [...settings.assets, ...additions], ...(settings.brief ? {} : { shortsBrief: DEFAULT_MASCOT_BRIEF }) });
   return failure ? { error: failure } : { success: true };
 }
 
-export async function removeShortsReference(automationId: string, referenceId: string): Promise<ShortsActionResult> {
+export async function removeShortsAsset(automationId: string, assetId: string): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
-  const settings = parseShortsReferenceSettings(owned.automation.config);
-  const target = settings.references.find((item) => item.id === referenceId);
+  const settings = parseShortsSettings(owned.automation.config);
+  const target = settings.assets.find((item) => item.id === assetId);
   if (!target) return { success: true };
-  const failure = await writeShortsConfig(owned, { references: settings.references.filter((item) => item.id !== referenceId) });
+  const failure = await writeShortsConfig(owned, { assets: settings.assets.filter((item) => item.id !== assetId) });
   if (failure) return { error: failure };
-  if (target.kind === "upload" && isOwnedReferencePath(target.source, owned.user.id, automationId)) {
-    await deleteReferenceImage(createAdminClient(), target.source);
+  if (target.origin === "upload" && isOwnedAssetPath(target.source, owned.user.id, automationId)) {
+    await removeAssets(createAdminClient(), [target.source]).catch(() => undefined);
   }
   return { success: true };
 }
 
-export async function saveShortsCreativeSettings(
+export async function saveShortsSettings(
   automationId: string,
-  input: { style: string; brief: string },
+  input: { brief: string; durationSec: number; voiceMode: string },
 ): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
-  if (!(input.style in SHORTS_STYLES)) return { error: "영상 스타일을 확인해주세요." };
   const brief = input.brief.trim();
   if (brief.length > SHORTS_BRIEF_MAX_LENGTH) return { error: `요청 사항은 ${SHORTS_BRIEF_MAX_LENGTH}자 이내로 적어주세요.` };
-  const failure = await writeShortsConfig(owned, { shortsStyle: input.style as ShortsStyle, shortsBrief: brief });
+  const durationSec = Math.round(input.durationSec);
+  if (!Number.isFinite(durationSec) || durationSec < SHORTS_DURATION.min || durationSec > SHORTS_DURATION.max) return { error: `영상 길이는 ${SHORTS_DURATION.min}~${SHORTS_DURATION.max}초 사이로 골라주세요.` };
+  if (input.voiceMode !== "native" && input.voiceMode !== "tts") return { error: "목소리 방식을 확인해주세요." };
+  const failure = await writeShortsConfig(owned, { shortsBrief: brief, durationSec, voiceMode: input.voiceMode });
   return failure ? { error: failure } : { success: true };
 }
 
-/** The owner corrects what the AI thought an image shows (a product it called "other", a person it called a character …). */
-export async function setReferenceSubject(automationId: string, referenceId: string, subject: string): Promise<ShortsActionResult> {
+/** The owner says what a photo is for (the AI fills in the rest when the video is made). */
+export async function setAssetRole(automationId: string, assetId: string, role: string): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
-  if (!isReferenceSubject(subject)) return { error: "이미지 종류를 확인해주세요." };
-  const settings = parseShortsReferenceSettings(owned.automation.config);
-  const target = settings.references.find((item) => item.id === referenceId);
-  if (!target || target.kind === "mascot") return { error: "바꿀 이미지를 찾을 수 없어요." };
-  const failure = await writeShortsConfig(owned, { references: settings.references.map((item) => (item.id === referenceId ? { ...item, subject } : item)) });
+  if (!(role in ASSET_ROLES)) return { error: "사진의 쓰임새를 확인해주세요." };
+  const settings = parseShortsSettings(owned.automation.config);
+  const target = settings.assets.find((item) => item.id === assetId);
+  if (!target || target.kind !== "image" || target.origin === "mascot") return { error: "바꿀 사진을 찾을 수 없어요." };
+  const failure = await writeShortsConfig(owned, { assets: settings.assets.map((item) => (item.id === assetId ? { ...item, role: role as ShortsAssetRole } : item)) });
   return failure ? { error: failure } : { success: true };
 }

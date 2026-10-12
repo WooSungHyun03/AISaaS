@@ -3,7 +3,7 @@
  * Pre-flight check for the production AI + video setup. Reads the same env
  * vars the app does (from the shell or `node --env-file=.env.local`) and
  * makes ONE tiny Claude call (a few tokens, well under a cent). It never
- * renders a video (that costs JSON2Video credits) and never prints a key.
+ * generates a video (that costs money) and never prints a key.
  *
  *   node --env-file=.env.local scripts/check-providers.mjs
  */
@@ -18,7 +18,7 @@ if (env.AI_PROVIDER !== "anthropic") {
 } else if (!env.ANTHROPIC_API_KEY) {
   bad("ANTHROPIC_API_KEY", "not set");
 } else {
-  const model = env.AI_MODEL || "claude-haiku-4-5-20251001";
+  const model = env.AI_MODEL || "claude-haiku-4-5-20251001"; // pipeline roles use AI_MODEL_PLANNER/WRITER/REVIEWER/VISION (Opus 5.5 / Fable 5.1 / Sonnet 5.5 by default)
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -38,19 +38,37 @@ if (env.AI_PROVIDER !== "anthropic") {
   }
 }
 
-// --- Video ----------------------------------------------------------------
-if (env.ANIMATION_PROVIDER === "fal") {
-  if (!env.FAL_KEY) bad("FAL_KEY", "not set — ANIMATION_PROVIDER=fal needs it (characters would fall back to the simple motion effect)");
-  else ok("FAL_KEY", "설정됨(유효성은 첫 캐릭터 영상에서 확인돼요 — 클립당 약 $0.35)");
+// --- Ad video (Wan 3.0 on fal, FFmpeg worker, Korean voice) ---------------
+if (env.AD_VIDEO_PROVIDER !== "fal") {
+  bad("AD_VIDEO_PROVIDER", `"${env.AD_VIDEO_PROVIDER ?? "(unset → mock)"}" — set fal for real ad videos (mock only returns a placeholder)`);
 } else {
-  bad("ANIMATION_PROVIDER", `"${env.ANIMATION_PROVIDER ?? "(unset → mock)"}" — set fal to really animate characters (without it they only get the simple motion effect)`);
+  if (!env.FAL_KEY) bad("FAL_KEY", "not set");
+  else ok("FAL_KEY", `설정됨(유효성은 첫 영상에서 확인돼요 — ${env.WAN_MODEL || "alibaba/wan-3.0/reference-to-video"}, 720p 초당 $0.10)`);
+  if (env.POSTPROCESS_PROVIDER !== "worker") bad("POSTPROCESS_PROVIDER", "worker가 아니에요 — 로고·문구·음성 합성을 하는 FFmpeg 서버가 필요해요(worker/ffmpeg)");
+  else if (!env.POSTPROCESS_WORKER_URL || !env.POSTPROCESS_WORKER_TOKEN) bad("POSTPROCESS_WORKER_URL/TOKEN", "not set");
+  else {
+    try {
+      const response = await fetch(`${env.POSTPROCESS_WORKER_URL.replace(/\/+$/, "")}/healthz`, { signal: AbortSignal.timeout(10_000) });
+      if (response.ok) ok("FFmpeg worker", "healthz OK");
+      else bad("FFmpeg worker", `healthz HTTP ${response.status}`);
+    } catch (error) {
+      bad("FFmpeg worker", `연결 실패: ${error instanceof Error ? error.message : error}`);
+    }
+  }
 }
-if (env.VIDEO_RENDER_PROVIDER !== "json2video") {
-  bad("VIDEO_RENDER_PROVIDER", `"${env.VIDEO_RENDER_PROVIDER ?? "(unset → mock)"}" — set json2video for real videos`);
+if (env.TTS_PROVIDER === "elevenlabs") {
+  if (!env.ELEVENLABS_API_KEY || !env.TTS_VOICE_ID) bad("ELEVENLABS_API_KEY / TTS_VOICE_ID", "한국어 음성 보완에 둘 다 필요해요");
+  else ok("한국어 음성", "설정됨(첫 사용에서 확인돼요)");
 } else {
-  if (!env.VIDEO_RENDER_API_KEY) bad("VIDEO_RENDER_API_KEY", "not set");
-  else ok("VIDEO_RENDER_API_KEY", "설정됨(유효성은 첫 영상 만들기에서 확인돼요)");
+  bad("TTS_PROVIDER", `"${env.TTS_PROVIDER ?? "(unset → mock)"}" — 영상에 소리가 비었을 때 한국어 음성을 입히려면 elevenlabs로 설정하세요`);
 }
+
+// --- Spend budget -----------------------------------------------------------
+if (env.ALLOW_PAID_AI_CALLS !== "true") bad("ALLOW_PAID_AI_CALLS", "true가 아니라서 유료 AI 호출이 모두 막혀 있어요(의도한 상태면 무시)");
+else ok("ALLOW_PAID_AI_CALLS", "true — 유료 호출 허용");
+if (!env.BUDGET_PERIOD_START || !env.BUDGET_PERIOD_END) bad("BUDGET_PERIOD_START/END", "운영 기간(YYYY-MM-DD)을 정해야 유료 생성이 돼요. 자동으로 매달 초기화되지 않아요");
+else ok("예산 기간", `${env.BUDGET_PERIOD_START} ~ ${env.BUDGET_PERIOD_END} (끝 날짜 제외)`);
+ok("예산 한도", `영상 $${env.BUDGET_VIDEO_USD || 50} / ${env.BUDGET_VIDEO_ITEMS || 10}편, 블로그 $${env.BUDGET_BLOG_USD || 20} / ${env.BUDGET_BLOG_ITEMS || 10}편`);
 
 // --- Billing ----------------------------------------------------------------
 if (env.BILLING_PROVIDER === "mock" && env.ALLOW_MOCK_BILLING !== "true") {

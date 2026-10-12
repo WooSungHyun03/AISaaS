@@ -1,5 +1,6 @@
 import type { AIProvider, GenerateTextParams, GenerateTextResult } from "../provider";
-import { mockBlogGuide, mockBlogOutline, mockBlogSection } from "./mock-blog";
+import { mockAdPlan, mockAdQa, mockImageAnalysis } from "./mock-ad";
+import { mockBlogDraft, mockBlogFix, mockBlogGuide, mockBlogPlan, mockBlogReview } from "./mock-blog";
 
 /**
  * Deterministic, no-network provider used for local development, CI, and
@@ -25,24 +26,9 @@ export class MockAIProvider implements AIProvider {
   readonly name = "mock";
 
   async generateText({ prompt, system }: GenerateTextParams): Promise<GenerateTextResult> {
-    if (prompt.includes("AUTOBIZ_SHORTS_TOPIC_V1")) {
-      return { text: JSON.stringify({ topic: "고객의 시간을 아껴주는 우리 서비스 활용법" }) };
-    }
-
-    if (prompt.includes("AUTOBIZ_REFERENCE_ANALYSIS_V1")) {
-      // Decide from the owner's label, the way a person would: enough for local development and CI.
-      const label = prompt.match(/for this image \(may be empty\): "([^"]*)"/)?.[1] ?? "";
-      const subject = /캐릭터|마스코트|로봇|고양이|강아지|곰|토끼|character|mascot/i.test(label)
-        ? "character"
-        : /사람|사장|직원|손님|얼굴|모델|person/i.test(label)
-          ? "person"
-          : /매장|가게|내부|외관|사무실|공간|인테리어|카페 전경|place|shop/i.test(label)
-            ? "place"
-            : /상품|메뉴|제품|음식|빵|커피|케이크|product|item/i.test(label) || label === ""
-              ? "product"
-              : "other";
-      return { text: JSON.stringify({ subject, summary: label || "상품이 보이는 사진", visibleText: [] }) };
-    }
+    if (prompt.includes("AUTOBIZ_IMAGE_ANALYSIS_V2")) return { text: mockImageAnalysis(prompt) };
+    if (prompt.includes("AUTOBIZ_AD_PLAN_V1")) return { text: mockAdPlan(prompt, system) };
+    if (prompt.includes("AUTOBIZ_AD_QA_V1")) return { text: mockAdQa() };
 
     if (prompt.includes("AUTOBIZ_SHORTS_PUBLISHING_V1")) {
       const topic = prompt.match(/^Topic: (.+)$/m)?.[1]?.trim() ?? "숏폼";
@@ -59,53 +45,6 @@ export class MockAIProvider implements AIProvider {
           summary: `${topic}을(를) 소개하는 짧은 영상이에요.`,
           youtubeTitle: hook,
           instagramHook: hook,
-        }),
-      };
-    }
-
-    if (prompt.includes("AUTOBIZ_SHORTS_PLAN_V1")) {
-      // Reference lines look like "2. [product] 설명"; pick images from the group the format may use.
-      const tagged = [...prompt.matchAll(/^(\d+)\. \[(\w+)\]/gm)].map((match) => ({ index: Number(match[1]), subject: match[2] }));
-      const characters = tagged.filter((item) => item.subject === "character").map((item) => item.index);
-      const photos = tagged.filter((item) => item.subject !== "character").map((item) => item.index);
-      const request = prompt.match(/^The owner's request \(follow it\): (.+)$/m)?.[1] ?? "";
-      const onlyPromo = prompt.includes('Use format "promo"');
-      const onlyCharacter = prompt.includes('Use format "character"');
-      const promo = onlyPromo || (!onlyCharacter && photos.length > 0 && !/마스코트|캐릭터/.test(request));
-      if (promo && photos.length > 0) {
-        const photo = (turn: number) => photos[turn % photos.length];
-        const people = new Set(tagged.filter((item) => item.subject === "person").map((item) => item.index));
-        return {
-          text: JSON.stringify({
-            format: "promo",
-            hook: "아직도 모르세요?",
-            scenes: [
-              { text: "아직도 모르세요?", imageIndex: photo(0), camera: "push-in", animate: !people.has(photo(0)), motionPrompt: "Slow push-in; soft light shimmers across the surface.", durationSec: 3 },
-              { text: "정성껏 준비한 대표 메뉴를 만나보세요", imageIndex: photo(1), camera: "pan-left", animate: false, motionPrompt: "", durationSec: 5 },
-              { text: "한 입 먹으면 이유를 알게 돼요", imageIndex: photo(2), camera: "pull-out", animate: !people.has(photo(2)), motionPrompt: "Gentle camera pull-back; a little steam rises.", durationSec: 5 },
-              { text: "매장 분위기도 편안해요", imageIndex: photo(3), camera: "pan-right", animate: false, motionPrompt: "", durationSec: 5 },
-              { text: "지금 바로 들러 보세요", imageIndex: photo(4), camera: "tilt-up", animate: false, motionPrompt: "", durationSec: 4 },
-            ],
-            caption: "우리 동네 가게 소개 #동네맛집 #소상공인 #숏폼",
-            privacy: "private",
-          }),
-        };
-      }
-      const character = (turn: number) => (characters.length > 0 ? characters[turn % characters.length] : 1);
-      return {
-        text: JSON.stringify({
-          format: "character",
-          hook: "사장님, 큰일 났어요!",
-          scenes: [
-            { text: "사장님, 큰일 났어요!", speaker: "partner", imageIndex: character(0), action: "The character looks panicked and shakes slightly.", motion: "shake", durationSec: 2 },
-            { text: "무슨 일이에요? 말해 보세요!", speaker: "main", imageIndex: character(1), action: "The character tilts its head curiously and waves.", motion: "pop", durationSec: 3 },
-            { text: "마케팅할 시간이 하나도 없어요", speaker: "partner", imageIndex: character(2), action: "The character listens with a worried expression.", motion: "wobble", durationSec: 5 },
-            { text: "걱정 마세요, 제가 뚝딱 만들어 드려요!", speaker: "main", imageIndex: character(3), action: "The character cheerfully gives a thumbs up and bounces.", motion: "bounce", durationSec: 6 },
-            { text: "글도 영상도 한 번에 끝이에요", speaker: "main", imageIndex: character(4), action: "The character spreads its arms proudly.", motion: "zoom", durationSec: 5 },
-            { text: "지금 바로 시작해 보세요!", speaker: "main", imageIndex: character(5), action: "The character points forward and winks.", motion: "pop", durationSec: 4 },
-          ],
-          caption: "마케팅이 어려운 사장님을 위한 캐릭터 콩트 #소상공인마케팅 #숏폼 #마케팅자동화",
-          privacy: "private",
         }),
       };
     }
@@ -153,14 +92,11 @@ export class MockAIProvider implements AIProvider {
       };
     }
 
-    // Blog pipeline (local dev / CI): stage 1 picks a topic, stage 2 writes the post.
-    if (prompt.includes("Pick one specific blog topic") || prompt.includes("Use exactly this planned topic")) {
-      const planned = prompt.match(/Use exactly this planned topic without replacing it: "([^"]+)"/)?.[1];
-      const topic = planned ?? "단골 손님이 가장 자주 묻는 질문 정리";
-      return { text: JSON.stringify({ topic, title: `${topic}, 한 번에 정리했어요` }) };
-    }
-    if (prompt.includes("AUTOBIZ_BLOG_OUTLINE_V1")) return { text: mockBlogOutline(prompt, system) };
-    if (prompt.includes("AUTOBIZ_BLOG_SECTION_V1")) return { text: mockBlogSection(prompt, system) };
+    // Blog pipeline (local dev / CI): plan, draft, targeted fix, fact check, publishing guide.
+    if (prompt.includes("AUTOBIZ_BLOG_PLAN_V2")) return { text: mockBlogPlan(prompt, system) };
+    if (prompt.includes("AUTOBIZ_BLOG_DRAFT_V2")) return { text: mockBlogDraft(prompt, system) };
+    if (prompt.includes("AUTOBIZ_BLOG_FIX_V2")) return { text: mockBlogFix(prompt, system) };
+    if (prompt.includes("AUTOBIZ_BLOG_REVIEW_V2")) return { text: mockBlogReview() };
     if (prompt.includes("AUTOBIZ_BLOG_GUIDE_V1")) return { text: mockBlogGuide(prompt) };
 
     return {

@@ -73,13 +73,13 @@ describe("POST /api/cron/run-automations", () => {
     vi.setSystemTime(new Date("2026-10-01T00:00:00.000Z"));
     findDueMock.mockResolvedValue([{ id: "a-1" }, { id: "a-2" }, { id: "a-3" }]);
     runDueMock.mockImplementation(async () => {
-      vi.setSystemTime(new Date(Date.now() + 40_000)); // each run "takes" 40s (budget is 70s from the start of the tick)
+      vi.setSystemTime(new Date(Date.now() + 150_000)); // each run "takes" 150s (budget is 270s from the start of the tick)
       return { runId: "r", status: "SUCCESS" };
     });
 
     const body = await (await POST(request("test-cron-secret"))).json();
 
-    expect(runDueMock).toHaveBeenCalledTimes(2); // started at 0s and 40s; at 80s the 70s budget is spent
+    expect(runDueMock).toHaveBeenCalledTimes(2); // started at 0s and 150s; at 300s the 270s budget is spent
     expect(body.processed).toBe(2);
   });
 

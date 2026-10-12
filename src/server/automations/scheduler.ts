@@ -1,5 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logger } from "@/lib/logger";
+import { closeFailedRunBudget } from "@/server/budget";
 import { releaseCreditByReference } from "@/server/billing/credits";
 import { SERVICE_TIMEZONE, getZonedParts, zonedTimeToUtc } from "@/lib/utils/date";
 import type { AutomationSchedule } from "@/types/automation";
@@ -76,8 +78,8 @@ export async function findDueAutomations(limit = 20): Promise<Automation[]> {
 
 /** A run that has been RUNNING/QUEUED this long was killed (timeout, deploy, crash) and will never finish on its own. */
 export const STALE_RUN_MINUTES = 10;
-/** Deferred runs (clips + render) legitimately take minutes, so they get a longer window (the handler gives up at 30). */
-export const STALE_DEFERRED_RUN_MINUTES = 45;
+/** Deferred runs (clips + render) legitimately take minutes, so they get a longer window (a handler gives up before this). */
+export const STALE_DEFERRED_RUN_MINUTES = 90;
 
 /**
  * Marks abandoned runs FAILED. The partial unique index on automation_runs
@@ -114,6 +116,12 @@ export async function reapStaleRuns(now: Date = new Date()): Promise<number> {
   const reapedIds = [...(plain.data ?? []), ...(deferred.data ?? [])].map((run) => run.id);
   for (const runId of reapedIds) {
     await releaseCreditByReference(runId, "stale_run_reaped");
+    // The same for the spend budget: what the run reserved counts as spent, its item slot goes back. No-op for unmetered runs.
+    try {
+      await closeFailedRunBudget(runId, "stale_run_reaped");
+    } catch (error) {
+      logger.error("cron_reap_budget_failed", { runId, message: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   return reapedIds.length;

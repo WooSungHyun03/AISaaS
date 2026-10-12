@@ -4,6 +4,14 @@ import type { Json } from "@/types/domain";
 import { blogPublishingGuideSchema, type BlogPublishingGuide } from "@/server/blog/publishing-guide";
 import { shortsPublishingSchema, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
 
+export interface SafeShortsQa {
+  status: "REJECTED" | "NEEDS_HUMAN_CHECK";
+  summary: string | null;
+  aiChecked: boolean;
+  findings: Array<{ severity: "reject" | "warn"; message: string }>;
+  notes: string[];
+}
+
 export interface SafeAutomationRunOutput {
   title: string | null;
   topic: string | null;
@@ -28,10 +36,15 @@ export interface SafeAutomationRunOutput {
   shortsPublishing: ShortsPublishing | null;
   blogStats: { chars: number; sections: number; photos: number } | null;
   qualityNotes: string[];
-  /** Shorts built from reference images: how the characters were produced. */
-  format: "character" | "promo" | null;
-  animationMode: "video" | "tween" | "photos" | null;
-  animationNote: string | null;
+  /** Shorts: `ad` for the ad-video pipeline; older runs were `character` or `promo` videos. */
+  format: "ad" | "character" | "promo" | null;
+  /** Shorts made by the ad pipeline: where the finished video sits in private Storage (the page signs a fresh address), and its length. */
+  videoPath: string | null;
+  durationSec: number | null;
+  /** Shorts: the quality check. There is no "approved": at best the video needs the owner's final look. */
+  qa: SafeShortsQa | null;
+  /** The video's own voice was missing, so a Korean voice was added. */
+  voiceFallback: boolean;
   /** The video is a test placeholder (no real renderer connected): not a finished Short, cannot be posted. */
   sampleVideo: boolean;
   publicationResults: Partial<Record<"instagram" | "youtube", {
@@ -87,6 +100,22 @@ function safeBlogStats(value: Json | undefined): { chars: number; sections: numb
   const sections = record.sections;
   const photos = record.photos;
   return typeof chars === "number" && typeof sections === "number" && typeof photos === "number" ? { chars, sections, photos } : null;
+}
+
+function safeShortsQa(value: Json | undefined): SafeShortsQa | null {
+  const record = asRecord(value ?? null);
+  if (!record || (record.status !== "REJECTED" && record.status !== "NEEDS_HUMAN_CHECK")) return null;
+  const findings: SafeShortsQa["findings"] = [];
+  if (Array.isArray(record.findings)) {
+    for (const entry of record.findings.slice(0, 20)) {
+      const item = asRecord(entry);
+      const message = item ? safeText(item.message, 400) : null;
+      if (!item || !message) continue;
+      if (item.severity === "reject" || item.severity === "warn") findings.push({ severity: item.severity, message });
+    }
+  }
+  const notes = Array.isArray(record.notes) ? record.notes.filter((item): item is string => typeof item === "string").slice(0, 8).map((item) => item.slice(0, 300)) : [];
+  return { status: record.status, summary: safeText(record.summary, 300), aiChecked: record.aiChecked === true, findings, notes };
 }
 
 function safePublicationResults(value: Json | undefined): SafeAutomationRunOutput["publicationResults"] {
@@ -161,9 +190,11 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
     qualityNotes: Array.isArray(output.qualityNotes)
       ? output.qualityNotes.filter((item): item is string => typeof item === "string").slice(0, 6).map((item) => item.slice(0, 200))
       : [],
-    format: output.format === "character" || output.format === "promo" ? output.format : null,
-    animationMode: output.animationMode === "video" || output.animationMode === "tween" || output.animationMode === "photos" ? output.animationMode : null,
-    animationNote: safeText(output.animationNote, 300),
+    format: output.format === "ad" || output.format === "character" || output.format === "promo" ? output.format : null,
+    videoPath: safeText(output.videoPath, 300),
+    durationSec: typeof output.durationSec === "number" && Number.isFinite(output.durationSec) ? Math.max(0, Math.min(60, output.durationSec)) : null,
+    qa: safeShortsQa(output.qa),
+    voiceFallback: output.voiceFallback === true,
     sampleVideo: output.sampleVideo === true,
     publicationResults: safePublicationResults(output.publicationResults),
   };
@@ -171,7 +202,7 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
   const hasVisibleValue = Object.entries(safe).some(([key, item]) => {
     if (Array.isArray(item)) return item.length > 0;
     if (key === "publicationResults") return Object.keys(item as object).length > 0;
-    if (key === "sampleVideo") return false;
+    if (key === "sampleVideo" || key === "voiceFallback") return false;
     return item !== null;
   });
   return hasVisibleValue ? safe : null;

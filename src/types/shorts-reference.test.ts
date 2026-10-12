@@ -1,96 +1,102 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSET_LIMITS,
   MASCOT_POSES,
-  MAX_SHORTS_REFERENCES,
-  allowedShortsFormats,
-  describeReferenceForPrompt,
-  parseShortsReferenceSettings,
-  referenceIndexes,
-  type ShortsReference,
+  SHORTS_DURATION,
+  assetsOfKind,
+  describeAssetForPrompt,
+  parseShortsSettings,
+  totalSeconds,
+  type ShortsAsset,
 } from "./shorts-reference";
 
-describe("parseShortsReferenceSettings", () => {
-  it("defaults to no references, the automatic style and an empty brief", () => {
-    expect(parseShortsReferenceSettings({})).toEqual({ references: [], style: "auto", brief: "" });
-    expect(parseShortsReferenceSettings(null)).toEqual({ references: [], style: "auto", brief: "" });
+const image = (id: string, extra: Record<string, unknown> = {}) => ({ id, kind: "image", origin: "upload", source: `u/a/assets/${id}.png`, label: "", ...extra });
+
+describe("parseShortsSettings", () => {
+  it("defaults to no files, 25 seconds, the video's own voice and an empty request", () => {
+    const expected = { assets: [], brief: "", durationSec: 25, voiceMode: "native" };
+    expect(parseShortsSettings({})).toEqual(expected);
+    expect(parseShortsSettings(null)).toEqual(expected);
+    expect(parseShortsSettings("junk")).toEqual(expected);
   });
 
-  it("keeps valid references and drops malformed, unknown-mascot and duplicate ones", () => {
-    const settings = parseShortsReferenceSettings({
-      shortsStyle: "promo",
+  it("keeps valid files and drops malformed, unknown-mascot, mascot-video and duplicate ones", () => {
+    const settings = parseShortsSettings({
       shortsBrief: "  신메뉴 홍보  ",
-      references: [
-        { id: "a", kind: "upload", source: "u/a/a.png", label: "사장님", subject: "person", summary: "웃는 사장님" },
-        { id: "a", kind: "upload", source: "u/a/a2.png", label: "duplicate id" },
-        { id: "m", kind: "mascot", source: "wave", label: "인사" },
-        { id: "bad", kind: "mascot", source: "not-a-pose", label: "" },
-        { id: "", kind: "upload", source: "x", label: "" },
+      assets: [
+        image("a", { role: "person", summary: "웃는 사장님" }),
+        image("a", { label: "duplicate id" }),
+        { id: "m", kind: "image", origin: "mascot", source: "wave", label: "인사" },
+        { id: "bad", kind: "image", origin: "mascot", source: "not-a-pose", label: "" },
+        { id: "mv", kind: "video", origin: "mascot", source: "wave", label: "" },
+        { id: "", kind: "image", source: "x" },
+        { id: "k", kind: "gif", source: "x" },
         "junk",
       ],
     });
-    expect(settings.style).toBe("promo");
     expect(settings.brief).toBe("신메뉴 홍보");
-    expect(settings.references.map((item) => item.id)).toEqual(["a", "m"]);
-    expect(settings.references[0]).toMatchObject({ subject: "person", summary: "웃는 사장님" });
+    expect(settings.assets.map((asset) => asset.id)).toEqual(["a", "m"]);
+    expect(settings.assets[0]).toMatchObject({ role: "person", summary: "웃는 사장님" });
   });
 
-  it("never returns more than the maximum number of references", () => {
-    const references = Array.from({ length: 20 }, (_, index) => ({ id: `r${index}`, kind: "upload", source: `p/${index}.png`, label: "" }));
-    expect(parseShortsReferenceSettings({ references }).references).toHaveLength(MAX_SHORTS_REFERENCES);
+  it("never returns more of a kind than the model accepts, and keeps the kinds apart", () => {
+    const images = Array.from({ length: 14 }, (_, index) => image(`i${index}`));
+    const videos = Array.from({ length: 8 }, (_, index) => ({ id: `v${index}`, kind: "video", source: `p/${index}.mp4`, durationSec: 2 }));
+    const settings = parseShortsSettings({ assets: [...images, ...videos, { id: "l1", kind: "logo", source: "p/l1.png" }, { id: "l2", kind: "logo", source: "p/l2.png" }] });
+    expect(assetsOfKind(settings.assets, "image")).toHaveLength(ASSET_LIMITS.image.max);
+    expect(assetsOfKind(settings.assets, "video")).toHaveLength(ASSET_LIMITS.video.max);
+    expect(assetsOfKind(settings.assets, "logo")).toHaveLength(1);
   });
 
-  it("accepts the four styles and falls back to auto for anything else", () => {
-    for (const style of ["auto", "skit", "explainer", "promo"]) expect(parseShortsReferenceSettings({ shortsStyle: style }).style).toBe(style);
-    expect(parseShortsReferenceSettings({ shortsStyle: "showcase" }).style).toBe("auto");
-    expect(parseShortsReferenceSettings({ shortsStyle: 3 }).style).toBe("auto");
+  it("clamps the length to 20-30 seconds and accepts only the two voice modes", () => {
+    expect(parseShortsSettings({ durationSec: 5 }).durationSec).toBe(SHORTS_DURATION.min);
+    expect(parseShortsSettings({ durationSec: 99 }).durationSec).toBe(SHORTS_DURATION.max);
+    expect(parseShortsSettings({ durationSec: 27.4 }).durationSec).toBe(27);
+    expect(parseShortsSettings({ durationSec: "30" }).durationSec).toBe(SHORTS_DURATION.default);
+    expect(parseShortsSettings({ voiceMode: "tts" }).voiceMode).toBe("tts");
+    expect(parseShortsSettings({ voiceMode: "robot" }).voiceMode).toBe("native");
   });
 
-  it("forces mascots to 'character' and leaves older uploads without a subject (they are detected when needed)", () => {
-    const settings = parseShortsReferenceSettings({
+  it("forces mascots to 'character'", () => {
+    const [mascot] = parseShortsSettings({ assets: [{ id: "m", kind: "image", origin: "mascot", source: "cheer", label: "", role: "product" }] }).assets;
+    expect(mascot.role).toBe("character");
+  });
+
+  it("upgrades the older reference list (uploads and mascots, with their detected subject)", () => {
+    const settings = parseShortsSettings({
       references: [
-        { id: "old", kind: "upload", source: "u/a/old.png", label: "옛날 이미지" },
-        { id: "m", kind: "mascot", source: "wave", label: "인사", subject: "product" },
+        { id: "r1", kind: "upload", source: "u/a/r1.png", label: "소금빵", subject: "product", summary: "갓 구운 소금빵" },
+        { id: "r2", kind: "upload", source: "u/a/r2.png", label: "" },
+        { id: "mascot-wave", kind: "mascot", source: "wave", label: "인사", subject: "character" },
       ],
     });
-    expect(settings.references.map((item) => item.subject)).toEqual([undefined, "character"]);
+    expect(settings.assets).toEqual([
+      expect.objectContaining({ id: "r1", kind: "image", origin: "upload", role: "product", summary: "갓 구운 소금빵" }),
+      expect.objectContaining({ id: "r2", kind: "image", origin: "upload" }),
+      expect.objectContaining({ id: "mascot-wave", kind: "image", origin: "mascot", role: "character" }),
+    ]);
+    expect(settings.assets[1].role).toBeUndefined();
   });
 });
 
-describe("describing images for the planner", () => {
-  it("tags every image with what it shows and includes the summary and the owner's label", () => {
-    for (const pose of MASCOT_POSES) {
-      expect(describeReferenceForPrompt({ id: pose.key, kind: "mascot", source: pose.key, label: pose.label, subject: "character" })).toContain(pose.description);
-    }
-    expect(describeReferenceForPrompt({ id: "u", kind: "upload", source: "p", label: "소금빵", subject: "product", summary: "갓 구운 소금빵 클로즈업" }))
-      .toBe("[product] 갓 구운 소금빵 클로즈업 (사장님 설명: 소금빵)");
-    expect(describeReferenceForPrompt({ id: "u", kind: "upload", source: "p", label: "", subject: "place" })).toContain("[place]");
-    expect(describeReferenceForPrompt({ id: "u", kind: "upload", source: "p", label: "" })).toContain("[other]");
-    expect(describeReferenceForPrompt({ id: "u", kind: "upload", source: "p", label: "같음", subject: "other", summary: "같음" })).toBe("[other] 같음");
-  });
-});
+describe("helpers", () => {
+  const assets = [
+    { id: "v1", kind: "video", origin: "upload", source: "a", label: "", durationSec: 6.5 },
+    { id: "v2", kind: "video", origin: "upload", source: "b", label: "", durationSec: 8 },
+    { id: "a1", kind: "audio", origin: "upload", source: "c", label: "", durationSec: 4 },
+    { id: "i1", kind: "image", origin: "upload", source: "d", label: "" },
+  ] as ShortsAsset[];
 
-describe("allowed formats", () => {
-  const ref = (id: string, subject?: ShortsReference["subject"]): ShortsReference => ({ id, kind: "upload", source: id, label: "", subject });
-
-  it("numbers the character and photo groups the way the AI sees them", () => {
-    expect(referenceIndexes([ref("a", "character"), ref("b", "place"), ref("c", "character"), ref("d", "person"), ref("e")])).toEqual({ character: [1, 3], photo: [2, 4, 5] });
+  it("adds up the seconds of reference video and audio (the part the model bills on top of the output)", () => {
+    expect(totalSeconds(assets, "video")).toBe(14.5);
+    expect(totalSeconds(assets, "audio")).toBe(4);
+    expect(totalSeconds([], "video")).toBe(0);
   });
 
-  it("lets auto use whatever the images allow, and pinned styles only what they can satisfy", () => {
-    const mixed = [ref("a", "character"), ref("b", "product")];
-    expect(allowedShortsFormats(mixed, "auto")).toEqual(["character", "promo"]);
-    expect(allowedShortsFormats(mixed, "skit")).toEqual(["character"]);
-    expect(allowedShortsFormats(mixed, "explainer")).toEqual(["character"]);
-    expect(allowedShortsFormats(mixed, "promo")).toEqual(["promo"]);
-  });
-
-  it("falls back to the available format when a pinned style has no matching image", () => {
-    expect(allowedShortsFormats([ref("b", "product")], "skit")).toEqual(["promo"]);
-    expect(allowedShortsFormats([ref("a", "character")], "promo")).toEqual(["character"]);
-  });
-
-  it("treats people and unknown images as photos, never as characters", () => {
-    expect(allowedShortsFormats([ref("p", "person")], "auto")).toEqual(["promo"]);
-    expect(allowedShortsFormats([ref("u")], "auto")).toEqual(["promo"]);
+  it("describes a photo to the planner by its role, the AI's summary and the owner's words", () => {
+    expect(describeAssetForPrompt({ id: "i", kind: "image", origin: "upload", source: "x", label: "시그니처", role: "product", summary: "갓 구운 소금빵" })).toBe("[product] 갓 구운 소금빵 (사장님 설명: 시그니처)");
+    expect(describeAssetForPrompt({ id: "i", kind: "image", origin: "upload", source: "x", label: "" })).toBe("[other] 사용자가 올린 참고 이미지");
+    expect(describeAssetForPrompt({ id: "m", kind: "image", origin: "mascot", source: "wave", label: "" })).toContain("마스코트");
+    expect(MASCOT_POSES).toHaveLength(8);
   });
 });

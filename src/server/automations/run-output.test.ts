@@ -51,8 +51,10 @@ describe("toSafeAutomationRunOutput", () => {
       blogStats: null,
       qualityNotes: [],
       format: null,
-      animationMode: null,
-      animationNote: null,
+      videoPath: null,
+      durationSec: null,
+      qa: null,
+      voiceFallback: false,
       sampleVideo: false,
       publicationResults: {},
     }));

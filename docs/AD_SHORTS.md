@@ -1,35 +1,107 @@
-# Ad Shorts from reference images (character, product, shop)
+# Ad Shorts: one 20–30 s video, generated end to end
 
-The owner adds up to 8 images and, optionally, writes what they want. The AI **looks at the images** and builds the matching kind of vertical ad (TikTok / Instagram Reels / YouTube Shorts). Setup, costs and the deferred-run flow are in `docs/ANIMATED_CHARACTERS.md`.
+The owner uploads product / shop photos (and, if needed, short reference clips, music and a logo), says what they want, and gets a vertical 9:16 ad of **20–30 seconds** (default 25) with sound. The video is generated **in one pass** by **Wan 3.0 Standard reference-to-video** on fal.ai — there are no stitched 5-second clips — then checked, voiced if needed, and finished with FFmpeg. Nothing is ever posted without the owner pressing the button.
 
-## How ad shorts are made in practice (research, 2026)
+## The pipeline
 
-- The common pipeline is **asset → brief → storyboard → generation → platform export**: a product photo or URL goes in, a script, voice, captions and music come out, vertical 9:16, 15–30 s ([UGC workflow](https://mrkarthikkn.medium.com/make-viral-ai-ugc-ads-in-2026-the-full-workflow-for-high-converting-campaigns-80335379a20b), [shhots](https://shhots.ai/blog/best-ai-avatar-solutions-for-ugc-product-ads/)).
-- Products on the market: Creatify (product URL → UGC-style ads with avatars, from US$39/month), Topview, Arcads and HeyGen (talking avatars/spokespeople), Higgsfield (cinematic image-to-video) ([Creatify vs Topview](https://www.stork.ai/compare/creatify-vs-topview-ai)). They are subscription tools for ad teams; none writes Korean small-business ads from the owner's own photos with a Korean voice on a per-video price.
-- The generation layer is image-to-video: Kling 2.5 Turbo Pro about US$0.35 per 5 s clip, Runway Gen-4 Turbo about US$0.05/s, Veo 3.1 Fast US$0.10–0.15/s ([fal.ai Kling](https://fal.ai/models/fal-ai/kling-video/v2.5-turbo/pro/image-to-video), [Veo 3.1 Fast](https://fal.ai/models/fal-ai/veo3.1/fast/image-to-video)). Prompts that keep a product stable separate **camera motion**, **subject motion** and **preservation rules**, and ask for simple, slow moves ([Kling prompt guide](https://picsart.com/blog/kling-ai-prompts/)).
-- What makes an ad short work: the first 1–2 s stop the scroll (a question, a desire, a problem, a joke) and the hook is also on-screen text; one message; concrete shots (product close-up, in use, the place); captions burned in; a clear last-scene call to action.
+```
+upload (browser -> Storage)            photos ≤10, clips ≤5 (≤15 s total), audio ≤5 (≤15 s total), logo 1
+        │
+run     look at new photos (Sonnet vision, one call) -> ad plan (Opus 5.5, Zod-checked)
+        -> Wan prompt (rules, no AI) -> posting text (Sonnet)               src/server/automations/handlers/shorts.ts
+SUBMIT  reserve the generation in the ledger -> queue it at fal -> save the job id at once (checkpoint)
+WAIT    poll fal -> settle the reservation when the video is ready
+CHECK   FFmpeg measurements + vision QA of 8 frames. A clear error rejects; at most ONE regeneration
+VOICE   Korean narration, only if the video's voice is missing or the owner chose it
+FINISH  FFmpeg worker: logo, name, CTA, exact images, voice mix, loudness, final MP4 -> private Storage
+```
 
-## What the app does
+Each call is one quick step; the run is *deferred* between steps (cron tick or the open page advances it), survives restarts, and never submits the same generation twice: the fal job id is saved with `ctx.checkpoint` before the step ends, so a crash resumes **polling** instead of paying again.
 
-1. **Look at each image** (`server/shorts/reference-analysis.ts`, Claude vision, once when it is added): `character` (illustration/mascot/animal), `product` (item, dish, drink), `place` (shop, interior, office), `person` (owner/staff/customer) or `other`, plus a one-sentence summary and any readable text. The owner sees the result under each thumbnail and can correct it. Without vision (another AI provider) an image is `other` with the owner's label.
-2. **Pick the format** (`allowedShortsFormats` + the AI, from the owner's request): style *자동* lets the AI choose; *캐릭터 콩트 / 캐릭터 설명* need a character; *상품·매장 홍보* uses the photos.
-   - **character:** a funny skit or explainer where the character really moves (one 5 s clip per line, two voices) — see `ANIMATED_CHARACTERS.md`.
-   - **promo:** 4–7 scenes: spoken hook (≤ 12 characters) → the product/place at its best → 2–3 highlights taken only from what is visible, the profile and the request → proof only if given → closing card with the business name, location and offering **from the profile**. One narrator voice and the business name in a corner.
-   - **No captions.** Neither format draws subtitles, speech bubbles or caption boxes (owner's decision: shorts usually have none). Only the small business-name tag and the closing card are drawn, so the voice and the picture must carry each scene.
-3. **Photos are never altered by AI.** Each photo is framed to 9:16 (`preparePhotoFrame`: portrait-ish photos are cropped to the interesting part; landscape ones are shown whole over a blurred copy). The plan marks **at most 4** scenes as *animate* where real motion helps (steam, pouring, light, a slow push-in); those frames go to the image-to-video model with a product-preserving prompt (shape, colour, packaging text and logo unchanged, no new objects, no people). The other scenes get a slow pan/zoom (`camera`). **Person photos are never animated.**
-4. **Cost control:** generating a Shorts preview reserves one `SHORTS` credit for the whole run, including its animated scenes. Publishing an existing preview uses no additional credit. Without a fal key, promos still render with panned photos and say so.
-5. **No fabricated claims:** the planner may not state prices, hours, addresses, awards or statistics that were not given, nor unprovable superlatives (최고, 1등 …).
+### The request to Wan (`connectors/wan/fal.ts`, schema checked 2026-10-12)
 
-## Sound and models
+`alibaba/wan-3.0/reference-to-video`, queue API. Always sent explicitly — the endpoint's own defaults would be a 1080p, 5 s, "adaptive" video:
 
-- **Background music:** the plan picks a mood (`music`: e.g. "playful ukulele" for a skit, "warm acoustic" for a cafe); an instrumental track is generated next to the clips (fal Lyria 2, about US$0.10 per ~30 s track, `MUSIC_MODEL`) and mixed at volume 0.2 under the voice, looped to the movie length with a fade-out. A missing or failed track just means no music.
-- **Model tiers:** plans carry `animationQuality` (`src/server/billing/plans.ts`): Starter uses `ANIMATION_MODEL` (default Kling 2.5 Turbo Pro, about US$0.35 per 5 s clip), Pro uses `ANIMATION_MODEL_PREMIUM` (default Kling 3.0 Pro, about US$0.56 without audio). Each model family's input names are mapped in `connectors/animation/fal.ts`.
-- **Compare before choosing:** `npm run bakeoff:animation -- --image <https url> --prompt "…" [--models a,b] [--music "…"]` runs the same image through several models in parallel and prints time, estimated price and the video URLs (spends real fal credit; needs `FAL_KEY` in `.env.local`).
-- **Not built yet (needs the comparison first):** lip-synced talking characters (Kling 3.0 native audio — Korean support is reported inconsistently), multi-reference generation (Seedance 2.0 reference-to-video), a natural Korean voice (ElevenLabs via JSON2Video — voice IDs must be verified), restyled product backgrounds.
+| field | value |
+|---|---|
+| `resolution` | `720p` |
+| `aspect_ratio` | `9:16` |
+| `duration` | 20–30, integer (default 25) |
+| `audio` | `true` |
+| `enable_prompt_expansion` | `true` (fal warns quality drops without it) |
+| `enable_thinking` | `true` |
+| `enable_safety_checker` | `true` |
+| `reference_image_urls` / `reference_video_urls` / `reference_audio_urls` | signed URLs of the owner's files, in upload order |
 
-## Limits
+Limits enforced before anything is sent: ≤10 images, ≤5 videos (≤15 s in total, ≥16 fps), ≤5 audio files (≤15 s in total), duration 20–30. The logo is **never** sent to the model; it is laid over the finished video.
 
-- Product accuracy: image-to-video can still bend small text or logos; keep clips short and review the preview before publishing.
-- Real people are shown, never animated or voiced as the person.
-- The Korean voice is TTS (Azure); lip-sync is not attempted.
-- Sound effects are not added; the Korean voice is plain TTS.
+### The plan (Opus 5.5) and the prompt (rules)
+
+The planner returns a Zod-validated plan: concept, one message, audience, a 2-second hook, a 4–8 scene storyboard that covers 0 → N seconds with no gaps, what each reference is for, camera/lighting/colour, music and sound effects, the Korean narration, the CTA, the logo position, "exact" image inserts, and what must not change. `buildWanPrompt` turns that into the prompt **by rules** (same plan → same prompt, ≤ 2,000 characters; the standing rules are never cut). The rules (no text/subtitles/logos in the footage, keep products and labels exactly, no invented screens/prices/phone numbers, no distortion/flicker, and "no speech" when the voice is recorded separately) are checked again against fal's `actual_prompt` (after its own prompt expansion); if one is missing the owner gets a warning.
+
+Labels, packaging text, screens and logos are **not** asked of the model: images marked "정확히 보여줄 이미지" are laid over the finished video by FFmpeg at the time the plan chose.
+
+## Money: the budget ledger (`src/server/budget`, migration 0073)
+
+Service-wide, **not per user**, enforced in the database under one advisory lock per (period, kind) so parallel runs can never overspend.
+
+| | video | blog |
+|---|---|---|
+| default cap / items | **$50 / 10 videos** | **$20 / 10 posts** (avg ≤ $2) |
+| per item cap (retries included) | $10 (`BUDGET_VIDEO_ITEM_CAP_USD`) | $3 |
+| held back for every unfinished item | $3.50 | $0.60 |
+
+Everything paid goes through reserve → call → settle: the worst case is reserved **before** the call (and the call is refused if it would pass the cap, the item cap, or eat the money other unfinished items still need); afterwards it is settled to the real cost. A call that failed in a way that may have been billed (timeout, dropped connection, a fal job that failed after queueing) stays booked at the reserved amount. Only a request provably rejected before any work (HTTP 4xx) is released. Free local FFmpeg is not counted. Nothing runs unless `ALLOW_PAID_AI_CALLS=true` **and** an explicit period (`BUDGET_PERIOD_START/END`, Seoul dates, end excluded) is set — there is no automatic monthly reset. `BUDGET_FREEZE=true` stops every paid call at once.
+
+Generation price (`src/server/budget/pricing.ts`): `(output seconds + reference-video seconds) × $0.10/s (720p)`; fal bills the reference video's length **in addition** to the output. `enable_thinking` has no documented price effect, so until `WAN_THINKING_COST_VERIFIED=true` every generation is reserved (and booked) at **× 1.5**:
+
+| output | no reference video | + 15 s reference video |
+|---|---|---|
+| 20 s | $3.00 (≈ $2.00 once verified) | $5.25 |
+| 25 s | $3.75 (≈ $2.50) | $6.00 |
+| 30 s | $4.50 (≈ $3.00) | $6.75 |
+
+The first generation is reserved **before** the planner is called, so a run the month cannot afford stops at once and costs nothing. A regeneration is reserved before it is sent; if the ledger refuses it (cap, item cap) the run ends. With the defaults a 25 s video with one regeneration costs about $7.5 + ~$0.8 of Claude — inside the $10 item cap; with a long reference video the second attempt will usually be refused by the item cap (raise `BUDGET_VIDEO_ITEM_CAP_USD` if you want that).
+
+Each run records its calls (`output.generation`: model, per-step cost, tokens, attempts, seed, `actual_prompt`), and the ledger keeps one row per call (`budget_spend`).
+
+### Failure → refund
+
+Run failed (generation failed twice, QA rejected the second video, budget refused the regeneration, worker down, over 80 minutes): the run is FAILED, the **credit is released**, the item slot goes back, and no further money is spent. Money already spent stays counted.
+
+## Quality gate (`src/server/shorts/qa.ts`)
+
+1. **FFmpeg measurements** (worker `analyze` job): duration within ±2 s of the request, 9:16 ratio, height ≥ 1,000 px, file integrity, black stretches (> 1.2 s rejects), frozen stretches (> 3 s rejects), silence, loudness, clipping.
+2. **Vision QA** (Sonnet, 8 frames + the plan + what the photos show): hook, concept, product fidelity, brand text, invented UI/prices, burned-in subtitles, artifacts, continuity. Only **clearly visible** errors are `high` and reject.
+
+A clear error rejects the video automatically and starts **one** regeneration (same model, correction in the prompt). **The AI never approves**: a video that passes is "직접 확인이 필요해요" and the owner decides. If the vision check is unavailable the video still goes to the owner, with a warning.
+
+## Voice
+
+Wan's native audio is used first (Korean narration quality is **not verified**). If the video has no sound or is nearly silent, **ElevenLabs** narration (the plan's Korean script, cost counted in the video budget) is mixed over the video's own sound with ducking (music/effects kept). The owner can also choose "한국어 음성 입히기": the prompt then asks for no speech and the recorded voice is mixed in. If narration fails the video is finished with a warning instead of being thrown away.
+
+## FFmpeg worker (`worker/ffmpeg`)
+
+A small Node service (no dependencies) around the system `ffmpeg`/`ffprobe`: `/v1/probe`, async `analyze` and `compose` jobs, output PUT to a signed Storage URL. See `worker/ffmpeg/README.md` for running and deploying it. Security: bearer token (timing-safe), https-only, host **allowlist**, DNS resolved once and the connection **pinned** to a public address (no private/loopback/link-local, no redirects, no credentials in URLs), size and time limits, request text never reaches a shell or a filter expression (overlay text goes through files), temp directories removed after every job and swept at start.
+
+## Uploads (`server/shorts/assets.ts`, `app/(app)/shorts/actions.ts`)
+
+The browser uploads straight to a private Storage bucket with a one-time signed upload URL (a video does not fit through a Server Action; Vercel's body limit is about 4.5 MB). The server then reads the first bytes (the browser's file type is never trusted), measures video/audio with the worker (`ffprobe`), checks count, size, length, fps and the 15 s totals, and only then adds the file to the settings; a rejected file is deleted. SVG logos must be plain shapes (no scripts, links or images). Files are reached only through short-lived signed URLs. The two private buckets (`shorts-references` for the owner's files, `shorts-videos` for finished videos and voice tracks) are created on first use; the older image-only `shorts-references` bucket is widened automatically. **Supabase's Free plan caps a single file at 50 MB** (a project-wide setting) whatever the bucket says, so a longer reference clip fails there; raise the project limit or keep clips short.
+
+## Mock mode
+
+With `AD_VIDEO_PROVIDER=mock` (default) nothing is called or paid: the planner/vision/QA are the mock AI, the "video" is a flagged placeholder (`sampleVideo`) that cannot be posted, and the ledger is untouched. In production the run is refused unless the real services are configured (`preflight`).
+
+## Not verified with real services (needs your keys)
+
+- Real fal / Wan generation, Korean native narration quality, label/packaging fidelity, how `enable_thinking` is billed (check one invoice, then set `WAN_THINKING_COST_VERIFIED=true`), the exact reference syntax ("image 1" is used positionally, as fal's docs describe), accepted reference file formats beyond JPEG/PNG/WEBP, MP4/MOV, MP3/WAV.
+- Real Anthropic calls (Opus 5.5 / Fable 5.1 / Sonnet 5.5): request shapes follow the migration guide and are unit-tested, not run.
+- Real ElevenLabs voice and its Korean pronunciation.
+- The worker has been run for real only on a developer machine (real `ffmpeg`, real local Supabase Storage); deploy it and run `npm run check:providers`.
+
+## First real video: checklist
+
+1. Apply migration 0073; set the env (see `.env.example`: `AD_VIDEO_PROVIDER=fal`, `FAL_KEY`, worker, `AI_PROVIDER=anthropic`, `ALLOW_PAID_AI_CALLS=true`, period, budgets).
+2. `node --env-file=.env.local scripts/check-providers.mjs`.
+3. Make one 20 s video without reference clips. Compare fal's invoice with `output.generation.costUsd` (should be $3.00 reserved, $2.00 if thinking is free).
+4. Watch the result: label text, product shape, narration language and loudness, the 2-second hook.

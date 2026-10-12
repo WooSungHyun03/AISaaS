@@ -1,41 +1,48 @@
 import { z } from "zod";
 
-/** Most reference images one Shorts setup can hold (uploads + mascot poses together). */
-export const MAX_SHORTS_REFERENCES = 8;
-/** Per-file ceiling for an uploaded reference (the browser downsizes before sending). */
-export const MAX_REFERENCE_UPLOAD_BYTES = 3 * 1024 * 1024;
-export const REFERENCE_LABEL_MAX_LENGTH = 60;
-export const SHORTS_BRIEF_MAX_LENGTH = 300;
+/** Client-safe description of what an owner can give the ad-video pipeline (no server imports). */
+
+/** Length of the finished ad. The model is asked for exactly this many whole seconds. */
+export const SHORTS_DURATION = { min: 20, max: 30, default: 25 } as const;
+export const SHORTS_BRIEF_MAX_LENGTH = 500;
+export const ASSET_LABEL_MAX_LENGTH = 60;
+
+export const SHORTS_ASSET_KINDS = {
+  image: "사진",
+  video: "참고 영상",
+  audio: "음원",
+  logo: "로고",
+} as const;
+export type ShortsAssetKind = keyof typeof SHORTS_ASSET_KINDS;
+
+const MB = 1024 * 1024;
 
 /**
- * `auto` lets the AI pick the format from the owner's request and what the images show; the others pin
- * it. `skit`/`explainer` need a character image, `promo` needs photos of a product, place or similar.
+ * What can be uploaded. The counts and the 15-second totals are the model's own limits
+ * (alibaba/wan-3.0/reference-to-video: 10 images, 5 videos / 15 s in total, 5 audio files / 15 s in total).
+ * Sizes are ours. A logo is never sent to the model: it is laid over the finished video.
  */
-export const SHORTS_STYLES = {
-  auto: { label: "자동 (이미지에 맞게)", description: "요청 사항과 올린 이미지를 보고 가장 알맞은 영상으로 만들어요" },
-  skit: { label: "캐릭터 콩트", description: "캐릭터가 움직이며 대사를 주고받는 짧고 웃긴 영상" },
-  explainer: { label: "캐릭터 설명", description: "캐릭터가 움직이며 차근차근 알려주는 영상" },
-  promo: { label: "상품·매장 홍보", description: "상품·메뉴·매장 사진으로 만드는 광고 영상 (후킹 → 장점 → 행동 유도)" },
+export const ASSET_LIMITS = {
+  image: { max: 10, maxBytes: 10 * MB, mimes: ["image/jpeg", "image/png", "image/webp"], extensions: ["jpg", "jpeg", "png", "webp"], label: "JPG·PNG·WEBP 사진, 10MB 이하" },
+  video: { max: 5, maxBytes: 100 * MB, mimes: ["video/mp4", "video/quicktime"], extensions: ["mp4", "mov"], maxSeconds: 15, totalSeconds: 15, minFps: 16, label: "MP4·MOV, 합쳐서 15초 이내, 100MB 이하" },
+  audio: { max: 5, maxBytes: 20 * MB, mimes: ["audio/mpeg", "audio/wav", "audio/x-wav", "audio/wave"], extensions: ["mp3", "wav"], maxSeconds: 15, totalSeconds: 15, label: "MP3·WAV, 합쳐서 15초 이내, 20MB 이하" },
+  logo: { max: 1, maxBytes: 5 * MB, mimes: ["image/png", "image/svg+xml"], extensions: ["png", "svg"], label: "PNG·SVG 로고, 5MB 이하" },
 } as const;
-export type ShortsStyle = keyof typeof SHORTS_STYLES;
 
-/** What a reference image shows. Decided by the AI when the image is added; the owner can correct it. */
-export const REFERENCE_SUBJECTS = {
-  character: "캐릭터",
+/** What a photo is for. The owner can set it; the AI looks at the photo when the video is made and fills in what is missing. */
+export const ASSET_ROLES = {
   product: "상품·메뉴",
   place: "매장·공간",
   person: "사람",
+  character: "캐릭터",
+  exact: "정확히 보여줄 이미지 (라벨·화면)",
   other: "기타",
 } as const;
-export type ReferenceSubject = keyof typeof REFERENCE_SUBJECTS;
-export function isReferenceSubject(value: string): value is ReferenceSubject {
-  return value in REFERENCE_SUBJECTS;
-}
+export type ShortsAssetRole = keyof typeof ASSET_ROLES;
 
 /**
- * Poses of the 이지 마케팅 mascot shipped in `public/shorts-mascot/*.png`.
- * `description` is what the AI reads to pick the right expression for each
- * line, so keep it about the pose and the moment it fits.
+ * Poses of the 이지 마케팅 mascot shipped in `public/shorts-mascot/*.png`: reference images the owner can add with
+ * one click. `description` is what the planner reads to pick a pose.
  */
 export const MASCOT_POSES = [
   { key: "wave", label: "인사", description: "윙크하며 손을 흔드는 모습 — 등장 인사, 마무리 인사" },
@@ -54,78 +61,94 @@ export function isMascotPoseKey(value: string): value is MascotPoseKey {
   return MASCOT_KEYS.has(value);
 }
 
-export const shortsReferenceSchema = z.object({
+export const shortsAssetSchema = z.object({
   id: z.string().min(1).max(64),
-  /** `upload`: `source` is a private Storage path; `mascot`: `source` is a MASCOT_POSES key. */
-  kind: z.enum(["upload", "mascot"]),
+  kind: z.enum(["image", "video", "audio", "logo"]),
+  /** `upload`: `source` is a private Storage path. `mascot`: `source` is a MASCOT_POSES key (a static file of the site). */
+  origin: z.enum(["upload", "mascot"]).default("upload"),
   source: z.string().min(1).max(300),
-  label: z.string().trim().max(REFERENCE_LABEL_MAX_LENGTH),
-  /** What the image shows (AI-detected, owner-correctable). Missing on older uploads: they are detected again when needed. */
-  subject: z.enum(["character", "product", "place", "person", "other"]).optional(),
-  /** One Korean sentence about what is in the image, written by the AI; read by the video planner. */
+  label: z.string().trim().max(ASSET_LABEL_MAX_LENGTH).default(""),
+  mime: z.string().max(100).optional(),
+  bytes: z.number().int().min(0).optional(),
+  width: z.number().int().min(0).optional(),
+  height: z.number().int().min(0).optional(),
+  /** Media length measured by the server (ffprobe) when the file was added. */
+  durationSec: z.number().min(0).max(3_600).optional(),
+  fps: z.number().min(0).max(240).optional(),
+  role: z.enum(["product", "place", "person", "character", "exact", "other"]).optional(),
+  /** One Korean sentence about what the image shows, written by the AI when the video is made. */
   summary: z.string().trim().max(200).optional(),
 });
-export type ShortsReference = z.infer<typeof shortsReferenceSchema>;
+export type ShortsAsset = z.infer<typeof shortsAssetSchema>;
 
-export interface ShortsReferenceSettings {
-  references: ShortsReference[];
-  style: ShortsStyle;
+export type VoiceMode = "native" | "tts";
+export const VOICE_MODES: Record<VoiceMode, { label: string; description: string }> = {
+  native: { label: "AI 영상의 목소리", description: "영상을 만들 때 한국어 나레이션도 함께 만들어요. 소리가 비면 자동으로 한국어 음성을 입혀요." },
+  tts: { label: "한국어 음성 입히기", description: "영상은 음악·효과음만 만들고, 대본을 한국어 음성으로 따로 만들어 입혀요. 발음이 더 또렷해요." },
+};
+
+export interface ShortsSettings {
+  assets: ShortsAsset[];
   /** Free-text direction from the owner ("이번엔 신메뉴 홍보" …). */
   brief: string;
+  durationSec: number;
+  voiceMode: VoiceMode;
 }
 
-/** Reads the reference settings out of `automations.config`, dropping anything malformed. */
-export function parseShortsReferenceSettings(config: unknown): ShortsReferenceSettings {
+const LEGACY_ROLE: Record<string, ShortsAssetRole> = { character: "character", product: "product", place: "place", person: "person", other: "other" };
+
+/** Reads the Shorts settings out of `automations.config`, dropping anything malformed and upgrading the older reference list. */
+export function parseShortsSettings(config: unknown): ShortsSettings {
   const record = config && typeof config === "object" && !Array.isArray(config) ? (config as Record<string, unknown>) : {};
-  const references: ShortsReference[] = [];
+  const candidates: unknown[] = [];
+  if (Array.isArray(record.assets)) candidates.push(...record.assets);
+  // Before ad videos existed, images were saved as `references` ({kind: "upload" | "mascot", subject}).
   if (Array.isArray(record.references)) {
     for (const item of record.references) {
-      const parsed = shortsReferenceSchema.safeParse(item);
-      if (!parsed.success) continue;
-      if (parsed.data.kind === "mascot" && !isMascotPoseKey(parsed.data.source)) continue;
-      if (references.some((existing) => existing.id === parsed.data.id)) continue;
-      references.push(parsed.data.kind === "mascot" ? { ...parsed.data, subject: "character" } : parsed.data);
-      if (references.length >= MAX_SHORTS_REFERENCES) break;
+      if (!item || typeof item !== "object") continue;
+      const legacy = item as Record<string, unknown>;
+      candidates.push({ ...legacy, kind: "image", origin: legacy.kind === "mascot" ? "mascot" : "upload", role: typeof legacy.subject === "string" ? LEGACY_ROLE[legacy.subject] : undefined });
     }
   }
-  const style: ShortsStyle = typeof record.shortsStyle === "string" && record.shortsStyle in SHORTS_STYLES ? (record.shortsStyle as ShortsStyle) : "auto";
+
+  const assets: ShortsAsset[] = [];
+  const counts: Record<ShortsAssetKind, number> = { image: 0, video: 0, audio: 0, logo: 0 };
+  for (const candidate of candidates) {
+    const parsed = shortsAssetSchema.safeParse(candidate);
+    if (!parsed.success) continue;
+    const asset = parsed.data;
+    if (asset.origin === "mascot") {
+      if (!isMascotPoseKey(asset.source) || asset.kind !== "image") continue;
+      asset.role = "character";
+    }
+    if (assets.some((existing) => existing.id === asset.id)) continue;
+    if (counts[asset.kind] >= ASSET_LIMITS[asset.kind].max) continue;
+    counts[asset.kind] += 1;
+    assets.push(asset);
+  }
+
   const brief = typeof record.shortsBrief === "string" ? record.shortsBrief.trim().slice(0, SHORTS_BRIEF_MAX_LENGTH) : "";
-  return { references, style, brief };
+  const rawDuration = typeof record.durationSec === "number" ? Math.round(record.durationSec) : SHORTS_DURATION.default;
+  const durationSec = Math.min(SHORTS_DURATION.max, Math.max(SHORTS_DURATION.min, rawDuration));
+  const voiceMode: VoiceMode = record.voiceMode === "tts" ? "tts" : "native";
+  return { assets, brief, durationSec, voiceMode };
 }
 
-/** What the AI is told about each reference image (1-based so it matches `imageIndex`). */
-export function describeReferenceForPrompt(reference: ShortsReference): string {
-  const subject = reference.subject ?? "other";
-  if (reference.kind === "mascot") {
-    const pose = MASCOT_POSES.find((item) => item.key === reference.source);
+export function assetsOfKind(assets: ShortsAsset[], kind: ShortsAssetKind): ShortsAsset[] {
+  return assets.filter((asset) => asset.kind === kind);
+}
+
+/** Seconds of media the owner's reference videos (or audio files) add up to: what the model bills on top of the output. */
+export function totalSeconds(assets: ShortsAsset[], kind: "video" | "audio"): number {
+  return Math.round(assetsOfKind(assets, kind).reduce((sum, asset) => sum + (asset.durationSec ?? 0), 0) * 100) / 100;
+}
+
+/** What the planner is told about an image (1-based position among the images sent to the model). */
+export function describeAssetForPrompt(asset: ShortsAsset): string {
+  if (asset.origin === "mascot") {
+    const pose = MASCOT_POSES.find((item) => item.key === asset.source);
     return `[character] 이지 마케팅 마스코트 로봇${pose ? ` · ${pose.description}` : ""}`;
   }
-  const text = [reference.summary, reference.label && reference.label !== reference.summary ? `(사장님 설명: ${reference.label})` : ""].filter(Boolean).join(" ");
-  return `[${subject}] ${text || "사용자가 올린 참고 이미지"}`;
-}
-
-export type ShortsFormat = "character" | "promo";
-
-/** 1-based indexes of the references of each group, as the AI sees them. Characters are animated actors; everything else is a photo. */
-export function referenceIndexes(references: ShortsReference[]): { character: number[]; photo: number[] } {
-  const character: number[] = [];
-  const photo: number[] = [];
-  references.forEach((reference, index) => ((reference.subject ?? "other") === "character" ? character : photo).push(index + 1));
-  return { character, photo };
-}
-
-/** Which formats the owner's images and chosen style allow. Always at least one for a non-empty list. */
-export function allowedShortsFormats(references: ShortsReference[], style: ShortsStyle): ShortsFormat[] {
-  const { character, photo } = referenceIndexes(references);
-  const formats: ShortsFormat[] = [];
-  const wantsCharacter = style === "auto" || style === "skit" || style === "explainer";
-  const wantsPromo = style === "auto" || style === "promo";
-  if (wantsCharacter && character.length > 0) formats.push("character");
-  if (wantsPromo && photo.length > 0) formats.push("promo");
-  // A pinned style the images cannot satisfy falls back to whatever the images do allow.
-  if (formats.length === 0) {
-    if (character.length > 0) formats.push("character");
-    if (photo.length > 0) formats.push("promo");
-  }
-  return formats;
+  const text = [asset.summary, asset.label && asset.label !== asset.summary ? `(사장님 설명: ${asset.label})` : ""].filter(Boolean).join(" ");
+  return `[${asset.role ?? "other"}] ${text || "사용자가 올린 참고 이미지"}`;
 }

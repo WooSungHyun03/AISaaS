@@ -93,82 +93,47 @@ describe("GeminiProvider", () => {
   });
 });
 
-describe("MockAIProvider", () => {
-  it("returns deterministic structured items for a marketing calendar request", async () => {
-    const { MockAIProvider } = await import("./mock");
-    const provider = new MockAIProvider();
+describe("MockAIProvider ad-video pipeline", () => {
+  const bounds = (durationSec: number, imageCount: number, exactImages: number[] = []) => ({ durationSec, imageCount, videoCount: 1, audioCount: 1, exactImages });
 
-    const result = await provider.generateText({
-      prompt: [
-        "AUTOBIZ_CALENDAR_PLAN_V1",
-        "PLAN_START=2026-03-01",
-        "PLAN_END=2026-03-14",
-        "WEEKS=2",
-        "BUSINESS_NAME=성장 카페",
-      ].join("\n"),
-    });
-    const items = JSON.parse(result.text) as Array<{ date: string; platform: string; topic: string }>;
-
-    expect(items).toHaveLength(6);
-    expect(items.map((item) => item.platform)).toEqual([
-      "blog", "instagram_reels", "youtube_shorts",
-      "blog", "instagram_reels", "youtube_shorts",
-    ]);
-    expect(items[0]).toMatchObject({ date: "2026-03-01", topic: expect.stringContaining("성장 카페") });
+  it.each([20, 25, 30])("plans a %i s ad that satisfies the plan schema, with every reference described", async (durationSec) => {
+    const [{ MockAIProvider }, { makeAdPlanSchema }] = await Promise.all([import("./mock"), import("@/server/shorts/ad-plan")]);
+    const prompt = `AUTOBIZ_AD_PLAN_V1\nDURATION=${durationSec}\nIMAGE_COUNT=3\nVIDEO_COUNT=1\nAUDIO_COUNT=1\nImages 2 are 'exact' images (a real label).\nThe owner's logo exists; the app overlays it.`;
+    const { text } = await new MockAIProvider().generateText({ prompt, system: "상호: 우리 빵집" });
+    const plan = makeAdPlanSchema(bounds(durationSec, 3, [2])).parse(JSON.parse(text));
+    expect(plan.storyboard[0].startSec).toBe(0);
+    expect(plan.storyboard.at(-1)?.endSec).toBe(durationSec);
+    expect(plan.references.filter((reference) => reference.type === "image")).toHaveLength(3);
+    expect(plan.inserts).toEqual([expect.objectContaining({ imageIndex: 2 })]);
+    expect(plan.logo.show).toBe(true);
   });
 
-  it("returns a deterministic Shorts topic", async () => {
-    const { MockAIProvider } = await import("./mock");
-    const topic = await new MockAIProvider().generateText({ prompt: "AUTOBIZ_SHORTS_TOPIC_V1" });
-    expect((JSON.parse(topic.text) as { topic: string }).topic).toBeTruthy();
-  });
-});
-
-describe("MockAIProvider reference-image plans", () => {
-  const listing = (tags: string[]) => tags.map((tag, index) => `${index + 1}. [${tag}] 이미지 ${index + 1}`).join("\n");
-
-  it("plans a character skit that only uses the listed character images", async () => {
-    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
-    const { text } = await new MockAIProvider().generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "character".\n${listing(["product", "character", "character"])}\nRules:` });
-    const plan = makeShortsPlanSchema(["character"]).parse(JSON.parse(text));
-    expect(plan.format).toBe("character");
-    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
+  it("keeps a fixed topic, and plans no insert or logo when there are none", async () => {
+    const [{ MockAIProvider }, { makeAdPlanSchema }] = await Promise.all([import("./mock"), import("@/server/shorts/ad-plan")]);
+    const prompt = 'AUTOBIZ_AD_PLAN_V1\nDURATION=25\nIMAGE_COUNT=1\nVIDEO_COUNT=0\nAUDIO_COUNT=0\nUse exactly this planned topic without replacing it: "아침 소금빵".';
+    const plan = makeAdPlanSchema(bounds(25, 1)).parse(JSON.parse((await new MockAIProvider().generateText({ prompt })).text));
+    expect(plan.topic).toBe("아침 소금빵");
+    expect(plan.inserts).toEqual([]);
+    expect(plan.logo.show).toBe(false);
   });
 
-  it("plans a promo from the non-character images and never animates a person", async () => {
-    const [{ MockAIProvider }, { makeShortsPlanSchema }] = await Promise.all([import("./mock"), import("@/server/ai/prompts/shorts")]);
-    const { text } = await new MockAIProvider().generateText({ prompt: `AUTOBIZ_SHORTS_PLAN_V1\nUse format "promo".\n${listing(["character", "person", "product"])}\nRules:` });
-    const plan = makeShortsPlanSchema(["promo"]).parse(JSON.parse(text));
-    expect(plan.format).toBe("promo");
-    if (plan.format !== "promo") return;
-    expect(plan.scenes.every((scene) => scene.imageIndex === 2 || scene.imageIndex === 3)).toBe(true);
-    expect(plan.scenes.filter((scene) => scene.imageIndex === 2).every((scene) => !scene.animate)).toBe(true);
+  it("recognises what a photo shows from the owner's label, in one batch", async () => {
+    const [{ MockAIProvider }, { imageAnalysisSchema }] = await Promise.all([import("./mock"), import("@/server/shorts/image-analysis")]);
+    const prompt = 'AUTOBIZ_IMAGE_ANALYSIS_V2\nImage 1 label: "귀여운 곰 마스코트"\nImage 2 label: "매장 내부"\nImage 3 label: "사장님 사진"\nImage 4 label: "시그니처 소금빵"\nImage 5 label: ""';
+    const { images } = imageAnalysisSchema.parse(JSON.parse((await new MockAIProvider().generateText({ prompt })).text));
+    expect(images.map((item) => item.role)).toEqual(["character", "place", "person", "product", "product"]);
   });
 
-  it("follows the request when both formats are allowed", async () => {
-    const { MockAIProvider } = await import("./mock");
-    const provider = new MockAIProvider();
-    const both = (request: string) => `AUTOBIZ_SHORTS_PLAN_V1\nThe owner's request (follow it): ${request}\n${listing(["character", "product"])}\nRules:`;
-    expect((JSON.parse((await provider.generateText({ prompt: both("마스코트가 나와서 소개해줘") })).text) as { format: string }).format).toBe("character");
-    expect((JSON.parse((await provider.generateText({ prompt: both("신메뉴를 홍보해줘") })).text) as { format: string }).format).toBe("promo");
-  });
-
-  it("recognises what an image shows from the owner's label", async () => {
-    const [{ MockAIProvider }, { referenceAnalysisSchema }] = await Promise.all([import("./mock"), import("@/server/shorts/reference-analysis")]);
-    const provider = new MockAIProvider();
-    const analyse = async (label: string) =>
-      referenceAnalysisSchema.parse(JSON.parse((await provider.generateText({ prompt: `AUTOBIZ_REFERENCE_ANALYSIS_V1\nThe owner's label for this image (may be empty): "${label}"\nDecide…` })).text)).subject;
-    expect(await analyse("귀여운 곰 마스코트")).toBe("character");
-    expect(await analyse("매장 내부")).toBe("place");
-    expect(await analyse("사장님 사진")).toBe("person");
-    expect(await analyse("시그니처 소금빵")).toBe("product");
-    expect(await analyse("")).toBe("product");
+  it("answers the frame QA with a schema-valid, problem-free review", async () => {
+    const [{ MockAIProvider }, { aiQaSchema }] = await Promise.all([import("./mock"), import("@/server/shorts/qa")]);
+    const result = aiQaSchema.parse(JSON.parse((await new MockAIProvider().generateText({ prompt: "AUTOBIZ_AD_QA_V1" })).text));
+    expect(result.problems).toEqual([]);
   });
 });
 
 describe("MockAIProvider (local dev / CI) produces schema-valid output for every pipeline", () => {
-  it("covers the website narrative and the blog topic, outline and section stages", async () => {
-    const [{ MockAIProvider }, { websiteDiagnosisNarrativeSchema }, { blogTopicSchema, blogOutlineSchema, blogSectionOutputSchema }] = await Promise.all([
+  it("covers the website narrative and every blog stage (plan, draft, fix, review)", async () => {
+    const [{ MockAIProvider }, { websiteDiagnosisNarrativeSchema }, { blogPlanSchema, blogDraftSchema, blogFixSchema, blogReviewSchema }] = await Promise.all([
       import("./mock"),
       import("@/server/marketing/diagnosis"),
       import("../prompts/blog"),
@@ -178,15 +143,20 @@ describe("MockAIProvider (local dev / CI) produces schema-valid output for every
     const narrative = await provider.generateText({ prompt: "x\n===WEBPAGE_DATA_START===\ny\n===WEBPAGE_DATA_END===" });
     expect(websiteDiagnosisNarrativeSchema.safeParse(JSON.parse(narrative.text)).success).toBe(true);
 
-    const topic = await provider.generateText({ prompt: "Pick one specific blog topic relevant to this business." });
-    expect(blogTopicSchema.safeParse(JSON.parse(topic.text)).success).toBe(true);
-    const planned = await provider.generateText({ prompt: 'Use exactly this planned topic without replacing it: "봄맞이 메뉴". Create one title.' });
-    expect(JSON.parse(planned.text).topic).toBe("봄맞이 메뉴");
+    const planned = await provider.generateText({ system: "상호: 우리 빵집", prompt: 'AUTOBIZ_BLOG_PLAN_V2\nPlan one marketing blog post about exactly this planned topic, without replacing it: "봄맞이 메뉴".' });
+    const plan = blogPlanSchema.parse(JSON.parse(planned.text));
+    expect(plan.topic).toBe("봄맞이 메뉴");
+    expect(plan.sections.length).toBeGreaterThanOrEqual(5);
 
-    const outline = await provider.generateText({ system: "상호: 우리 빵집", prompt: 'AUTOBIZ_BLOG_OUTLINE_V1\nPlan one marketing blog post about "봄맞이 메뉴" (working title: "t").' });
-    expect(blogOutlineSchema.parse(JSON.parse(outline.text)).sections.length).toBeGreaterThanOrEqual(5);
-    const section = await provider.generateText({ system: "상호: 우리 빵집", prompt: "AUTOBIZ_BLOG_SECTION_V1\nKIND=intro" });
-    expect(blogSectionOutputSchema.parse(JSON.parse(section.text)).blocks.length).toBeGreaterThan(1);
+    const brief = plan.sections.map((section, index) => `${index + 1}. ${section.heading} — purpose: x.`).join("\n");
+    const draft = await provider.generateText({ system: "상호: 우리 빵집", prompt: `AUTOBIZ_BLOG_DRAFT_V2\nPost title: ${plan.title}\n${brief}` });
+    expect(blogDraftSchema.parse(JSON.parse(draft.text)).sections).toHaveLength(plan.sections.length + 2);
+
+    const fix = await provider.generateText({ system: "상호: 우리 빵집", prompt: `AUTOBIZ_BLOG_FIX_V2\n${brief}\nSECTION 2 (heading: ${plan.sections[1].heading})\nCurrent blocks: []` });
+    expect(blogFixSchema.parse(JSON.parse(fix.text)).sections[0]).toMatchObject({ index: 2, heading: plan.sections[1].heading });
+
+    const review = await provider.generateText({ prompt: "AUTOBIZ_BLOG_REVIEW_V2" });
+    expect(blogReviewSchema.parse(JSON.parse(review.text)).unsupported).toEqual([]);
   });
 });
 

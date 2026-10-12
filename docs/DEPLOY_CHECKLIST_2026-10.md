@@ -33,12 +33,27 @@ node --env-file=.env.local scripts/check-providers.mjs   # 결제·문의·환�
 | 변수 | 용도 |
 |---|---|
 | `BILLING_PROVIDER=toss`, `NEXT_PUBLIC_TOSS_CLIENT_KEY`(`test_ck_…`), `TOSS_SECRET_KEY`(`test_sk_…`) | 토스 **테스트** 결제 (라이브 키는 코드가 거절) |
-| `ANTHROPIC_API_KEY`, `AI_PROVIDER=anthropic` | 글·기획 |
-| `VIDEO_RENDER_PROVIDER=json2video`, `VIDEO_RENDER_API_KEY` | 숏폼 합성 (없으면 운영에서 숏폼 시작을 거절하고 이용권을 쓰지 않음) |
-| `ANIMATION_PROVIDER=fal`, `FAL_KEY` | 움직이는 클립·음악 (선택) |
+| `ANTHROPIC_API_KEY`, `AI_PROVIDER=anthropic` | 글·기획 (Opus 5.5 / Fable 5.1 / Sonnet 5.5) |
+| `AD_VIDEO_PROVIDER=fal`, `FAL_KEY` | 광고 영상 생성 (Wan 3.0). 없으면 운영에서 숏폼 시작을 거절하고 이용권을 쓰지 않음 |
+| `POSTPROCESS_PROVIDER=worker`, `POSTPROCESS_WORKER_URL`, `POSTPROCESS_WORKER_TOKEN` | FFmpeg 워커(`worker/ffmpeg`) — 영상 점검·로고/문구·음성 합성 |
+| `TTS_PROVIDER=elevenlabs`, `ELEVENLABS_API_KEY`, `TTS_VOICE_ID` | 한국어 음성 보완 (선택) |
+| `ALLOW_PAID_AI_CALLS=true`, `BUDGET_PERIOD_START`, `BUDGET_PERIOD_END` | **유료 호출 허용 + 운영 기간.** 둘 다 없으면 유료 생성이 모두 막힘 (자동 월 초기화 없음) |
+| `BUDGET_VIDEO_USD/_ITEMS`, `BUDGET_BLOG_USD/_ITEMS` (선택) | 기본: 영상 $50·10편, 블로그 $20·10편 |
 | `YOUTUBE_CLIENT_ID/SECRET`, `YOUTUBE_API_KEY`, `NAVER_CLIENT_ID/SECRET` | 이미 있음. 네이버 블로그는 이제 키 없이도 RSS로 진단 |
 
 `NEXT_PUBLIC_*`는 빌드 때 들어가므로 바꾼 뒤 반드시 다시 배포하세요.
+
+### 2-1. 광고 영상·예산 (2026-10-12 이후, migration 0073 이상 필요)
+
+```bash
+npx supabase db push --linked --dry-run   # 0073_budget_ledger.sql 이 목록에 보여야 함 (예산 원장, 기존 데이터 변경 없음)
+npx supabase db push --linked
+```
+
+1. FFmpeg 워커를 배포합니다(`worker/ffmpeg/README.md`: Docker 이미지, `WORKER_TOKEN`, `WORKER_ALLOWED_HOSTS` 에 Supabase 호스트와 `.fal.media`, `.fal.run`).
+2. 위 환경변수를 입력하고 재배포한 뒤 `node --env-file=.env.local scripts/check-providers.mjs` 로 ❌ 가 없는지 봅니다.
+3. 기존에 진행 중이던 숏폼/블로그 작업은 새 형식으로 이어지지 않고 안내 메시지와 함께 이용권이 환불됩니다. 배포 전에 끝내 두세요.
+4. 한 편만 만들어 fal 청구서와 `output.generation.costUsd` 를 비교합니다 (자세한 점검표는 `docs/AD_SHORTS.md`).
 
 ## 3. 운영 최초 관리자 등록
 

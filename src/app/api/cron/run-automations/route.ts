@@ -6,12 +6,12 @@ import { logger } from "@/lib/logger";
 import { safeEqual } from "@/server/shared/secret";
 
 /**
- * Each tick first advances in-flight deferred runs (animated Shorts), then starts a handful of
- * due automations. Starting a character Short (AI plan + frames + queueing clips) takes ~30 s.
+ * Each tick first advances in-flight deferred runs (blog posts, ad Shorts), then starts a handful of
+ * due automations. One step can be a single long model call, so the budgets leave room for it.
  */
-export const maxDuration = 120;
-const ADVANCE_BUDGET_MS = 40_000;
-const TICK_BUDGET_MS = 70_000;
+export const maxDuration = 300;
+const ADVANCE_BUDGET_MS = 200_000;
+const TICK_BUDGET_MS = 270_000;
 
 /**
  * Called by the Supabase Edge Function (supabase/functions/run-due-automations)

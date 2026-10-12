@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const { adminMock, disconnectConnectionMock } = vi.hoisted(() => ({ adminMock: { current: null as unknown }, disconnectConnectionMock: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => adminMock.current }));
 vi.mock("@/server/connectors/integrations", () => ({ disconnectConnection: disconnectConnectionMock }));
-vi.mock("@/server/shorts/reference-images", () => ({ REFERENCE_BUCKET: "shorts-references" }));
+vi.mock("@/server/shorts/assets", () => ({ REFERENCE_BUCKET: "shorts-references", VIDEO_BUCKET: "shorts-videos" }));
 vi.mock("@/lib/logger", () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 const { deleteUserAccount } = await import("./delete-account");

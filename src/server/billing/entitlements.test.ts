@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const {
   canExecuteAutomation,
-  canUseAnimatedShorts,
   CREDIT_EXHAUSTED_MESSAGE,
   getAutomationCreditKind,
   incrementUsage,
@@ -63,17 +62,6 @@ describe("canExecuteAutomation — credit balance", () => {
     expect(getAutomationCreditKind("blog-marketing")).toBe("BLOG");
     expect(getAutomationCreditKind("shorts")).toBe("SHORTS");
     expect(getAutomationCreditKind("newsletter")).toBeNull();
-  });
-});
-
-describe("canUseAnimatedShorts", () => {
-  it.each([
-    ["FREE", "standard"],
-    ["STARTER", "standard"],
-    ["PRO", "premium"],
-  ] as const)("keeps %s model quality without a monthly animation cap", async (plan, animationQuality) => {
-    const client = makeSupabase({ subscriptions: [{ data: { plan, status: "ACTIVE" } }] });
-    await expect(canUseAnimatedShorts(client as never, "user-1")).resolves.toEqual({ allowed: true, animationQuality });
   });
 });
 

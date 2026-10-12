@@ -1,47 +1,73 @@
 import "server-only";
 import { z } from "zod";
 import { generateStructured } from "@/server/ai/generate";
-import {
-  buildShortsPlanPrompt,
-  buildShortsTopicPrompt,
-  makeShortsPlanSchema,
-  shortsContentSchema,
-  shortsTopicSchema,
-  type CharacterPlan,
-  type PromoPlan,
-  type ShortsContent,
-  type ShortsTopic,
-} from "@/server/ai/prompts/shorts";
+import type { AIImageInput } from "@/server/ai/provider";
 import { isNearDuplicateTopic } from "@/server/ai/similarity";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { generateShortsPublishing } from "@/server/shorts/publishing-generate";
-import { shortsPublishingSchema, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
 import { serverEnv } from "@/lib/env/server";
-import { publishShortsToPlatforms } from "@/server/automations/shorts-publishing";
-import { getAnimationProvider, isAnimationAvailable, type AnimationClipHandle, type AnimationQuality } from "@/server/connectors/animation";
-import { animationClipHandleSchema } from "@/server/connectors/animation/types";
+import { logger } from "@/lib/logger";
 import {
-  buildCharacterMovie,
-  buildPromoMovie,
-  getMovieRenderStatus,
-  startMovieRender,
-  withBackgroundMusic,
-  type PromoEndCard,
-  type PromoRenderScene,
-  type VideoRenderScene,
-} from "@/server/connectors/video";
-import { canUseAnimatedShorts } from "@/server/billing/entitlements";
+  assertPaidCallsAllowed,
+  isBudgetError,
+  releaseSpend,
+  reserveSpend,
+  runPaidCall,
+  settleSpend,
+  summarizeRunSpend,
+  ttsUsd,
+  wanReserveUsd,
+  wanSettledUsd,
+  withBudgetScope,
+  type WanPricingInput,
+} from "@/server/budget";
+import { publishShortsToPlatforms } from "@/server/automations/shorts-publishing";
+import { getPostprocessProvider, MockPostprocessProvider, type ComposeOverlay, type PostprocessProvider, type VideoAnalysis } from "@/server/connectors/postprocess";
+import { getTtsProvider } from "@/server/connectors/tts";
+import { getWanProvider, isRealVideoGeneration, wanHandleSchema, type WanHandle, type WanRequest } from "@/server/connectors/wan";
+import { isAppError } from "@/server/shared/errors";
 import { promotionFieldValue } from "@/lib/promotion";
 import { resolvePromotionType } from "@/server/promotion/strategy";
-import { prepareCharacterFrame, preparePhotoFrame } from "@/server/shorts/character-frame";
-import { analyzeReferenceImage } from "@/server/shorts/reference-analysis";
 import {
-  deleteReferenceImages,
-  loadReferenceBytes,
-  resolveReferenceImageUrls,
-  signStoragePath,
-  uploadReferenceImage,
-} from "@/server/shorts/reference-images";
+  buildAdPlanPrompt,
+  buildWanPrompt,
+  makeAdPlanSchema,
+  normalizeAdPlan,
+  adPlanSchema,
+  type AdPlan,
+} from "@/server/shorts/ad-plan";
+import {
+  ensureShortsBuckets,
+  isOwnedAssetPath,
+  loadImageBytes,
+  REFERENCE_BUCKET,
+  resolveAssetUrls,
+  signAsset,
+  VIDEO_BUCKET,
+  VIDEO_URL_TTL_SEC,
+  videoStoragePath,
+} from "@/server/shorts/assets";
+import { shortsContentSchema, type ShortsContent } from "@/server/shorts/content";
+import { analyzeImages, prepareVisionImage } from "@/server/shorts/image-analysis";
+import { generateShortsPublishing } from "@/server/shorts/publishing-generate";
+import { shortsPublishingSchema, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
+import {
+  aiQaSchema,
+  buildAiQaPrompt,
+  combineQa,
+  evaluateAnalysis,
+  promptFindings,
+  retryNoteFrom,
+  type QaReport,
+} from "@/server/shorts/qa";
+import {
+  assetsOfKind,
+  describeAssetForPrompt,
+  parseShortsSettings,
+  shortsAssetSchema,
+  totalSeconds,
+  type ShortsAsset,
+  type ShortsSettings,
+} from "@/types/shorts-reference";
 import type {
   AutomationHandler,
   AutomationHandlerOutcome,
@@ -50,46 +76,118 @@ import type {
   ShortsPublishPlatform,
 } from "@/types/automation";
 import type { Json } from "@/types/domain";
-import {
-  allowedShortsFormats,
-  describeReferenceForPrompt,
-  parseShortsReferenceSettings,
-  referenceIndexes,
-  type ShortsReference,
-  type ShortsReferenceSettings,
-} from "@/types/shorts-reference";
 
 /**
- * Selects a topic before writing the full video so a near-duplicate only
- * costs one small regeneration. The second result is accepted regardless of
- * similarity, matching the bounded retry pattern used by the Blog pipeline.
+ * Ad Shorts. One 20-30 s vertical video is generated end to end by Wan 3.0 (reference-to-video on fal) from the owner's
+ * photos, clips and music, then checked, voiced if needed and finished with FFmpeg. Every paid step reserves its worst
+ * case in the VIDEO budget first (src/server/budget) and nothing runs without that.
+ *
+ *   run     look at new photos (vision) -> ad plan (Opus) -> Wan prompt (rules) -> posting text (Sonnet)
+ *   SUBMIT  reserve the generation -> queue it at fal -> save the job id at once
+ *   WAIT    poll fal -> settle the reservation when it finishes
+ *   CHECK   FFmpeg measurements + vision QA of sampled frames. A clear error rejects; at most one regeneration
+ *   VOICE   Korean narration (only when the video's own voice is missing, or the owner chose it)
+ *   FINISH  FFmpeg worker: logo, name, CTA, exact images, voice mixing, loudness, final MP4 into private Storage
+ *
+ * One quick step per call; the run is deferred between steps and survives restarts (see runner.ts).
  */
-async function generateTopic(ctx: AutomationRunContext, direction?: string): Promise<ShortsTopic> {
-  // A calendar item already fixed the topic — never replace it with a new one.
-  if (ctx.calendarItem) return { topic: ctx.calendarItem.topic.slice(0, 120) };
+const MAX_ATTEMPTS = 2;
+const MAX_JOB_MINUTES = 80;
+/** A generation that has not finished after this long is given up on (and, since it may be billed, stays booked). */
+const MAX_GENERATION_MINUTES = 30;
+const MAX_WORKER_TRIES = 3;
+const QA_FRAMES = 8;
+const WAN_RESOLUTION = "720p" as const;
 
-  const first = await generateStructured({
-    ...buildShortsTopicPrompt(ctx.business, ctx.recentTopics, undefined, direction),
-    schema: shortsTopicSchema,
-    maxTokens: 120,
-  });
-  if (!isNearDuplicateTopic(first.topic, ctx.recentTopics)) return first;
+const wanAttemptSchema = z.object({
+  attempt: z.number().int().min(1),
+  outcome: z.enum(["accepted", "rejected", "failed", "lost"]),
+  usd: z.number().min(0).default(0),
+  note: z.string().max(300).default(""),
+});
 
-  return generateStructured({
-    ...buildShortsTopicPrompt(ctx.business, ctx.recentTopics, first.topic, direction),
-    schema: shortsTopicSchema,
-    maxTokens: 120,
-  });
+const jobStateSchema = z.object({
+  v: z.literal(2),
+  stage: z.enum(["SUBMIT", "WAIT", "CHECK", "VOICE", "FINISH"]),
+  topic: z.string(),
+  durationSec: z.number().int().min(20).max(30),
+  voiceMode: z.enum(["native", "tts"]),
+  previewOnly: z.boolean(),
+  platforms: z.array(z.enum(["instagram", "youtube"])),
+  plan: adPlanSchema,
+  assets: z.array(shortsAssetSchema),
+  wanPrompt: z.string(),
+  referenceVideoSeconds: z.number().min(0),
+  publishing: shortsPublishingSchema.optional(),
+  attempt: z.number().int().min(1).max(MAX_ATTEMPTS),
+  retryNote: z.string().max(500).optional(),
+  /** The open reservation of the current generation, if any (real generation only). */
+  reservation: z.object({ id: z.string(), usd: z.number() }).optional(),
+  wan: wanHandleSchema.optional(),
+  wanSubmittedAt: z.string().optional(),
+  generated: z.object({ videoUrl: z.string(), durationSec: z.number().optional(), seed: z.number().optional(), actualPrompt: z.string().optional() }).optional(),
+  /** What the current generation was settled at. */
+  lastUsd: z.number().min(0).default(0),
+  analysisJob: z.object({ jobId: z.string() }).optional(),
+  analysis: z.object({ hasAudio: z.boolean(), durationSec: z.number() }).optional(),
+  qa: z.looseObject({}).optional(),
+  attempts: z.array(wanAttemptSchema).default([]),
+  needsVoice: z.boolean().default(false),
+  voice: z.object({ path: z.string(), characters: z.number() }).optional(),
+  composeJob: z.object({ jobId: z.string() }).optional(),
+  workerTries: z.number().int().min(0).default(0),
+  notes: z.array(z.string()).default([]),
+  aiCalls: z.number().int().min(0).default(0),
+  startedAt: z.string(),
+});
+type JobState = z.infer<typeof jobStateSchema>;
+
+const PROGRESS: Record<JobState["stage"], (state: JobState) => string> = {
+  SUBMIT: (state) => (state.attempt > 1 ? "영상을 다시 만들 준비를 하고 있어요 (2/2번째 시도)" : "영상 만들기를 시작하고 있어요"),
+  WAIT: (state) => `AI가 영상을 만드는 중이에요 (${state.attempt}/${MAX_ATTEMPTS}번째 시도, 보통 몇 분 걸려요)`,
+  CHECK: () => "만든 영상을 꼼꼼히 점검하는 중이에요",
+  VOICE: () => "한국어 음성을 만드는 중이에요",
+  FINISH: () => "로고와 문구를 넣어 영상을 마무리하는 중이에요",
+};
+
+function deferred(state: JobState, stage: JobState["stage"] = state.stage): AutomationHandlerOutcome {
+  const next = { ...state, stage };
+  return { deferred: { state: next as unknown as Json, progress: PROGRESS[stage](next) } };
 }
+
+const owner = (ctx: AutomationRunContext) => ({ userId: ctx.automation.user_id, automationId: ctx.automation.id });
+
+function wanPricing(durationSec: number, referenceVideoSeconds: number): WanPricingInput {
+  return {
+    resolution: WAN_RESOLUTION,
+    outputSeconds: durationSec,
+    referenceVideoSeconds,
+    thinking: serverEnv.WAN_ENABLE_THINKING === "true",
+    thinkingCostVerified: serverEnv.WAN_THINKING_COST_VERIFIED === "true",
+    thinkingReserveMultiplier: serverEnv.WAN_THINKING_RESERVE_MULTIPLIER,
+  };
+}
+
+/** A placeholder video (mock generator) has nothing for the worker to download: the mock post-processor stands in for it. */
+function postprocessFor(): PostprocessProvider {
+  return getWanProvider().name === "mock" ? new MockPostprocessProvider() : getPostprocessProvider();
+}
+
+const scoped = <T,>(ctx: AutomationRunContext, attempt: number, fn: () => Promise<T>) => withBudgetScope({ kind: "VIDEO", runId: ctx.runId, attempt }, fn);
 
 function scheduledPlatforms(config: AutomationRunContext["config"]): ShortsPublishPlatform[] {
   // Publishing is opt-in: an automation without an explicit platform list only renders a preview.
   if (!Array.isArray(config.platforms)) return [];
-  const platforms = config.platforms.filter(
-    (value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube",
-  );
+  const platforms = config.platforms.filter((value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube");
   return [...new Set(platforms)];
 }
+
+function videoLink(ctx: AutomationRunContext): string | null {
+  return promotionFieldValue(ctx.business, "actionUrl") ?? promotionFieldValue(ctx.business, "website");
+}
+
+/** Failures that mean fal refused the request before queueing anything: nothing was billed. */
+const UNBILLED_SUBMIT_CODES = new Set(["INVALID_TARGET", "NOT_CONFIGURED", "AUTH_FAILED", "PERMISSION_DENIED", "UPSTREAM_CLIENT_ERROR"]);
 
 async function publishExistingPreview(ctx: AutomationRunContext): Promise<AutomationHandlerResult> {
   const request = ctx.shorts?.publish;
@@ -104,17 +202,21 @@ async function publishExistingPreview(ctx: AutomationRunContext): Promise<Automa
   if (error || !sourceRun || sourceRun.status !== "SUCCESS") {
     throw new Error("게시할 Shorts 미리보기를 찾을 수 없습니다. 영상을 다시 만들어주세요.");
   }
-  const output = sourceRun.output && typeof sourceRun.output === "object" && !Array.isArray(sourceRun.output)
-    ? sourceRun.output as Record<string, unknown>
-    : null;
+  const output = sourceRun.output && typeof sourceRun.output === "object" && !Array.isArray(sourceRun.output) ? (sourceRun.output as Record<string, unknown>) : null;
   const content = shortsContentSchema.safeParse(output);
-  const videoUrl = typeof output?.videoUrl === "string" ? output.videoUrl : "";
+  const videoPath = typeof output?.videoPath === "string" ? output.videoPath : "";
+  if (isSampleVideo(output)) {
+    throw new Error("테스트용 샘플 영상은 게시할 수 없어요. 영상 제작 서비스를 연결한 뒤 다시 만들어주세요.");
+  }
+  // A video made by this pipeline lives in private Storage: the address for the platforms is signed now. Older videos kept a public address.
+  let videoUrl = typeof output?.videoUrl === "string" ? output.videoUrl : "";
+  if (videoPath) {
+    if (!isOwnedAssetPath(videoPath, ctx.automation.user_id, ctx.automation.id)) throw new Error("게시할 영상 정보가 올바르지 않습니다. 영상을 다시 만들어주세요.");
+    videoUrl = await signAsset(admin, VIDEO_BUCKET, videoPath, 60 * 60);
+  }
   const topic = typeof output?.topic === "string" ? output.topic : content.success ? content.data.hook : "";
   if (!content.success || !/^https:\/\//i.test(videoUrl)) {
     throw new Error("게시할 영상 정보가 올바르지 않습니다. 영상을 다시 만들어주세요.");
-  }
-  if (isSampleVideo(output)) {
-    throw new Error("테스트용 샘플 영상은 게시할 수 없어요. 영상 제작 서비스를 연결한 뒤 다시 만들어주세요.");
   }
 
   // The owner's edited posting text (saved on the history row) wins over what the AI first wrote.
@@ -122,7 +224,6 @@ async function publishExistingPreview(ctx: AutomationRunContext): Promise<Automa
   const edited = shortsPublishingSchema.safeParse(workingCopy?.publishing);
   const generated = shortsPublishingSchema.safeParse(output?.publishing);
   const publishing = edited.success ? edited.data : generated.success ? generated.data : undefined;
-  const link = promotionFieldValue(ctx.business, "actionUrl") ?? promotionFieldValue(ctx.business, "website");
 
   const publicationResults = await publishShortsToPlatforms({
     userId: ctx.automation.user_id,
@@ -132,7 +233,7 @@ async function publishExistingPreview(ctx: AutomationRunContext): Promise<Automa
     videoUrl,
     platforms: request.platforms,
     publishing,
-    link,
+    link: videoLink(ctx),
   });
   return {
     output: {
@@ -141,10 +242,10 @@ async function publishExistingPreview(ctx: AutomationRunContext): Promise<Automa
       ...content.data,
       ...(publishing ? { publishing } : {}),
       topic,
-      videoUrl,
+      ...(videoPath ? { videoPath } : { videoUrl }),
       publicationResults,
     } as unknown as Json,
-    externalUrl: videoUrl,
+    externalUrl: videoPath ? undefined : videoUrl,
     title: content.data.hook,
     topic,
     contentType: "shorts-publish",
@@ -153,452 +254,491 @@ async function publishExistingPreview(ctx: AutomationRunContext): Promise<Automa
   };
 }
 
-/** Longest a deferred Shorts run may take before it is given up on (clips + render). */
-const MAX_JOB_MINUTES = 30;
-/** Each clip is retried once with a fresh request; a second failure ends the run. */
-const MAX_CLIP_ATTEMPTS = 2;
-
-const plannedSceneSchema = z.object({
-  text: z.string(),
-  visualPrompt: z.string(),
-  durationSec: z.number(),
-  /** 0-based index into the saved reference list. */
-  referenceIndex: z.number().int().min(0),
-  // character format
-  speaker: z.enum(["main", "partner"]).optional(),
-  motion: z.string().optional(),
-  action: z.string().optional(),
-  // promo format
-  camera: z.string().optional(),
-  animate: z.boolean().optional(),
-  motionPrompt: z.string().optional(),
-  /** Private-bucket path of this scene's framed photo (promo). */
-  framePath: z.string().optional(),
-});
-type PlannedScene = z.infer<typeof plannedSceneSchema>;
-
-const clipStateSchema = z.object({
-  sceneIndex: z.number().int().min(0),
-  handle: animationClipHandleSchema,
-  status: z.enum(["pending", "done", "failed"]),
-  videoUrl: z.string().optional(),
-  attempts: z.number().int().min(1),
-  framePath: z.string(),
-});
-type ClipState = z.infer<typeof clipStateSchema>;
-
-const musicStateSchema = z.object({
-  handle: animationClipHandleSchema,
-  status: z.enum(["pending", "done", "failed"]),
-  audioUrl: z.string().optional(),
-});
-type MusicState = z.infer<typeof musicStateSchema>;
-
-const jobStateSchema = z.object({
-  v: z.literal(1),
-  stage: z.enum(["ANIMATING", "COMPOSING"]),
-  format: z.enum(["character", "promo"]),
-  /** video = real animated clips; tween = a still character moved by JSON2Video (fallback); photos = promo without clips. */
-  animationMode: z.enum(["video", "tween", "photos"]),
-  animationNote: z.string().optional(),
-  topic: z.string(),
-  content: z.looseObject({}),
-  scenes: z.array(plannedSceneSchema),
-  previewOnly: z.boolean(),
-  platforms: z.array(z.enum(["instagram", "youtube"])),
-  clips: z.array(clipStateSchema),
-  framePaths: z.array(z.string()),
-  /** Background track queued next to the clips; the movie waits for it, but a failed track is simply left out. */
-  music: musicStateSchema.optional(),
-  /** Title, description, keywords and hashtags written from this video's script (see server/shorts/publishing-metadata.ts). */
-  publishing: shortsPublishingSchema.optional(),
-  /** Model tier the plan paid for; reused when a clip is retried. */
-  quality: z.enum(["standard", "premium"]).default("standard"),
-  projectId: z.string().optional(),
-  startedAt: z.string(),
-});
-type JobState = z.infer<typeof jobStateSchema>;
-
-function deferred(state: JobState, progress: string): AutomationHandlerOutcome {
-  return { deferred: { state: state as unknown as Json, progress } };
+/** The placeholder a mock video generator returns is an address, not a video: it must never be shown as a finished Short. */
+function isSampleVideo(output: Record<string, unknown> | null | undefined): boolean {
+  if (!output) return false;
+  if (output.sampleVideo === true) return true;
+  return typeof output.videoUrl === "string" && /\.invalid(\/|$)/.test(output.videoUrl);
 }
 
-/** The AI numbers images from 1; anything outside the group the format may use falls back to that group's first image. */
-function clampReferenceIndex(imageIndex: number, validOneBased: number[]): number {
-  return (validOneBased.includes(imageIndex) ? imageIndex : validOneBased[0]) - 1;
+/** What the owner told the pipeline, checked before a credit is touched or a cent is reserved. */
+function requireInputs(settings: ShortsSettings): void {
+  if (assetsOfKind(settings.assets, "image").length === 0 && assetsOfKind(settings.assets, "video").length === 0) {
+    throw new Error("사진이나 참고 영상을 먼저 추가해주세요. 상품·매장 사진을 올리거나 이지 마케팅 마스코트를 불러오면 광고 영상을 만들 수 있어요.");
+  }
 }
 
-const CHARACTER_PRESERVE = "Keep the character's design, colors and proportions exactly the same as in the image. Smooth, natural motion with a steady camera; the plain gradient background stays unchanged; no text, no subtitles, no logos, no new characters.";
-const PRODUCT_PRESERVE = "Keep the product, its shape, colors, labels, packaging text and logo exactly as in the image. Smooth, slow, realistic motion; the framing stays stable; no new objects, no people appear, no added text or subtitles.";
-
-function clipPrompt(action: string, format: "character" | "promo"): string {
-  return `${action} ${format === "character" ? CHARACTER_PRESERVE : PRODUCT_PRESERVE}`.slice(0, 600);
+/** Looks at photos nobody has described yet (once, for the whole run), and remembers the answer for the next video. */
+async function withImageAnalysis(ctx: AutomationRunContext, settings: ShortsSettings): Promise<ShortsAsset[]> {
+  const admin = createAdminClient();
+  const pending = assetsOfKind(settings.assets, "image").filter((asset) => !asset.summary);
+  if (pending.length === 0) return settings.assets;
+  let analyzed: ShortsAsset[] = [];
+  try {
+    const prepared: Array<{ asset: ShortsAsset; vision: AIImageInput }> = [];
+    for (const asset of pending) prepared.push({ asset, vision: await prepareVisionImage(await loadImageBytes(admin, asset, owner(ctx))) });
+    analyzed = await analyzeImages(prepared);
+  } catch (error) {
+    if (isBudgetError(error)) throw error;
+    logger.warn("shorts_image_analysis_failed", { runId: ctx.runId, message: error instanceof Error ? error.message : String(error) });
+    return settings.assets;
+  }
+  const byId = new Map(analyzed.map((asset) => [asset.id, asset]));
+  const merged = settings.assets.map((asset) => byId.get(asset.id) ?? asset);
+  // Best effort: the next video does not pay for the same photos again.
+  try {
+    const { data } = await admin.from("automations").select("config").eq("id", ctx.automation.id).single();
+    const config = data?.config && typeof data.config === "object" && !Array.isArray(data.config) ? (data.config as Record<string, Json | undefined>) : {};
+    if (Array.isArray(config.assets)) {
+      const next = (config.assets as Json[]).map((raw) => {
+        const found = raw && typeof raw === "object" && !Array.isArray(raw) ? byId.get(String((raw as Record<string, Json>).id)) : undefined;
+        return found ? { ...(raw as Record<string, Json>), role: found.role ?? null, summary: found.summary ?? null } : raw;
+      });
+      await admin.from("automations").update({ config: { ...config, assets: next } as unknown as Json }).eq("id", ctx.automation.id);
+    }
+  } catch {
+    // The plan already has what it needs.
+  }
+  return merged;
 }
 
-function contentForOutput(plan: { hook: string; caption: string; privacy: "private" | "unlisted" | "public" }, scenes: PlannedScene[]): ShortsContent {
+async function makePlan(ctx: AutomationRunContext, settings: ShortsSettings, assets: ShortsAsset[]): Promise<AdPlan> {
+  const images = assetsOfKind(assets, "image");
+  const videos = assetsOfKind(assets, "video");
+  const audios = assetsOfKind(assets, "audio");
+  const bounds = {
+    durationSec: settings.durationSec,
+    imageCount: images.length,
+    videoCount: videos.length,
+    audioCount: audios.length,
+    exactImages: images.flatMap((asset, index) => (asset.role === "exact" ? [index + 1] : [])),
+  };
+  const request = (rejectedTopic?: string) => ({
+    ...buildAdPlanPrompt({
+      business: ctx.business,
+      topic: ctx.calendarItem?.topic,
+      brief: settings.brief || undefined,
+      recentTopics: ctx.recentTopics,
+      rejectedTopic,
+      calendar: ctx.calendarItem ? { goal: ctx.calendarItem.goal, summary: ctx.calendarItem.summary, cta: ctx.calendarItem.cta } : undefined,
+      bounds,
+      voiceMode: settings.voiceMode,
+      images: images.map(describeAssetForPrompt),
+      videos: videos.map((asset) => ({ label: asset.label, durationSec: asset.durationSec ?? 0 })),
+      audios: audios.map((asset) => ({ label: asset.label, durationSec: asset.durationSec ?? 0 })),
+      hasLogo: assetsOfKind(assets, "logo").length > 0,
+    }),
+    schema: makeAdPlanSchema(bounds),
+    maxTokens: 10_000,
+    role: "planner" as const,
+    purpose: rejectedTopic ? "video.plan.retry" : "video.plan",
+  });
+  let plan = await generateStructured(request());
+  // A topic too close to a recent video is planned again, once; the calendar's own topic is never replaced.
+  if (!ctx.calendarItem && isNearDuplicateTopic(plan.topic, ctx.recentTopics)) plan = await generateStructured(request(plan.topic));
+  const normalized = normalizeAdPlan(plan, settings.durationSec);
+  return ctx.calendarItem ? { ...normalized, topic: ctx.calendarItem.topic.slice(0, 120) } : normalized;
+}
+
+/** Wan accepts a reference to a logo-less ad; a logo asset that does not exist anymore is simply not drawn. */
+function referencesFor(assets: ShortsAsset[]) {
+  return { images: assetsOfKind(assets, "image"), videos: assetsOfKind(assets, "video"), audios: assetsOfKind(assets, "audio") };
+}
+
+async function startRun(ctx: AutomationRunContext): Promise<AutomationHandlerOutcome> {
+  const settings = parseShortsSettings(ctx.config);
+  requireInputs(settings);
+  const real = isRealVideoGeneration();
+  const referenceVideoSeconds = totalSeconds(settings.assets, "video");
+  const pricing = wanPricing(settings.durationSec, referenceVideoSeconds);
+
+  // The generation is the expensive part: reserve it before spending anything on planning, so a run the budget cannot
+  // afford stops here, and a refused reservation costs nothing. If planning then fails, the reservation is released.
+  let reservation: JobState["reservation"];
+  if (real) {
+    assertPaidCallsAllowed();
+    const reserved = await reserveSpend({
+      kind: "VIDEO",
+      runId: ctx.runId,
+      step: "video.generate",
+      attempt: 1,
+      provider: "fal",
+      model: serverEnv.WAN_MODEL,
+      usd: wanReserveUsd(pricing),
+      idempotencyKey: `${ctx.runId}:wan:1`,
+      note: `${WAN_RESOLUTION} ${settings.durationSec}s + ${referenceVideoSeconds}s reference video`,
+    });
+    reservation = { id: reserved.id, usd: reserved.usd };
+  }
+
+  try {
+    return await scoped(ctx, 1, async () => {
+      const assets = await withImageAnalysis(ctx, settings);
+      const plan = await makePlan(ctx, settings, assets);
+      const wanPrompt = buildWanPrompt({ plan, durationSec: settings.durationSec, voiceMode: settings.voiceMode });
+      const { metadata: publishing } = await generateShortsPublishing({
+        promotionType: resolvePromotionType(ctx.business),
+        businessName: ctx.business.name,
+        industry: ctx.business.industry ?? null,
+        location: ctx.business.location ?? null,
+        keywords: ctx.business.keywords,
+        topic: plan.topic,
+        hook: plan.hook.text,
+        sceneTexts: plan.storyboard.map((scene) => scene.narration || scene.visual.slice(0, 60)),
+        link: videoLink(ctx),
+      });
+      const previewOnly = Boolean(ctx.shorts?.previewOnly);
+      const state: JobState = {
+        v: 2,
+        stage: "SUBMIT",
+        topic: plan.topic,
+        durationSec: settings.durationSec,
+        voiceMode: settings.voiceMode,
+        previewOnly,
+        platforms: previewOnly ? [] : scheduledPlatforms(ctx.config),
+        plan,
+        assets,
+        wanPrompt,
+        referenceVideoSeconds,
+        publishing,
+        attempt: 1,
+        reservation,
+        lastUsd: 0,
+            attempts: [],
+        needsVoice: false,
+        workerTries: 0,
+        notes: [],
+        aiCalls: 3,
+        startedAt: new Date().toISOString(),
+      };
+      return deferred(state);
+    });
+  } catch (error) {
+    if (reservation) await releaseSpend(reservation.id, "planning failed before the video was requested").catch(() => undefined);
+    throw error;
+  }
+}
+
+/** Settles the open generation reservation (exactly once: the ledger ignores a second settle). */
+async function settleGeneration(state: JobState, usd: number | "reserved", note: string): Promise<number> {
+  if (!state.reservation) return 0;
+  const amount = usd === "reserved" ? state.reservation.usd : usd;
+  await settleSpend(state.reservation.id, amount, { note, attempt: state.attempt });
+  return amount;
+}
+
+/** Starts the next attempt from a clean slate (the reservation of the finished attempt is already settled). */
+function nextAttempt(state: JobState, outcome: "rejected" | "failed" | "lost", usd: number, note: string, retryNote?: string): JobState {
   return {
-    hook: plan.hook,
-    script: scenes.map((scene) => scene.text).join(" "),
-    scenes: scenes.map(({ text, visualPrompt, durationSec, speaker, motion, action, camera, referenceIndex }) => ({
-      text,
-      visualPrompt,
-      durationSec,
-      ...(speaker ? { speaker } : {}),
-      ...(motion ? { motion } : {}),
-      ...(action ? { action } : {}),
-      ...(camera ? { camera } : {}),
-      imageIndex: referenceIndex + 1,
-    })),
-    caption: plan.caption,
-    privacy: plan.privacy,
+    ...state,
+    attempts: [...state.attempts, { attempt: state.attempt, outcome, usd, note: note.slice(0, 300) }],
+    attempt: state.attempt + 1,
+    retryNote: retryNote || state.retryNote,
+    reservation: undefined,
+    wan: undefined,
+    wanSubmittedAt: undefined,
+    generated: undefined,
+    lastUsd: 0,
+    analysisJob: undefined,
+    analysis: undefined,
+    qa: undefined,
+    needsVoice: false,
+    workerTries: 0,
   };
 }
 
-/** Images added before the AI looked at them (or while it was unavailable) are looked at now, once. */
-async function withAnalysis(
-  admin: ReturnType<typeof createAdminClient>,
-  settings: ShortsReferenceSettings,
-  owner: { userId: string; automationId: string },
-): Promise<ShortsReferenceSettings> {
-  const references = await Promise.all(
-    settings.references.map(async (reference): Promise<ShortsReference> => {
-      if (reference.subject) return reference;
-      try {
-        const analysis = await analyzeReferenceImage(await loadReferenceBytes(admin, reference, owner), reference.label);
-        return { ...reference, ...analysis };
-      } catch {
-        return { ...reference, subject: "other" };
-      }
-    }),
-  );
-  return { ...settings, references };
-}
-
-/** "https://shop.example.com/p/1/" -> "shop.example.com/p/1": what fits on a card and what a viewer can type. */
-function shortUrl(url: string | null): string {
-  if (!url) return "";
-  try {
-    const parsed = new URL(url);
-    return `${parsed.host}${parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "")}`.slice(0, 40);
-  } catch {
-    return "";
-  }
-}
-
-/** The closing card: straight from what the owner entered for this type, never written by the AI. */
-function endCardFor(ctx: AutomationRunContext): PromoEndCard {
-  const { business } = ctx;
-  const type = resolvePromotionType(business);
-  const value = (key: Parameters<typeof promotionFieldValue>[1]) => promotionFieldValue(business, key);
-  const lines =
-    type === "PRODUCT"
-      ? [value("priceInfo") ? `💰 ${value("priceInfo")!.slice(0, 40)}` : "", value("actionUrl") ? `🛒 ${shortUrl(value("actionUrl"))}` : "", value("mainOffering")?.slice(0, 40) ?? ""]
-      : type === "PLATFORM"
-        ? [value("mainOffering")?.slice(0, 40) ?? "", value("actionUrl") ? `🚀 ${shortUrl(value("actionUrl"))}` : value("website") ? `🌐 ${shortUrl(value("website"))}` : ""]
-        : [value("location") ? `📍 ${value("location")!.slice(0, 40)}` : "", value("mainOffering")?.slice(0, 40) ?? "", value("priceInfo") ? `💰 ${value("priceInfo")!.slice(0, 40)}` : ""];
-  return { title: business.name, lines: lines.filter(Boolean) };
-}
-
-async function checkAnimation(
-  admin: ReturnType<typeof createAdminClient>,
-  ctx: AutomationRunContext,
-  format: "character" | "promo",
-): Promise<{ animate: boolean; note?: string; quality: AnimationQuality }> {
-  const fallback = format === "character" ? "기본 움직임 효과" : "사진을 천천히 움직이는 기본 효과";
-  if (!isAnimationAvailable()) return { animate: false, quality: "standard", note: `움직이는 영상 서비스가 아직 연결되지 않아 ${fallback}로 만들었어요.` };
-  const entitlement = await canUseAnimatedShorts(admin, ctx.automation.user_id);
-  const quality = entitlement.animationQuality ?? "standard";
-  if (!entitlement.allowed) {
-    return { animate: false, quality, note: `${entitlement.reason ?? "움직이는 영상 한도를 모두 썼어요."} ${fallback}로 만들었어요.` };
-  }
-  return { animate: true, quality };
-}
-
-/** Queues the background track. Music is a nice-to-have: any failure here just means a video without it. */
-async function startMusic(direction: string): Promise<MusicState | undefined> {
-  if (!isAnimationAvailable()) return undefined;
-  try {
-    return { handle: await getAnimationProvider().startMusic({ prompt: direction }), status: "pending" };
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Reference-image Shorts. The AI looks at what the owner's images show and plans the matching kind of ad
- * (a character acts it out, or the product / place photos are advertised), then clips are generated where
- * motion helps and JSON2Video assembles voice, music and clips. Clips and the render take minutes, which
- * no single request can wait for, so the run is deferred and advanced in short steps (see runner.ts).
- */
-async function startReferenceRun(ctx: AutomationRunContext, rawSettings: ShortsReferenceSettings): Promise<AutomationHandlerOutcome> {
-  const owner = { userId: ctx.automation.user_id, automationId: ctx.automation.id };
-  const admin = createAdminClient();
-  const settings = await withAnalysis(admin, rawSettings, owner);
-  const { topic } = await generateTopic(ctx, settings.brief || undefined);
-  const allowed = allowedShortsFormats(settings.references, settings.style);
-  const plan = await generateStructured({
-    ...buildShortsPlanPrompt(ctx.business, topic, {
-      references: settings.references.map(describeReferenceForPrompt),
-      allowedFormats: allowed,
-      style: settings.style,
-      brief: settings.brief || undefined,
-      mascot: settings.references.some((reference) => reference.kind === "mascot"),
-      calendar: ctx.calendarItem ? { goal: ctx.calendarItem.goal, summary: ctx.calendarItem.summary, cta: ctx.calendarItem.cta } : undefined,
-    }),
-    schema: makeShortsPlanSchema(allowed),
-    maxTokens: 2_000,
-  });
-
-  const previewOnly = Boolean(ctx.shorts?.previewOnly);
-  const platforms = previewOnly ? [] : scheduledPlatforms(ctx.config);
-  // The background track is queued right away so it is ready by the time the clips are.
-  const music = await startMusic(plan.music);
-  const { metadata: publishing } = await generateShortsPublishing({
-    promotionType: resolvePromotionType(ctx.business),
-    businessName: ctx.business.name,
-    industry: ctx.business.industry ?? null,
-    location: ctx.business.location ?? null,
-    keywords: ctx.business.keywords,
-    topic,
-    hook: plan.hook,
-    sceneTexts: plan.scenes.map((scene) => scene.text),
-    link: promotionFieldValue(ctx.business, "actionUrl") ?? promotionFieldValue(ctx.business, "website"),
-  });
-  const base: RunBase = { v: 1, topic, previewOnly, platforms, startedAt: new Date().toISOString(), music, publishing };
-  const groups = referenceIndexes(settings.references);
-
-  if (plan.format === "promo") return startPromoRun(ctx, admin, settings, owner, plan, groups.photo, base);
-  return startCharacterRun(ctx, admin, settings, owner, plan, groups.character, base);
-}
-
-type RunBase = { v: 1; topic: string; previewOnly: boolean; platforms: ShortsPublishPlatform[]; startedAt: string; music?: MusicState; publishing?: ShortsPublishing };
-
-async function startCharacterRun(
-  ctx: AutomationRunContext,
-  admin: ReturnType<typeof createAdminClient>,
-  settings: ShortsReferenceSettings,
-  owner: { userId: string; automationId: string },
-  plan: CharacterPlan,
-  characterIndexes: number[],
-  base: RunBase,
-): Promise<AutomationHandlerOutcome> {
-  const scenes: PlannedScene[] = plan.scenes.map((scene) => ({
-    text: scene.text,
-    visualPrompt: scene.visualPrompt,
-    durationSec: scene.durationSec,
-    speaker: scene.speaker,
-    motion: scene.motion,
-    action: scene.action,
-    referenceIndex: clampReferenceIndex(scene.imageIndex, characterIndexes),
-  }));
-  const content = contentForOutput(plan, scenes);
-  const { animate, note: animationNote, quality } = await checkAnimation(admin, ctx, "character");
-
-  if (!animate) {
-    const waiting: JobState = { ...base, stage: "ANIMATING", format: "character", animationMode: "tween", animationNote, quality, content, scenes, clips: [], framePaths: [] };
-    // With a track on the way, wait for it first; otherwise render right away.
-    if (base.music) return deferred(waiting, "배경음악을 만드는 중이에요");
-    const projectId = await startMovieRender(await characterTweenMovie(admin, ctx, scenes));
-    return deferred({ ...waiting, stage: "COMPOSING", projectId }, "영상을 만드는 중이에요");
-  }
-
-  // Really animate: one 9:16 frame and one clip per scene.
-  const provider = getAnimationProvider();
-  const framePaths: string[] = [];
-  const clips: ClipState[] = [];
-  for (const [sceneIndex, scene] of scenes.entries()) {
-    const reference = settings.references[scene.referenceIndex];
-    const frame = await prepareCharacterFrame(await loadReferenceBytes(admin, reference, owner), sceneIndex);
-    const framePath = `${owner.userId}/${owner.automationId}/frames/${ctx.runId}-${sceneIndex}.png`;
-    await uploadReferenceImage(admin, framePath, frame, "png");
-    framePaths.push(framePath);
-    const handle = await provider.startClip({ imageUrl: await signStoragePath(admin, framePath), prompt: clipPrompt(scene.action ?? "", "character") }, { quality });
-    clips.push({ sceneIndex, handle, status: "pending", attempts: 1, framePath });
-  }
-  const state: JobState = { ...base, stage: "ANIMATING", format: "character", animationMode: "video", quality, content, scenes, clips, framePaths };
-  return deferred(state, `캐릭터를 움직이는 중이에요 (0/${clips.length})`);
-}
-
-async function startPromoRun(
-  ctx: AutomationRunContext,
-  admin: ReturnType<typeof createAdminClient>,
-  settings: ShortsReferenceSettings,
-  owner: { userId: string; automationId: string },
-  plan: PromoPlan,
-  photoIndexes: number[],
-  base: RunBase,
-): Promise<AutomationHandlerOutcome> {
-  const wantsAnimation = plan.scenes.some((scene) => scene.animate);
-  const { animate, note, quality } = wantsAnimation
-    ? await checkAnimation(admin, ctx, "promo")
-    : { animate: false, note: undefined, quality: "standard" as AnimationQuality };
-
-  // People are never animated: their photo is only framed and panned.
-  const scenes: PlannedScene[] = plan.scenes.map((scene) => {
-    const referenceIndex = clampReferenceIndex(scene.imageIndex, photoIndexes);
-    const isPerson = settings.references[referenceIndex]?.subject === "person";
-    return {
-      text: scene.text,
-      visualPrompt: scene.visualPrompt,
-      durationSec: scene.durationSec,
-      camera: scene.camera,
-      animate: animate && scene.animate && !isPerson,
-      motionPrompt: scene.motionPrompt,
-      referenceIndex,
-    };
-  });
-  const content = contentForOutput(plan, scenes);
-
-  // Frame every scene's photo as 9:16 once (the same file is the animator's input and the still shown in the video).
-  const provider = getAnimationProvider();
-  const bytesByReference = new Map<number, Uint8Array>();
-  const framePaths: string[] = [];
-  const clips: ClipState[] = [];
-  for (const [sceneIndex, scene] of scenes.entries()) {
-    const reference = settings.references[scene.referenceIndex];
-    let bytes = bytesByReference.get(scene.referenceIndex);
-    if (!bytes) {
-      bytes = await loadReferenceBytes(admin, reference, owner);
-      bytesByReference.set(scene.referenceIndex, bytes);
-    }
-    const framePath = `${owner.userId}/${owner.automationId}/frames/${ctx.runId}-${sceneIndex}.jpg`;
-    await uploadReferenceImage(admin, framePath, await preparePhotoFrame(bytes), "jpeg");
-    framePaths.push(framePath);
-    scene.framePath = framePath;
-    if (scene.animate) {
-      const handle = await provider.startClip({ imageUrl: await signStoragePath(admin, framePath), prompt: clipPrompt(scene.motionPrompt ?? "", "promo") }, { quality });
-      clips.push({ sceneIndex, handle, status: "pending", attempts: 1, framePath });
-    }
-  }
-
-  if (clips.length === 0) {
-    const waiting: JobState = { ...base, stage: "ANIMATING", format: "promo", animationMode: "photos", animationNote: note, quality, content, scenes, clips: [], framePaths };
-    if (base.music) return deferred(waiting, "배경음악을 만드는 중이에요");
-    const projectId = await startMovieRender(await promoMovie(admin, ctx, scenes, []));
-    return deferred({ ...waiting, stage: "COMPOSING", projectId }, "사진으로 영상을 만드는 중이에요");
-  }
-  const state: JobState = { ...base, stage: "ANIMATING", format: "promo", animationMode: "video", quality, content, scenes, clips, framePaths };
-  return deferred(state, `사진을 움직이는 중이에요 (0/${clips.length})`);
-}
-
-/** The character video without animation: the reference image moved by JSON2Video. */
-async function characterTweenMovie(admin: ReturnType<typeof createAdminClient>, ctx: AutomationRunContext, scenes: PlannedScene[]): Promise<Record<string, unknown>> {
-  const settings = parseShortsReferenceSettings(ctx.config);
-  const owner = { userId: ctx.automation.user_id, automationId: ctx.automation.id };
-  const urls = await resolveReferenceImageUrls(admin, settings.references, owner);
-  const renderScenes: VideoRenderScene[] = scenes.map((scene) => ({
-    text: scene.text,
-    visualPrompt: scene.visualPrompt,
-    durationSec: scene.durationSec,
-    speaker: scene.speaker,
-    motion: scene.motion as VideoRenderScene["motion"],
-    imageUrl: urls[scene.referenceIndex],
-  }));
-  return buildCharacterMovie(renderScenes);
-}
-
-async function promoMovie(
-  admin: ReturnType<typeof createAdminClient>,
-  ctx: AutomationRunContext,
-  scenes: PlannedScene[],
-  clips: ClipState[],
-): Promise<Record<string, unknown>> {
-  const renderScenes: PromoRenderScene[] = [];
-  for (const [index, scene] of scenes.entries()) {
-    const clipUrl = clips.find((clip) => clip.sceneIndex === index)?.videoUrl;
-    renderScenes.push({
-      text: scene.text,
-      camera: scene.camera as PromoRenderScene["camera"],
-      ...(clipUrl ? { videoUrl: clipUrl } : { imageUrl: await signStoragePath(admin, scene.framePath ?? "") }),
+async function submit(ctx: AutomationRunContext, state: JobState): Promise<AutomationHandlerOutcome> {
+  const real = isRealVideoGeneration();
+  let reservation = state.reservation;
+  // A regeneration has to be affordable BEFORE anything is sent: the ledger refuses it otherwise and the run ends here.
+  if (real && !reservation) {
+    assertPaidCallsAllowed();
+    const reserved = await reserveSpend({
+      kind: "VIDEO",
+      runId: ctx.runId,
+      step: "video.generate",
+      attempt: state.attempt,
+      provider: "fal",
+      model: serverEnv.WAN_MODEL,
+      usd: wanReserveUsd(wanPricing(state.durationSec, state.referenceVideoSeconds)),
+      idempotencyKey: `${ctx.runId}:wan:${state.attempt}`,
+      note: `regeneration ${state.attempt}`,
     });
+    reservation = { id: reserved.id, usd: reserved.usd };
   }
-  return buildPromoMovie(renderScenes, { brandName: ctx.business.name, endCard: endCardFor(ctx) });
+
+  // Everything that can fail before fal has seen the request is prepared first: if it fails here nothing was sent, so the
+  // reservation is released instead of being booked as spent.
+  let request: WanRequest;
+  try {
+    const refs = referencesFor(state.assets);
+    const admin = createAdminClient();
+    request = {
+      prompt: state.retryNote ? buildWanPrompt({ plan: state.plan, durationSec: state.durationSec, voiceMode: state.voiceMode, retryNote: state.retryNote }) : state.wanPrompt,
+      durationSec: state.durationSec,
+      resolution: WAN_RESOLUTION,
+      imageUrls: await resolveAssetUrls(admin, refs.images, owner(ctx)),
+      videoUrls: await resolveAssetUrls(admin, refs.videos, owner(ctx)),
+      audioUrls: await resolveAssetUrls(admin, refs.audios, owner(ctx)),
+      thinking: serverEnv.WAN_ENABLE_THINKING === "true",
+      promptExpansion: serverEnv.WAN_ENABLE_PROMPT_EXPANSION === "true",
+    };
+  } catch (error) {
+    if (reservation) await releaseSpend(reservation.id, "request could not be prepared").catch(() => undefined);
+    throw error;
+  }
+
+  let handle: WanHandle;
+  try {
+    handle = await getWanProvider().submit(request);
+  } catch (error) {
+    const billed = !(isAppError(error) && UNBILLED_SUBMIT_CODES.has(error.code));
+    if (reservation) {
+      // Refused before queueing: free. Anything else (a timeout, a dropped connection) may have queued — and billed — a job we have no id for.
+      if (!billed) await releaseSpend(reservation.id, "submit rejected").catch(() => undefined);
+      else await settleSpend(reservation.id, reservation.usd, { note: "submit outcome unknown", attempt: state.attempt }).catch(() => undefined);
+    }
+    if (billed && state.attempt < MAX_ATTEMPTS && isAppError(error) && error.retryable) {
+      return deferred(nextAttempt({ ...state, reservation }, "lost", reservation?.usd ?? 0, "요청 결과를 알 수 없어요"), "SUBMIT");
+    }
+    throw error;
+  }
+
+  const waiting: JobState = { ...state, reservation, wan: handle, wanSubmittedAt: new Date().toISOString() };
+  // Save the job id before anything else: a crash from here on resumes polling this job instead of starting (and paying for) another.
+  await ctx.checkpoint?.({ ...waiting, stage: "WAIT" } as unknown as Json);
+  return deferred(waiting, "WAIT");
 }
 
-async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise<AutomationHandlerOutcome> {
-  const parsed = jobStateSchema.safeParse(raw);
-  if (!parsed.success) throw new Error("진행 중인 숏폼 작업 정보를 읽지 못했어요. 영상을 다시 만들어주세요.");
-  const state = parsed.data;
-  if (Date.now() - Date.parse(state.startedAt) > MAX_JOB_MINUTES * 60_000) {
-    throw new Error("영상 만들기가 너무 오래 걸려 중단했어요. 잠시 후 다시 시도해주세요.");
+async function wait(ctx: AutomationRunContext, state: JobState): Promise<AutomationHandlerOutcome> {
+  if (!state.wan) return deferred({ ...state, wanSubmittedAt: undefined }, "SUBMIT");
+  const status = await getWanProvider().status(state.wan);
+  if (status.state === "pending") {
+    const minutes = (Date.now() - Date.parse(state.wanSubmittedAt ?? state.startedAt)) / 60_000;
+    if (minutes <= MAX_GENERATION_MINUTES) return deferred(state, "WAIT");
+    const usd = await settleGeneration(state, "reserved", "generation timed out");
+    return failedGeneration(state, usd, "영상 만들기가 너무 오래 걸렸어요");
   }
+  if (status.state === "failed") {
+    // A job that failed after queueing may still have been billed: it stays booked at the reserved amount.
+    const usd = await settleGeneration(state, "reserved", `generation failed: ${status.message}`);
+    return failedGeneration(state, usd, status.message);
+  }
+
+  const usd = await settleGeneration(state, wanSettledUsd({ ...wanPricing(state.durationSec, state.referenceVideoSeconds), actualOutputSeconds: status.durationSec }), "generation finished");
+  return deferred(
+    {
+      ...state,
+      reservation: undefined,
+      generated: { videoUrl: status.videoUrl, durationSec: status.durationSec, seed: status.seed, actualPrompt: status.actualPrompt },
+      lastUsd: usd,
+    },
+    "CHECK",
+  );
+}
+
+function failedGeneration(state: JobState, usd: number, message: string): AutomationHandlerOutcome {
+  // The provider's own wording stays in the log; the owner gets a plain sentence.
+  logger.warn("shorts_generation_failed", { attempt: state.attempt, message });
+  if (state.attempt >= MAX_ATTEMPTS) throw new Error("영상을 만들지 못했어요. 이용권은 돌려드렸어요. 요청 내용을 조금 바꿔 다시 시도해주세요.");
+  return deferred(nextAttempt(state, "failed", usd, message), "SUBMIT");
+}
+
+async function check(ctx: AutomationRunContext, state: JobState): Promise<AutomationHandlerOutcome> {
+  if (!state.generated) return deferred({ ...state, wan: undefined }, "SUBMIT");
+  const post = postprocessFor();
+  if (!state.analysisJob) {
+    const job = await post.startAnalyze(state.generated.videoUrl, QA_FRAMES);
+    return deferred({ ...state, analysisJob: job }, "CHECK");
+  }
+  const polled = await post.getAnalysis(state.analysisJob);
+  if (polled.state === "pending") return deferred(state, "CHECK");
+  if (polled.state === "failed") {
+    const tries = state.workerTries + 1;
+    if (polled.lost || tries < MAX_WORKER_TRIES) return deferred({ ...state, analysisJob: undefined, workerTries: tries }, "CHECK");
+    // The measurements are unavailable: the video is not thrown away (it is paid for), but nobody has checked it automatically.
+    return deferred({ ...state, analysisJob: undefined, notes: [...state.notes, "자동 품질 점검을 하지 못했어요. 영상을 직접 꼼꼼히 확인해 주세요."], needsVoice: false, workerTries: 0 }, state.voiceMode === "tts" ? "VOICE" : "FINISH");
+  }
+
+  const analysis: VideoAnalysis = polled.result;
+  const deterministic = evaluateAnalysis({ analysis, expectedSeconds: state.durationSec, voiceMode: state.voiceMode });
+  const aiNotes: string[] = [];
+  let ai = null;
+  if (analysis.frames.length > 0) {
+    try {
+      ai = await scoped(ctx, state.attempt, () =>
+        generateStructured({
+          ...buildAiQaPrompt({ plan: state.plan, durationSec: state.durationSec, referenceNotes: referenceNotes(state), frameTimes: analysis.frames.map((frame) => frame.atSec) }),
+          schema: aiQaSchema,
+          maxTokens: 4_000,
+          images: analysis.frames.map((frame) => ({ mediaType: "image/jpeg" as const, base64: frame.base64 })),
+          role: "vision",
+          effort: "medium",
+          purpose: "video.qa",
+        }),
+      );
+    } catch (error) {
+      // The automatic checks above still ran; a human looks at the video in any case.
+      logger.warn("shorts_ai_qa_failed", { runId: ctx.runId, message: error instanceof Error ? error.message : String(error) });
+      aiNotes.push("AI 화면 점검을 하지 못했어요. 영상을 직접 꼼꼼히 확인해 주세요.");
+    }
+  }
+  const report: QaReport = combineQa({
+    deterministic: deterministic.findings,
+    ai,
+    prompt: [...promptFindings(state.generated.actualPrompt, state.voiceMode)],
+  });
+  const notes = [...state.notes, ...aiNotes];
+  const aiCalls = state.aiCalls + (ai ? 1 : 0);
+
+  if (report.status === "REJECTED") {
+    const reasons = report.findings.filter((finding) => finding.severity === "reject").map((finding) => finding.message);
+    if (state.attempt >= MAX_ATTEMPTS) {
+      throw new Error(`만든 영상이 품질 점검을 통과하지 못했어요. (${reasons.slice(0, 3).join(" / ")}) 요청 내용을 조금 바꿔 다시 시도해주세요.`);
+    }
+    return deferred(nextAttempt({ ...state, notes, aiCalls }, "rejected", state.lastUsd, reasons.join(" / "), retryNoteFrom(report)), "SUBMIT");
+  }
+
+  const needsVoice = state.voiceMode === "tts" || deterministic.needsVoiceFallback;
+  return deferred(
+    {
+      ...state,
+      qa: report as unknown as Record<string, unknown>,
+      attempts: [...state.attempts, { attempt: state.attempt, outcome: "accepted" as const, usd: state.lastUsd, note: "" }],
+      analysis: { hasAudio: analysis.probe.hasAudio, durationSec: analysis.probe.durationSec },
+      analysisJob: undefined,
+      needsVoice,
+      notes,
+      aiCalls,
+      workerTries: 0,
+    },
+    needsVoice ? "VOICE" : "FINISH",
+  );
+}
+
+/** What the AI saw in the owner's photos, so the QA can judge label and packaging fidelity. */
+function referenceNotes(state: JobState): string[] {
+  return assetsOfKind(state.assets, "image").flatMap((asset) => (asset.summary ? [asset.summary] : []));
+}
+
+async function voice(ctx: AutomationRunContext, state: JobState): Promise<AutomationHandlerOutcome> {
+  const tts = getTtsProvider();
+  const text = state.plan.narration;
   const admin = createAdminClient();
+  await ensureShortsBuckets(admin);
+  try {
+    const synth = () => tts.synthesize(text);
+    const result = tts.name === "mock"
+      ? await synth()
+      : await scoped(ctx, state.attempt, () =>
+        runPaidCall({
+          kind: "VIDEO",
+          runId: ctx.runId,
+          step: "video.tts",
+          attempt: state.attempt,
+          provider: "elevenlabs",
+          model: serverEnv.TTS_MODEL_ID,
+          reserveUsd: ttsUsd(text.length, serverEnv.TTS_USD_PER_1K_CHARS),
+          idempotencyKey: `${ctx.runId}:tts:${state.attempt}`,
+          run: async () => {
+            const spoken = await synth();
+            return { value: spoken, actualUsd: ttsUsd(spoken.characters, serverEnv.TTS_USD_PER_1K_CHARS), usage: { characters: spoken.characters } };
+          },
+          // A rejected request (bad key, bad voice) was not billed; a timeout may have been.
+          onError: (error) => (isAppError(error) && UNBILLED_SUBMIT_CODES.has(error.code) ? "release" : undefined),
+        }),
+      );
+    const path = videoStoragePath(ctx.automation.user_id, ctx.automation.id, ctx.runId, `voice-${state.attempt}.mp3`);
+    const { error } = await admin.storage.from(VIDEO_BUCKET).upload(path, result.audio, { contentType: "audio/mpeg", upsert: true });
+    if (error) throw new Error("음성 파일을 저장하지 못했어요.", { cause: error });
+    return deferred({ ...state, voice: { path, characters: result.characters } }, "FINISH");
+  } catch (error) {
+    logger.warn("shorts_voice_failed", { runId: ctx.runId, message: error instanceof Error ? error.message : String(error) });
+    const own = state.analysis?.hasAudio;
+    return deferred(
+      { ...state, notes: [...state.notes, own ? "한국어 음성을 입히지 못해서 영상 자체의 소리를 그대로 썼어요." : "한국어 음성을 입히지 못했어요. 소리 없는 영상이니 확인해 주세요."] },
+      "FINISH",
+    );
+  }
+}
 
-  if (state.stage === "ANIMATING") {
-    const provider = getAnimationProvider();
-    const clips = state.clips.map((clip) => ({ ...clip }));
-    for (const clip of clips) {
-      if (clip.status !== "pending") continue;
-      const status = await provider.getClip(clip.handle as AnimationClipHandle);
-      if (status.state === "done") {
-        clip.status = "done";
-        clip.videoUrl = status.videoUrl;
-      } else if (status.state === "failed") {
-        if (clip.attempts >= MAX_CLIP_ATTEMPTS) {
-          throw new Error(`움직이는 영상을 만들지 못했어요: ${status.message}`);
-        }
-        const scene = state.scenes[clip.sceneIndex];
-        clip.handle = await provider.startClip({
-          imageUrl: await signStoragePath(admin, clip.framePath),
-          prompt: clipPrompt(state.format === "character" ? scene?.action ?? "" : scene?.motionPrompt ?? "", state.format),
-        }, { quality: state.quality });
-        clip.attempts += 1;
-      }
-    }
+function overlaysFor(ctx: AutomationRunContext, state: JobState, urls: { logo?: string; inserts: Map<number, string> }): ComposeOverlay[] {
+  const overlays: ComposeOverlay[] = [];
+  if (urls.logo && state.plan.logo.show) overlays.push({ kind: "image", url: urls.logo, position: state.plan.logo.position, widthPct: 0.2 });
+  else overlays.push({ kind: "text", text: ctx.business.name, position: "top-left", fontSizePx: 34 });
+  for (const insert of state.plan.inserts) {
+    const url = urls.inserts.get(insert.imageIndex);
+    if (url) overlays.push({ kind: "image", url, position: "center", widthPct: 0.82, startSec: insert.startSec, endSec: insert.endSec });
+  }
+  overlays.push({ kind: "text", text: state.plan.cta.text, position: "bottom", fontSizePx: 46, startSec: state.plan.cta.startSec, endSec: state.durationSec });
+  return overlays;
+}
 
-    // The background track: a failed or missing one simply means the video is made without music.
-    let music = state.music ? { ...state.music } : undefined;
-    if (music?.status === "pending") {
-      try {
-        const musicStatus = await provider.getMusic(music.handle as AnimationClipHandle);
-        if (musicStatus.state === "done") {
-          music.status = "done";
-          music.audioUrl = musicStatus.audioUrl;
-        } else if (musicStatus.state === "failed") {
-          music = { ...music, status: "failed" };
-        }
-      } catch {
-        music = { ...music, status: "failed" };
-      }
-    }
+async function finish(ctx: AutomationRunContext, state: JobState): Promise<AutomationHandlerOutcome> {
+  if (!state.generated) return deferred({ ...state, wan: undefined }, "SUBMIT");
+  const post = postprocessFor();
+  const admin = createAdminClient();
+  const finalPath = videoStoragePath(ctx.automation.user_id, ctx.automation.id, ctx.runId, "final.mp4");
 
-    const done = clips.filter((clip) => clip.status === "done").length;
-    const noun = state.format === "character" ? "캐릭터를" : "사진을";
-    if (done < clips.length) {
-      return deferred({ ...state, clips, music }, `${noun} 움직이는 중이에요 (${done}/${clips.length})`);
+  if (!state.composeJob) {
+    await ensureShortsBuckets(admin);
+    const images = assetsOfKind(state.assets, "image");
+    const logoAsset = assetsOfKind(state.assets, "logo")[0];
+    const logo = logoAsset && logoAsset.origin === "upload" ? await signAsset(admin, REFERENCE_BUCKET, logoAsset.source) : undefined;
+    const inserts = new Map<number, string>();
+    for (const insert of state.plan.inserts) {
+      const asset = images[insert.imageIndex - 1];
+      if (asset?.origin === "upload" && asset.role === "exact") inserts.set(insert.imageIndex, await signAsset(admin, REFERENCE_BUCKET, asset.source));
     }
-    if (music?.status === "pending") return deferred({ ...state, clips, music }, "배경음악을 만드는 중이에요");
-
-    let movie: Record<string, unknown>;
-    if (state.format === "promo") {
-      movie = await promoMovie(admin, ctx, state.scenes, clips);
-    } else if (state.animationMode === "tween") {
-      movie = await characterTweenMovie(admin, ctx, state.scenes);
-    } else {
-      const renderScenes: VideoRenderScene[] = state.scenes.map((scene, index) => ({
-        text: scene.text,
-        visualPrompt: scene.visualPrompt,
-        durationSec: scene.durationSec,
-        speaker: scene.speaker,
-        motion: scene.motion as VideoRenderScene["motion"],
-        videoUrl: clips.find((clip) => clip.sceneIndex === index)?.videoUrl,
-      }));
-      movie = buildCharacterMovie(renderScenes);
-    }
-    if (music?.status === "done" && music.audioUrl) movie = withBackgroundMusic(movie, music.audioUrl);
-    const projectId = await startMovieRender(movie);
-    return deferred({ ...state, stage: "COMPOSING", clips, music, projectId }, "영상을 합치는 중이에요");
+    const { data: upload, error: uploadError } = await admin.storage.from(VIDEO_BUCKET).createSignedUploadUrl(finalPath, { upsert: true });
+    if (uploadError || !upload) throw new Error("영상을 저장할 주소를 만들지 못했어요.", { cause: uploadError });
+    const hasOwnAudio = state.analysis?.hasAudio ?? true;
+    const job = await post.startCompose({
+      videoUrl: state.generated.videoUrl,
+      voiceUrl: state.voice ? await signAsset(admin, VIDEO_BUCKET, state.voice.path) : undefined,
+      audioMode: state.voice ? (hasOwnAudio ? "mix" : "voice_only") : "native",
+      overlays: overlaysFor(ctx, state, { logo, inserts }),
+      uploadUrl: upload.signedUrl,
+      target: { width: 720, height: 1280, fps: 30 },
+    });
+    return deferred({ ...state, composeJob: job }, "FINISH");
   }
 
-  // COMPOSING
-  if (!state.projectId) throw new Error("영상 렌더 작업 정보가 없어요. 영상을 다시 만들어주세요.");
-  const status = await getMovieRenderStatus(state.projectId);
-  if (status.state === "pending") return deferred(state, state.animationMode === "video" ? "영상을 합치는 중이에요" : "영상을 만드는 중이에요");
-  if (status.state === "failed") throw new Error(status.message);
+  const polled = await post.getCompose(state.composeJob);
+  if (polled.state === "pending") return deferred(state, "FINISH");
+  if (polled.state === "failed") {
+    const tries = state.workerTries + 1;
+    if (tries >= MAX_WORKER_TRIES) throw new Error("영상 마무리 작업에 실패했어요. 잠시 후 다시 시도해주세요.");
+    return deferred({ ...state, composeJob: undefined, workerTries: tries }, "FINISH");
+  }
 
-  const videoUrl = status.videoUrl;
-  const content = state.content as unknown as ShortsContent;
-  const publicationResults = state.platforms.length > 0
+  return complete(ctx, state, finalPath);
+}
+
+function sceneTextOf(scene: AdPlan["storyboard"][number], hook: string): string {
+  return (scene.narration || (scene.startSec === 0 ? hook : scene.visual.slice(0, 90))).slice(0, 180);
+}
+
+function captionFor(plan: AdPlan, publishing: ShortsPublishing | undefined, businessName: string): string {
+  const tags = (publishing?.hashtags ?? []).map((tag) => `#${tag.replace(/^#/, "")}`);
+  const filler = [`#${businessName.replace(/[^\p{L}\p{N}_]/gu, "")}`, "#광고", "#숏폼"].filter((tag) => tag.length > 1);
+  const all = [...new Set([...tags, ...filler])].slice(0, 8);
+  return `${plan.message.slice(0, 200)}\n${all.join(" ")}`.slice(0, 1_000);
+}
+
+async function complete(ctx: AutomationRunContext, state: JobState, finalPath: string): Promise<AutomationHandlerResult> {
+  const admin = createAdminClient();
+  const sample = getWanProvider().name === "mock";
+  const videoUrl = sample ? state.generated!.videoUrl : await signAsset(admin, VIDEO_BUCKET, finalPath, VIDEO_URL_TTL_SEC);
+  const content: ShortsContent = {
+    hook: state.plan.hook.text.slice(0, 120),
+    script: state.plan.narration,
+    scenes: state.plan.storyboard.map((scene) => ({ text: sceneTextOf(scene, state.plan.hook.text), visualPrompt: scene.visual.slice(0, 500), durationSec: Math.max(0.5, Math.round((scene.endSec - scene.startSec) * 10) / 10) })),
+    caption: captionFor(state.plan, state.publishing, ctx.business.name),
+    privacy: "private",
+  };
+  const qa = state.qa ?? { status: "NEEDS_HUMAN_CHECK", findings: [], summary: "", aiChecked: false };
+  const publicationResults = state.platforms.length > 0 && !sample
     ? await publishShortsToPlatforms({
       userId: ctx.automation.user_id,
       businessId: ctx.business.id,
@@ -607,62 +747,94 @@ async function resumeReferenceRun(ctx: AutomationRunContext, raw: Json): Promise
       videoUrl,
       platforms: state.platforms,
       publishing: state.publishing,
-      link: promotionFieldValue(ctx.business, "actionUrl") ?? promotionFieldValue(ctx.business, "website"),
+      link: videoLink(ctx),
     })
     : {};
-  await deleteReferenceImages(admin, state.framePaths).catch(() => undefined);
+  const spend = await summarizeRunSpend(ctx.runId).catch(() => null);
+  const wanAttempts = state.attempts.filter((item) => item.outcome !== "lost").length || 1;
 
   return {
     output: {
       ...content,
       topic: state.topic,
-      videoUrl,
+      format: "ad",
+      durationSec: state.durationSec,
+      voiceMode: state.voiceMode,
+      voiceFallback: state.needsVoice && state.voiceMode === "native",
+      ...(sample ? { videoUrl, sampleVideo: true } : { videoPath: finalPath, videoUrl }),
       ...(state.publishing ? { publishing: state.publishing } : {}),
-      format: state.format,
-      animationMode: state.animationMode,
-      ...(state.animationNote ? { animationNote: state.animationNote } : {}),
-      // A mock renderer's address is a placeholder; flag it so the screen says so and posting is refused.
-      ...(serverEnv.VIDEO_RENDER_PROVIDER !== "json2video" ? { sampleVideo: true } : {}),
+      concept: state.plan.concept,
+      qa: { ...qa, notes: state.notes.slice(0, 8) },
+      generation: {
+        pipeline: "wan3-v1",
+        model: serverEnv.WAN_MODEL,
+        resolution: WAN_RESOLUTION,
+        attempts: state.attempts,
+        referenceVideoSeconds: state.referenceVideoSeconds,
+        seed: state.generated?.seed ?? null,
+        actualPrompt: state.generated?.actualPrompt ?? null,
+        ...(spend && spend.steps.length > 0 ? { costUsd: spend.totalUsd, steps: spend.steps } : {}),
+      },
       publicationResults,
     } as unknown as Json,
-    externalUrl: videoUrl,
+    externalUrl: undefined,
     title: content.hook,
     topic: state.topic,
     content: content.script,
     contentType: "shorts",
-    externalApiCallCount: 1 + state.clips.length + (state.music?.audioUrl ? 1 : 0) + state.platforms.length,
+    aiGenerationCount: Math.max(1, state.aiCalls),
+    externalApiCallCount: wanAttempts + (state.voice ? 1 : 0) + (sample ? 0 : state.platforms.length),
   };
 }
 
-/** The preview a mock renderer returns is a placeholder address, not a video: it must never be shown as a finished Short. */
-function isSampleVideo(output: Record<string, unknown> | null | undefined): boolean {
-  if (!output) return false;
-  if (output.sampleVideo === true) return true;
-  return typeof output.videoUrl === "string" && /\.invalid(\/|$)/.test(output.videoUrl);
+async function resumeRun(ctx: AutomationRunContext, raw: Json): Promise<AutomationHandlerOutcome> {
+  const parsed = jobStateSchema.safeParse(raw);
+  if (!parsed.success) throw new Error("진행 중인 숏폼 작업 정보를 읽지 못했어요. 영상을 다시 만들어주세요.");
+  const state = parsed.data;
+  if (Date.now() - Date.parse(state.startedAt) > MAX_JOB_MINUTES * 60_000) {
+    // Money already booked stays booked; the run ends and the credit is returned.
+    throw new Error("영상 만들기가 너무 오래 걸려 중단했어요. 잠시 후 다시 시도해주세요.");
+  }
+  switch (state.stage) {
+    case "SUBMIT": return submit(ctx, state);
+    case "WAIT": return wait(ctx, state);
+    case "CHECK": return check(ctx, state);
+    case "VOICE": return voice(ctx, state);
+    case "FINISH": return finish(ctx, state);
+  }
 }
 
 export const shortsAutomationHandler: AutomationHandler = {
   templateSlug: "shorts",
 
+  /** A re-publish costs nothing. Real video generation, or any real AI call, draws on the video budget. */
+  metered(ctx) {
+    if (ctx.shorts?.publish) return null;
+    return isRealVideoGeneration() || serverEnv.AI_PROVIDER !== "mock" ? "VIDEO" : null;
+  },
+
   preflight(ctx) {
     if (ctx.shorts?.publish) return null;
-    // Without a real renderer a production run would "succeed" with a placeholder instead of a video.
-    if (process.env.NODE_ENV === "production" && serverEnv.VIDEO_RENDER_PROVIDER !== "json2video") {
-      return "영상 제작 서비스가 아직 연결되지 않아 지금은 숏폼을 만들 수 없어요. 이용권은 차감되지 않았어요. 관리자에게 문의해주세요.";
+    const unavailable = "영상 제작 서비스가 아직 연결되지 않아 지금은 광고 영상을 만들 수 없어요. 이용권은 차감되지 않았어요. 관리자에게 문의해주세요.";
+    // Without a real generator a production run would "succeed" with a placeholder instead of a video.
+    if (process.env.NODE_ENV === "production" && !isRealVideoGeneration()) return unavailable;
+    if (isRealVideoGeneration()) {
+      if (serverEnv.AI_PROVIDER !== "anthropic" || !serverEnv.FAL_KEY) return unavailable;
+      if (serverEnv.POSTPROCESS_PROVIDER !== "worker" || !serverEnv.POSTPROCESS_WORKER_URL || !serverEnv.POSTPROCESS_WORKER_TOKEN) return unavailable;
+      // A Korean voice the owner asked for needs the voice service; without it the run would only produce the silent kind.
+      if (parseShortsSettings(ctx.config).voiceMode === "tts" && (serverEnv.TTS_PROVIDER !== "elevenlabs" || !serverEnv.ELEVENLABS_API_KEY || !serverEnv.TTS_VOICE_ID)) {
+        return "한국어 음성 서비스가 아직 연결되지 않아 음성을 입힌 영상은 지금 만들 수 없어요. '영상 자체 목소리'로 바꾸거나 관리자에게 문의해주세요. 이용권은 차감되지 않았어요.";
+      }
     }
     return null;
   },
 
   async run(ctx: AutomationRunContext): Promise<AutomationHandlerOutcome> {
     if (ctx.shorts?.publish) return publishExistingPreview(ctx);
-    const settings = parseShortsReferenceSettings(ctx.config);
-    if (settings.references.length === 0) {
-      throw new Error("참고 이미지를 먼저 추가해주세요. 이지 마케팅 마스코트를 불러오거나 캐릭터·상품·매장 이미지를 올리면 영상을 만들 수 있어요.");
-    }
-    return startReferenceRun(ctx, settings);
+    return startRun(ctx);
   },
 
   async resume(ctx: AutomationRunContext, state: Json): Promise<AutomationHandlerOutcome> {
-    return resumeReferenceRun(ctx, state);
+    return resumeRun(ctx, state);
   },
 };

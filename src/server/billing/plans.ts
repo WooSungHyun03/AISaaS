@@ -18,7 +18,6 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     name: "Free",
     priceMonthlyKrw: 0,
     automationLimit: AUTOMATION_SETUP_LIMIT,
-    animationQuality: "standard",
     allowedTemplateSlugs: null,
     features: [
       "마케팅 진단 · 마케팅 캘린더",
@@ -31,11 +30,10 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     name: "Starter",
     priceMonthlyKrw: 19000,
     automationLimit: AUTOMATION_SETUP_LIMIT,
-    animationQuality: "standard",
     allowedTemplateSlugs: null,
     features: [
       "구매한 블로그·숏폼 이용권만큼 제작",
-      "움직이는 영상(캐릭터·상품) 지원",
+      "블로그 글 · 20~30초 광고 영상 제작",
       "정해둔 때마다 자동으로 만들기",
       "이용내역 보기",
     ],
@@ -45,11 +43,10 @@ export const PLAN_CONFIGS: Record<SubscriptionPlan, PlanConfig> = {
     name: "Pro",
     priceMonthlyKrw: 49000,
     automationLimit: AUTOMATION_SETUP_LIMIT,
-    animationQuality: "premium",
     allowedTemplateSlugs: null,
     features: [
       "구매한 블로그·숏폼 이용권만큼 제작",
-      "움직이는 영상(캐릭터·상품) · 고화질 모델",
+      "블로그 글 · 20~30초 광고 영상 제작",
       "정해둔 때마다 자동으로 만들기",
       "우선 처리",
     ],

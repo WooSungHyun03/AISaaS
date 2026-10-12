@@ -19,7 +19,7 @@ const fmt = (value: string) =>
   new Date(value).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 /** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export default async function BlogPage({
   searchParams,

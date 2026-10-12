@@ -23,8 +23,6 @@ export function getAutomationCreditKind(templateSlug: string): CreditKind | null
 export interface EntitlementCheck {
   allowed: boolean;
   reason?: string;
-  /** Animated Shorts still use the legacy plan's provider quality setting. */
-  animationQuality?: "standard" | "premium";
 }
 
 export async function getEffectivePlan(supabase: DbClient, userId: string): Promise<SubscriptionPlan> {
@@ -74,15 +72,6 @@ export async function canExecuteAutomation(
     .maybeSingle();
   if (error) throw error;
   return data ? { allowed: true } : { allowed: false, reason: CREDIT_EXHAUSTED_MESSAGE };
-}
-
-/**
- * Animation model selection remains a legacy-plan quality choice. Content
- * execution itself is governed only by Shorts credits and has no monthly cap.
- */
-export async function canUseAnimatedShorts(supabase: DbClient, userId: string): Promise<EntitlementCheck> {
-  const plan = await getEffectivePlan(supabase, userId);
-  return { allowed: true, animationQuality: getPlanConfig(plan).animationQuality };
 }
 
 export async function getAutomationLimit(plan: SubscriptionPlan): Promise<number | null> {

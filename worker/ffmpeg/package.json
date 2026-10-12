@@ -1,0 +1,14 @@
+{
+  "name": "autobiz-ffmpeg-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Post-processing worker for AutoBiz ad Shorts: probe, quality analysis, overlays, voice mixing and final MP4 encoding with FFmpeg.",
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "start": "node src/index.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

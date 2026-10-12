@@ -10,8 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:credits-db": "node scripts/test-credit-ledger.mjs",
-    "check:providers": "node scripts/check-providers.mjs",
-    "bakeoff:animation": "node --env-file=.env.local scripts/bakeoff-animation.mjs"
+    "check:providers": "node scripts/check-providers.mjs"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.21",

@@ -16,7 +16,9 @@ import { blogGuideContext } from "@/server/blog/guide-context";
 import { ShortsPublishingPanel } from "@/components/automations/shorts-publishing-panel";
 import { shortsPublishingSchema } from "@/server/shorts/publishing-metadata";
 import { blogSetupSchema } from "@/types/blog-automation";
-import { parseShortsReferenceSettings } from "@/types/shorts-reference";
+import { parseShortsSettings } from "@/types/shorts-reference";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { VIDEO_BUCKET, isOwnedAssetPath, signAsset } from "@/server/shorts/assets";
 import { promotionFieldValue } from "@/lib/promotion";
 
 const formatter = new Intl.DateTimeFormat("ko-KR", {
@@ -61,14 +63,18 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
   const guideBusiness = guideInputs?.[0].data ?? null;
   const parsedBlogConfig = blogSetupSchema.safeParse(automation.config);
   const ownedImages = (guideInputs?.[1].data ?? [])
-    .flatMap((row) => parseShortsReferenceSettings(row.config).references)
-    .filter((reference) => reference.kind === "upload" && reference.label)
+    .flatMap((row) => parseShortsSettings(row.config).assets)
+    .filter((asset) => asset.kind === "image" && asset.origin === "upload" && asset.label)
     .slice(0, 10)
-    .map((reference) => ({ label: reference.label, subject: reference.subject ?? "other" }));
+    .map((asset) => ({ label: asset.label, subject: asset.role ?? "other" }));
   const blogContext = guideBusiness
     ? blogGuideContext(guideBusiness, { platform: output?.platform ?? (parsedBlogConfig.success ? parsedBlogConfig.data.platform : undefined), keywords: parsedBlogConfig.success ? parsedBlogConfig.data.keywords : [] }, ownedImages)
     : null;
   const editedShortsPublishing = shortsPublishingSchema.safeParse(workingCopy?.publishing);
+  // An ad video lives in private Storage: sign a fresh address for this page view. Older videos kept a public address.
+  const videoUrl = output?.videoPath && isOwnedAssetPath(output.videoPath, user.id, automation.id)
+    ? await signAsset(createAdminClient(), VIDEO_BUCKET, output.videoPath, 60 * 60).catch(() => null)
+    : output?.videoUrl ?? null;
   const field = "bg-card px-5 py-4";
   const label = "text-[13px] font-semibold text-muted-foreground";
 
@@ -122,8 +128,8 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
               {output.callToAction ? <div><p className={label}>행동 유도 문구</p><p className="mt-1 text-[15px] leading-7">{output.callToAction}</p></div> : null}
               {output.keywords.length ? <div><p className={label}>키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.keywords.map((keyword) => <Badge key={keyword} variant="brand">{keyword}</Badge>)}</div></div> : null}
               {output.seoKeywords.length ? <div><p className={label}>SEO 키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.seoKeywords.map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>)}</div></div> : null}
-              {output.videoUrl ? <div><p className={label}>영상 미리보기</p><video src={output.videoUrl} controls preload="metadata" playsInline className="mt-2 aspect-[9/16] max-h-[620px] w-full rounded-2xl bg-black object-contain" aria-label="생성된 숏폼 영상 미리보기">브라우저에서 영상 재생을 지원하지 않습니다.</video>{output.sampleVideo ? null : <a href={output.videoUrl} download target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-semibold text-primary underline underline-offset-2">영상 파일 다운로드</a>}</div> : null}
-              {output.shortsPublishing && output.videoUrl ? (
+              {videoUrl ? <div><p className={label}>영상 미리보기</p><video src={videoUrl} controls preload="metadata" playsInline className="mt-2 aspect-[9/16] max-h-[620px] w-full rounded-2xl bg-black object-contain" aria-label="생성된 숏폼 영상 미리보기">브라우저에서 영상 재생을 지원하지 않습니다.</video>{output.sampleVideo ? null : <a href={videoUrl} download target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-semibold text-primary underline underline-offset-2">영상 파일 다운로드</a>}</div> : null}
+              {output.shortsPublishing && videoUrl ? (
                 <ShortsPublishingPanel
                   key={run.id}
                   contentId={workingCopy?.id ?? null}
@@ -133,11 +139,12 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
                 />
               ) : null}
               {output.caption && !output.shortsPublishing ? <div><p className={label}>게시 문구</p><p className="mt-1 whitespace-pre-wrap text-[15px] leading-7">{output.caption}</p></div> : null}
+              {output.qa ? <div><p className={label}>품질 점검 · 직접 확인해 주세요</p><div className="mt-2 space-y-1 rounded-xl bg-muted px-4 py-3 text-sm leading-6">{output.qa.summary ? <p>{output.qa.summary}</p> : null}{[...output.qa.findings.filter((finding) => finding.severity === "warn").map((finding) => finding.message), ...output.qa.notes].map((message, index) => <p key={`${index}-${message}`} className="text-muted-foreground">· {message}</p>)}{output.qa.aiChecked ? null : <p className="text-muted-foreground">· AI 화면 점검을 하지 못했어요.</p>}</div></div> : null}
               {output.scenes.length ? <div><p className={label}>장면 구성</p><ol className="mt-2 space-y-2">{output.scenes.map((scene, index) => <li key={`${index}-${scene.text}`} className="flex gap-3 rounded-xl bg-muted px-4 py-3 text-sm"><span className="font-bold text-primary">{index + 1}</span><span className="flex-1">{scene.text}</span><span className="text-muted-foreground">{scene.durationSec}초</span></li>)}</ol></div> : null}
               {Object.keys(output.publicationResults).length ? <div><p className={label}>플랫폼 게시 결과</p><ul className="mt-2 space-y-2">{Object.entries(output.publicationResults).map(([platform, result]) => result ? <li key={platform} className="flex flex-wrap items-center gap-2 rounded-xl bg-success-soft px-4 py-3 text-sm"><Badge variant="success">{platform === "youtube" ? "YouTube Shorts" : "Instagram Reels"}</Badge><span className="min-w-0 flex-1 break-all">ID {result.externalId ?? "확인 중"}{result.privacy === "private" ? " · 비공개" : ""}</span>{result.externalUrl ? <a href={result.externalUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-primary underline underline-offset-2">열기</a> : null}</li> : null)}</ul></div> : null}
             </div>
           )}
-          {output?.videoUrl ? null : (
+          {videoUrl ? null : (
             <p className="text-sm text-muted-foreground">이지 마케팅에 저장돼 있어요. 본문을 복사해서 직접 올려주세요.</p>
           )}
         </section>

@@ -2,14 +2,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/layout/page-header";
-import { ShortsCreateButton, ShortsStudio } from "@/components/automations/shorts-studio";
+import { ShortsCreateButton, ShortsStudio, type ShortsJobInfo } from "@/components/automations/shorts-studio";
 import { ShortsPublishingPanel } from "@/components/automations/shorts-publishing-panel";
 import { shortsPublishingSchema } from "@/server/shorts/publishing-metadata";
 import { promotionFieldValue } from "@/lib/promotion";
-import { ShortsReferencesCard, type ReferenceView } from "@/components/automations/shorts-references";
+import { ShortsAssetsCard, type AssetView } from "@/components/automations/shorts-assets";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { REFERENCE_BUCKET, isOwnedReferencePath } from "@/server/shorts/reference-images";
-import { parseShortsReferenceSettings } from "@/types/shorts-reference";
+import { REFERENCE_BUCKET, VIDEO_BUCKET, isOwnedAssetPath, signAsset } from "@/server/shorts/assets";
+import { parseShortsSettings } from "@/types/shorts-reference";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { toSafeAutomationRunOutput } from "@/server/automations/run-output";
@@ -19,8 +19,8 @@ import { PromotionTargetCard } from "@/components/business/promotion-target-card
 import { getUsableCredits } from "@/server/billing/run-credits";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
 
-/** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
-export const maxDuration = 60;
+/** Server Actions on this page call the AI / video providers; give them room beyond the 10s default. */
+export const maxDuration = 300;
 
 export default async function ShortsPage({ searchParams }: { searchParams: Promise<{ business?: string }> }) {
   const query = await searchParams;
@@ -57,20 +57,27 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const safeRuns = (runsResult.data ?? []).filter((run) => run.status === "SUCCESS").map((run) => ({ ...run, safe: toSafeAutomationRunOutput(run.output) }));
   const previewRun = safeRuns.find((run) => {
     const raw = run.output && typeof run.output === "object" && !Array.isArray(run.output) ? run.output : null;
-    return run.safe?.videoUrl && run.safe.script && raw?.operation !== "PUBLISH";
+    return (run.safe?.videoUrl || run.safe?.videoPath) && run.safe.script && raw?.operation !== "PUBLISH";
   });
-  const latestPreview = previewRun?.safe?.videoUrl ? {
+  // A video made by the ad pipeline sits in private Storage: sign a fresh address for this page view. Older videos kept a public address.
+  const previewVideoUrl = previewRun?.safe
+    ? previewRun.safe.videoPath && isOwnedAssetPath(previewRun.safe.videoPath, user.id, automation.id)
+      ? await signAsset(createAdminClient(), VIDEO_BUCKET, previewRun.safe.videoPath, 60 * 60).catch(() => null)
+      : previewRun.safe.videoUrl
+    : null;
+  const latestPreview = previewRun?.safe && previewVideoUrl ? {
     runId: previewRun.id,
     createdAt: previewRun.created_at,
-    videoUrl: previewRun.safe.videoUrl,
+    videoUrl: previewVideoUrl,
     hook: previewRun.safe.hook,
     topic: previewRun.safe.topic,
     caption: previewRun.safe.caption,
     script: previewRun.safe.script,
     scenes: previewRun.safe.scenes,
     format: previewRun.safe.format,
-    animationMode: previewRun.safe.animationMode,
-    animationNote: previewRun.safe.animationNote,
+    durationSec: previewRun.safe.durationSec,
+    voiceFallback: previewRun.safe.voiceFallback,
+    qa: previewRun.safe.qa,
     sample: previewRun.safe.sampleVideo,
   } : null;
   const publications = safeRuns.flatMap((run) => (Object.entries(run.safe?.publicationResults ?? {}) as Array<[ShortsPublishPlatform, NonNullable<typeof run.safe>["publicationResults"][ShortsPublishPlatform]]>)
@@ -80,8 +87,10 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const config = automation.config && typeof automation.config === "object" && !Array.isArray(automation.config) ? automation.config as Record<string, unknown> : {};
   const configuredPlatforms: ShortsPublishPlatform[] = Array.isArray(config.platforms) ? config.platforms.filter((item): item is ShortsPublishPlatform => item === "instagram" || item === "youtube") : [];
   const schedule = automation.schedule as unknown as AutomationSchedule;
-  const referenceSettings = parseShortsReferenceSettings(automation.config);
-  const referenceViews = await referenceViewsFor(referenceSettings.references, user.id, automation.id);
+  const settings = parseShortsSettings(automation.config);
+  const assetViews = await assetViewsFor(settings.assets, user.id, automation.id);
+  const jobState = readDeferredJob(inFlightResult.data?.output);
+  const job = jobInfoOf(jobState?.state);
   // The posting text written for the latest video, and the owner's edited copy of it (older videos have neither).
   const generatedPublishing = shortsPublishingSchema.safeParse(previewRun?.safe?.shortsPublishing);
   const { data: workingCopy } = previewRun && generatedPublishing.success
@@ -98,34 +107,45 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     />
   ) : null;
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio publishingSlot={publishingSlot} referencesSlot={<ShortsReferencesCard automationId={automation.id} references={referenceViews} style={referenceSettings.style} brief={referenceSettings.brief} disabled={Boolean(inFlightResult.data)} />} hasImages={referenceViews.length > 0} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} nextRunAt={automation.next_run_at} /></div>;
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio publishingSlot={publishingSlot} referencesSlot={<ShortsAssetsCard automationId={automation.id} assets={assetViews} brief={settings.brief} durationSec={settings.durationSec} voiceMode={settings.voiceMode} disabled={Boolean(inFlightResult.data)} />} hasImages={assetViews.some((asset) => asset.kind === "image" || asset.kind === "video")} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={jobState?.progress ?? null} job={job} nextRunAt={automation.next_run_at} /></div>;
 }
 
 function PageHeading() {
-  return <PageHeader title="숏폼 스튜디오" description="AI 영상 생성부터 미리보기, Instagram과 YouTube 게시, 예약 운영까지 한곳에서 관리해요." />;
+  return <PageHeader title="숏폼 스튜디오" description="사진을 올려 20~30초 AI 광고 영상을 만들고, 미리보기와 Instagram·YouTube 게시, 예약 운영까지 한곳에서 관리해요." />;
 }
 
 
-/** Thumbnails for the reference card: mascot poses are static files, uploads get a short-lived signed URL. */
-async function referenceViewsFor(
-  references: ReturnType<typeof parseShortsReferenceSettings>["references"],
+/** Where the in-flight background job is, from its saved state (null for runs that are not ad-video jobs). */
+function jobInfoOf(state: unknown): ShortsJobInfo | null {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return null;
+  const record = state as Record<string, unknown>;
+  const stage = record.stage;
+  if (stage !== "SUBMIT" && stage !== "WAIT" && stage !== "CHECK" && stage !== "VOICE" && stage !== "FINISH") return null;
+  return { stage, attempt: typeof record.attempt === "number" ? record.attempt : 1, needsVoice: record.voiceMode === "tts" || record.needsVoice === true };
+}
+
+/** Previews for the materials card: mascot poses are static files, uploads get a short-lived signed URL. */
+async function assetViewsFor(
+  assets: ReturnType<typeof parseShortsSettings>["assets"],
   userId: string,
   automationId: string,
-): Promise<ReferenceView[]> {
-  const uploadPaths = references
-    .filter((item) => item.kind === "upload" && isOwnedReferencePath(item.source, userId, automationId))
+): Promise<AssetView[]> {
+  const uploadPaths = assets
+    .filter((item) => item.origin === "upload" && isOwnedAssetPath(item.source, userId, automationId))
     .map((item) => item.source);
   const signed = new Map<string, string>();
   if (uploadPaths.length > 0) {
     const { data } = await createAdminClient().storage.from(REFERENCE_BUCKET).createSignedUrls(uploadPaths, 60 * 30);
     for (const item of data ?? []) if (item.path && item.signedUrl) signed.set(item.path, item.signedUrl);
   }
-  return references.map((item) => ({
+  return assets.map((item) => ({
     id: item.id,
     kind: item.kind,
+    origin: item.origin,
     label: item.label,
-    subject: item.subject ?? "other",
+    role: item.role ?? null,
     summary: item.summary ?? "",
-    previewUrl: item.kind === "mascot" ? `/shorts-mascot/${item.source}.png` : signed.get(item.source) ?? null,
+    durationSec: item.durationSec ?? null,
+    previewUrl: item.origin === "mascot" ? `/shorts-mascot/${item.source}.png` : signed.get(item.source) ?? null,
   }));
 }

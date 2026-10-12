@@ -43,6 +43,12 @@ export interface AutomationRunContext {
    */
   runId: string;
   /**
+   * Only while a deferred run is being resumed: saves the handler's state right now, before the step ends. A step that
+   * has just started something that cannot be repeated (a paid generation) calls it with the job's id, so a crash a
+   * moment later resumes from the saved id instead of starting a second job.
+   */
+  checkpoint?: (state: Json) => Promise<void>;
+  /**
    * A trusted calendar plan selected for this manual run. The Server Action
    * re-reads it under RLS before the runner receives it; handlers must never
    * accept topic/goal text directly from a client request.
@@ -116,7 +122,15 @@ export interface AutomationHandler<TRun extends AutomationHandlerOutcome = Autom
    * parked in ERROR — the owner cannot fix a server setting.
    */
   preflight?(ctx: AutomationRunContext): string | null;
+  /**
+   * Which service-wide spend budget this run draws on, or null when it costs nothing (a mock provider, a re-publish).
+   * A budgeted run takes one of the period's item slots before any credit is reserved, runs inside a budget scope
+   * so every paid call is reserved in the ledger first, and gives the slot back if it produces nothing.
+   */
+  metered?(ctx: AutomationRunContext): AutomationBudgetKind | null;
 }
+
+export type AutomationBudgetKind = "VIDEO" | "BLOG";
 
 export type AutomationAvailability = "AVAILABLE" | "BETA" | "COMING_SOON";
 

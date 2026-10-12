@@ -1,611 +1,537 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Automation, Business } from "@/types/domain";
 import type { AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
-import { instagramCaption, shortsPublishingSchema } from "@/server/shorts/publishing-metadata";
+import type { VideoAnalysis } from "@/server/connectors/postprocess/types";
+import type { WanRequest, WanStatus } from "@/server/connectors/wan/types";
+import { BudgetError } from "@/server/budget/errors";
+import { ConnectorError } from "@/server/shared/errors";
 
-const { generateStructuredMock } = vi.hoisted(() => ({ generateStructuredMock: vi.fn() }));
-vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
-const { startMovieRenderMock, getMovieRenderStatusMock } = vi.hoisted(() => ({
-  startMovieRenderMock: vi.fn(),
-  getMovieRenderStatusMock: vi.fn(),
+/** Every collaborator is a controllable fake; the AI is the real mock provider, so prompts and schemas are exercised for real. */
+const m = vi.hoisted(() => ({
+  reserve: vi.fn(),
+  settle: vi.fn(),
+  release: vi.fn(),
+  spend: vi.fn(),
+  paidCallsAllowed: vi.fn(),
+  real: { value: true },
+  wanSubmit: vi.fn(),
+  wanStatus: vi.fn(),
+  startAnalyze: vi.fn(),
+  getAnalysis: vi.fn(),
+  startCompose: vi.fn(),
+  getCompose: vi.fn(),
+  tts: vi.fn(),
+  publishToPlatforms: vi.fn(),
+  uploads: [] as Array<{ bucket: string; path: string }>,
+  aiRequests: [] as Array<{ purpose?: string; role?: string; prompt: string }>,
+  aiFail: { purpose: "" },
+  aiCalled: vi.fn(),
 }));
-vi.mock("@/server/connectors/video", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/server/connectors/video")>()),
-  startMovieRender: startMovieRenderMock,
-  getMovieRenderStatus: getMovieRenderStatusMock,
-}));
-const { animationProviderMock, isAnimationAvailableMock, canUseAnimatedShortsMock, prepareFrameMock, preparePhotoMock, analyzeMock } = vi.hoisted(() => ({
-  animationProviderMock: { name: "mock", startClip: vi.fn(), getClip: vi.fn(), startMusic: vi.fn(), getMusic: vi.fn() },
-  isAnimationAvailableMock: vi.fn(),
-  canUseAnimatedShortsMock: vi.fn(),
-  prepareFrameMock: vi.fn(),
-  preparePhotoMock: vi.fn(),
-  analyzeMock: vi.fn(),
-}));
-vi.mock("@/server/connectors/animation", () => ({
-  getAnimationProvider: () => animationProviderMock,
-  isAnimationAvailable: isAnimationAvailableMock,
-}));
-vi.mock("@/server/billing/entitlements", () => ({ canUseAnimatedShorts: canUseAnimatedShortsMock }));
-vi.mock("@/server/shorts/character-frame", () => ({ prepareCharacterFrame: prepareFrameMock, preparePhotoFrame: preparePhotoMock }));
-vi.mock("@/server/shorts/reference-analysis", () => ({ analyzeReferenceImage: analyzeMock }));
-const {
-  getConnectionMock,
-  instagramConnectorMock,
-  instagramIsConfiguredMock,
-  instagramPublishMock,
-  loadInstagramConnectorMock,
-  updateConnectionStatusMock,
-} = vi.hoisted(() => {
-  const instagramIsConfigured = vi.fn();
-  const instagramPublish = vi.fn();
-  return {
-    getConnectionMock: vi.fn(),
-    instagramConnectorMock: { isConfigured: instagramIsConfigured, publish: instagramPublish },
-    instagramIsConfiguredMock: instagramIsConfigured,
-    instagramPublishMock: instagramPublish,
-    loadInstagramConnectorMock: vi.fn(),
-    updateConnectionStatusMock: vi.fn(),
-  };
-});
-vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ kind: "admin-test-client" }) }));
-const { resolveReferenceImageUrlsMock, loadReferenceBytesMock, signStoragePathMock, uploadReferenceImageMock, deleteReferenceImagesMock } = vi.hoisted(() => ({
-  resolveReferenceImageUrlsMock: vi.fn(),
-  loadReferenceBytesMock: vi.fn(),
-  signStoragePathMock: vi.fn(),
-  uploadReferenceImageMock: vi.fn(),
-  deleteReferenceImagesMock: vi.fn(),
-}));
-vi.mock("@/server/shorts/reference-images", () => ({
-  resolveReferenceImageUrls: resolveReferenceImageUrlsMock,
-  loadReferenceBytes: loadReferenceBytesMock,
-  signStoragePath: signStoragePathMock,
-  uploadReferenceImage: uploadReferenceImageMock,
-  deleteReferenceImages: deleteReferenceImagesMock,
-}));
-vi.mock("@/server/connectors/instagram", () => ({
-  InstagramConnector: class {
-    isConfigured = instagramIsConfiguredMock;
-    publish = instagramPublishMock;
+
+vi.mock("@/server/ai/generate", () => ({
+  generateStructured: async (request: { schema: { parse(value: unknown): unknown }; prompt: string; system?: string; purpose?: string; role?: string }) => {
+    m.aiCalled(request.purpose);
+    m.aiRequests.push({ purpose: request.purpose, role: request.role, prompt: request.prompt });
+    if (m.aiFail.purpose && request.purpose === m.aiFail.purpose) throw new Error(`${request.purpose} failed`);
+    const { MockAIProvider } = await import("@/server/ai/providers/mock");
+    const { text } = await new MockAIProvider().generateText({ prompt: request.prompt, system: request.system });
+    return request.schema.parse(JSON.parse(text));
   },
 }));
-vi.mock("@/server/connectors/instagram/connect", () => ({ loadInstagramConnector: loadInstagramConnectorMock }));
-vi.mock("@/server/connectors/integrations", () => ({
-  getConnection: getConnectionMock,
-  updateConnectionStatus: updateConnectionStatusMock,
+vi.mock("@/server/budget", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/budget")>()),
+  reserveSpend: m.reserve,
+  settleSpend: m.settle,
+  releaseSpend: m.release,
+  summarizeRunSpend: m.spend,
+  assertPaidCallsAllowed: m.paidCallsAllowed,
+  runPaidCall: async (call: { run: () => Promise<{ value: unknown }>; reserveUsd: number; step: string }) => {
+    await m.reserve({ step: call.step, usd: call.reserveUsd });
+    return (await call.run()).value;
+  },
+  withBudgetScope: (_scope: unknown, fn: () => Promise<unknown>) => fn(),
+}));
+vi.mock("@/server/connectors/wan", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/connectors/wan")>()),
+  getWanProvider: () => ({ name: m.real.value ? "fal" : "mock", submit: m.wanSubmit, status: m.wanStatus }),
+  isRealVideoGeneration: () => m.real.value,
+}));
+vi.mock("@/server/connectors/postprocess", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/connectors/postprocess")>()),
+  getPostprocessProvider: () => ({ name: "worker", probe: vi.fn(), startAnalyze: m.startAnalyze, getAnalysis: m.getAnalysis, startCompose: m.startCompose, getCompose: m.getCompose }),
+}));
+vi.mock("@/server/connectors/tts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/connectors/tts")>()),
+  getTtsProvider: () => ({ name: "elevenlabs", synthesize: m.tts }),
+}));
+vi.mock("@/server/automations/shorts-publishing", () => ({ publishShortsToPlatforms: m.publishToPlatforms }));
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    storage: {
+      from: (bucket: string) => ({
+        createSignedUploadUrl: async (path: string) => ({ data: { signedUrl: `https://project.supabase.co/upload/${bucket}/${path}`, token: "t", path }, error: null }),
+        upload: async (path: string) => {
+          m.uploads.push({ bucket, path });
+          return { error: null };
+        },
+      }),
+    },
+    from: () => ({
+      select: () => ({ eq: () => ({ single: async () => ({ data: { config: {} } }), maybeSingle: async () => ({ data: null }) }) }),
+      update: () => ({ eq: async () => ({}) }),
+    }),
+  }),
+}));
+vi.mock("@/server/shorts/assets", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/shorts/assets")>()),
+  ensureShortsBuckets: async () => undefined,
+  loadImageBytes: async () => new Uint8Array([1, 2, 3]),
+  signAsset: async (_admin: unknown, bucket: string, path: string) => `https://project.supabase.co/sign/${bucket}/${path}?t=1`,
+  resolveAssetUrls: async (_admin: unknown, assets: Array<{ source: string }>) => assets.map((asset) => `https://project.supabase.co/sign/${asset.source}?t=1`),
+}));
+vi.mock("@/server/shorts/image-analysis", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/shorts/image-analysis")>()),
+  prepareVisionImage: async () => ({ mediaType: "image/jpeg" as const, base64: "AAAA" }),
 }));
 
 const { shortsAutomationHandler: handler } = await import("./shorts");
-
-beforeEach(() => {
-  vi.resetAllMocks();
-  getConnectionMock.mockResolvedValue({ id: "conn-1", status: "CONNECTED" });
-  loadInstagramConnectorMock.mockResolvedValue(instagramConnectorMock);
-  instagramIsConfiguredMock.mockReturnValue(true);
-  instagramPublishMock.mockResolvedValue({ externalId: "reel-media-1" });
-});
 
 const business: Business = {
   id: "biz-1",
   owner_id: "user-1",
   name: "우리동네 빵집",
   industry: "베이커리",
-  description: "매일 아침 직접 굽는 동네 베이커리",
+  description: null,
   location: "서울 마포구",
-  target_customer: "출근길 직장인",
-  brand_tone: "따뜻하고 친근한",
-  keywords: ["소금빵", "아침빵"],
+  target_customer: null,
+  brand_tone: "친근하고 따뜻한",
+  keywords: ["소금빵", "크루아상"],
   website: null,
   sns_links: {},
-  main_offering: null,
+  main_offering: "소금빵",
   strengths: null,
   marketing_goal: null,
-  promotion_type: null,
+  promotion_type: "STORE",
   promotion_details: {},
   public_widget_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-01T00:00:00.000Z",
 };
+const automation = { id: "auto-1", user_id: "user-1", business_id: "biz-1", template_id: "t", name: "숏폼", status: "ACTIVE", schedule: {}, config: {}, last_run_at: null, next_run_at: null, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z" } as unknown as Automation;
 
-const automation = {
-  id: "auto-1",
-  user_id: "user-1",
-  business_id: "biz-1",
-  template_id: "tmpl-1",
-  name: "쇼츠 자동화",
-  status: "ACTIVE",
-  schedule: {},
-  config: {},
-  last_run_at: null,
-  next_run_at: null,
-  created_at: "2026-01-01T00:00:00.000Z",
-  updated_at: "2026-01-01T00:00:00.000Z",
-} as unknown as Automation;
-
-function baseContext(overrides: Partial<AutomationRunContext> = {}): AutomationRunContext {
+const image = (id: string, extra: Record<string, unknown> = {}) => ({ id, kind: "image", origin: "upload", source: `user-1/auto-1/assets/${id}.png`, label: `상품 사진 ${id}`, ...extra });
+function context(config: Record<string, unknown> = {}, extra: Partial<AutomationRunContext> = {}): AutomationRunContext {
   return {
     automation,
     business,
-    config: {},
+    config: { assets: [image("a"), image("b")], durationSec: 25, voiceMode: "native", ...config } as never,
     recentTopics: [],
     runId: "run-1",
-    ...overrides,
+    shorts: { previewOnly: true },
+    checkpoint: vi.fn().mockResolvedValue(undefined),
+    ...extra,
   };
 }
 
-describe("shortsAutomationHandler", () => {
-  const plan = {
-    format: "character" as const,
-    hook: "사장님, 큰일 났어요!",
-    scenes: [
-      { text: "사장님, 큰일 났어요!", speaker: "partner" as const, imageIndex: 2, action: "The character panics.", motion: "shake" as const, durationSec: 2, visualPrompt: "v" },
-      { text: "무슨 일이에요?", speaker: "main" as const, imageIndex: 1, action: "The character waves.", motion: "pop" as const, durationSec: 3, visualPrompt: "v" },
-      { text: "마케팅할 시간이 없어요", speaker: "partner" as const, imageIndex: 3, action: "The character listens.", motion: "wobble" as const, durationSec: 5, visualPrompt: "v" },
-      { text: "걱정 마세요, 제가 해드려요!", speaker: "main" as const, imageIndex: 8, action: "The character gives a thumbs up.", motion: "bounce" as const, durationSec: 6, visualPrompt: "v" },
-      { text: "지금 바로 시작해요!", speaker: "main" as const, imageIndex: 1, action: "The character points forward.", motion: "zoom" as const, durationSec: 5, visualPrompt: "v" },
-    ],
-    caption: "마케팅이 어려운 사장님을 위해 #이지마케팅 #소상공인 #숏폼",
-    privacy: "private" as const,
-  };
-  const references = [
-    { id: "m-wave", kind: "mascot", source: "wave", label: "인사", subject: "character" },
-    { id: "m-point", kind: "mascot", source: "point", label: "아이디어", subject: "character" },
-    { id: "u-cat", kind: "upload", source: "user-1/auto-1/cat.png", label: "놀란 고양이", subject: "character", summary: "놀란 표정의 고양이 일러스트" },
-  ];
-  const configWith = (extra: Record<string, unknown> = {}) => ({ references, shortsStyle: "auto", shortsBrief: "이지 마케팅을 소개해줘", ...extra }) as never;
-  const imageUrls = ["https://img.example.com/wave.png", "https://img.example.com/point.png", "https://img.example.com/cat.png"];
-  const handle = (id: string) => ({ requestId: id, statusUrl: `https://queue.fal.run/m/requests/${id}/status`, responseUrl: `https://queue.fal.run/m/requests/${id}` });
-  type Deferred = { deferred: { state: Record<string, unknown>; progress?: string } };
-  const start = async (ctx: Partial<AutomationRunContext> = {}) =>
-    (await handler.run(baseContext({ config: configWith(), shorts: { previewOnly: true }, ...ctx }))) as unknown as Deferred;
-  const resume = async (state: unknown) => (await handler.resume!(baseContext(), state as never)) as unknown as Deferred;
+const probe = { durationSec: 25, sizeBytes: 4_000_000, formatName: "mp4", hasVideo: true, hasAudio: true, width: 720, height: 1280, fps: 30, videoCodec: "h264", audioCodec: "aac" };
+function analysisOf(over: Partial<VideoAnalysis> = {}): VideoAnalysis {
+  return { probe, black: { seconds: 0, spans: [] }, frozen: { seconds: 0, spans: [] }, audio: { meanVolumeDb: -20, maxVolumeDb: -3, silentSeconds: 0, silentRatio: 0, clippedSamples: 0 }, frames: [{ atSec: 3, base64: "AAAA" }, { atSec: 10, base64: "BBBB" }], ...over };
+}
+const done = (over: Partial<Extract<WanStatus, { state: "done" }>> = {}): WanStatus => ({ state: "done", videoUrl: "https://v3.fal.media/files/out.mp4", durationSec: 25, width: 720, height: 1280, seed: 9, actualPrompt: "No text or subtitles. Keep the product exactly the same. Do not invent screens. No distorted hands, no flicker.", ...over });
 
-  beforeEach(() => {
-    resolveReferenceImageUrlsMock.mockResolvedValue(imageUrls);
-    loadReferenceBytesMock.mockResolvedValue(new Uint8Array([1, 2, 3]));
-    prepareFrameMock.mockResolvedValue(Buffer.from("frame"));
-    preparePhotoMock.mockResolvedValue(Buffer.from("photo-frame"));
-    analyzeMock.mockResolvedValue({ subject: "product", summary: "갓 구운 소금빵 클로즈업" });
-    signStoragePathMock.mockImplementation(async (_admin: unknown, path: string) => `https://signed.example.com/${path}`);
-    uploadReferenceImageMock.mockResolvedValue(undefined);
-    deleteReferenceImagesMock.mockResolvedValue(undefined);
-    isAnimationAvailableMock.mockReturnValue(true);
-    canUseAnimatedShortsMock.mockResolvedValue({ allowed: true });
-    let clip = 0;
-    animationProviderMock.startClip.mockImplementation(async () => handle(`clip-${++clip}`));
-    animationProviderMock.getClip.mockImplementation(async (h: { requestId: string }) => ({ state: "done", videoUrl: `https://v3.fal.media/${h.requestId}.mp4` }));
-    startMovieRenderMock.mockResolvedValue("project-1");
-    // No background track unless a test asks for one.
-    animationProviderMock.startMusic.mockRejectedValue(new Error("music unavailable"));
-    animationProviderMock.getMusic.mockResolvedValue({ state: "done", audioUrl: "https://v3.fal.media/music.wav" });
+type Outcome = Awaited<ReturnType<NonNullable<typeof handler.resume>>>;
+type Deferred = { deferred: { state: Record<string, unknown>; progress?: string } };
+const isDeferred = (outcome: unknown): outcome is Deferred => Boolean(outcome && typeof outcome === "object" && "deferred" in outcome);
+
+/** Drives the run like the runner: run, then resume until a result (or an error) comes out. */
+async function drive(ctx: AutomationRunContext, onStep?: (outcome: Deferred) => void): Promise<AutomationHandlerResult> {
+  let outcome: Outcome = await handler.run(ctx);
+  for (let step = 0; step < 60; step++) {
+    if (!isDeferred(outcome)) return outcome as AutomationHandlerResult;
+    onStep?.(outcome);
+    outcome = await handler.resume!(ctx, outcome.deferred.state as never);
+  }
+  throw new Error("shorts run did not finish");
+}
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  m.uploads.length = 0;
+  m.aiRequests.length = 0;
+  m.aiFail.purpose = "";
+  m.real.value = true;
+  m.reserve.mockImplementation(async (input: { usd: number }) => ({ id: `res-${m.reserve.mock.calls.length}`, usd: input.usd }));
+  m.settle.mockResolvedValue(undefined);
+  m.release.mockResolvedValue(undefined);
+  m.spend.mockResolvedValue({ totalUsd: 4.1, steps: [{ step: "video.generate", usd: 3.75 }] });
+  m.wanSubmit.mockResolvedValue({ requestId: "r1", statusUrl: "https://queue.fal.run/x/requests/r1/status", responseUrl: "https://queue.fal.run/x/requests/r1" });
+  m.wanStatus.mockResolvedValue(done());
+  m.startAnalyze.mockResolvedValue({ jobId: "an-1" });
+  m.getAnalysis.mockResolvedValue({ state: "done", result: analysisOf() });
+  m.startCompose.mockResolvedValue({ jobId: "co-1" });
+  m.getCompose.mockResolvedValue({ state: "done", result: { probe } });
+  m.tts.mockResolvedValue({ audio: new Uint8Array(5_000), characters: 90 });
+  m.publishToPlatforms.mockResolvedValue({});
+});
+
+const generateReservations = () => m.reserve.mock.calls.map((call) => call[0]).filter((input) => input.step === "video.generate");
+
+describe("ad Shorts pipeline", () => {
+  it("plans, generates with Wan 3.0 at 720p / 9:16 / 25 s, checks, finishes and returns a video that still needs a human look", async () => {
+    const steps: string[] = [];
+    const result = await drive(context(), (step) => steps.push(String(step.deferred.state.stage)));
+
+    expect(steps).toEqual(["SUBMIT", "WAIT", "CHECK", "CHECK", "FINISH", "FINISH"]);
+    const request = m.wanSubmit.mock.calls[0][0] as WanRequest;
+    expect(request).toMatchObject({ durationSec: 25, resolution: "720p", thinking: true, promptExpansion: true });
+    expect(request.imageUrls).toHaveLength(2);
+    expect(request.prompt).toContain("Vertical 9:16");
+    expect(request.prompt).toContain("Rules:");
+
+    const output = result.output as Record<string, unknown>;
+    expect(result.contentType).toBe("shorts");
+    expect(output).toMatchObject({ format: "ad", durationSec: 25, videoPath: "user-1/auto-1/run-1/final.mp4", qa: { status: "NEEDS_HUMAN_CHECK" } });
+    expect(String(output.videoUrl)).toContain("/sign/shorts-videos/user-1/auto-1/run-1/final.mp4");
+    expect(JSON.stringify(output)).not.toContain("APPROVED");
+    expect(output.generation).toMatchObject({ pipeline: "wan3-v1", model: "alibaba/wan-3.0/reference-to-video", resolution: "720p", costUsd: 4.1 });
+    expect(output.publishing).toBeTruthy();
+    expect(result.externalApiCallCount).toBe(1);
   });
 
-  it("needs a reference image: without one it stops before any AI call", async () => {
-    await expect(handler.run(baseContext({ config: { references: [] } as never }))).rejects.toThrow("참고 이미지를 먼저 추가");
-    await expect(handler.run(baseContext())).rejects.toThrow("참고 이미지를 먼저 추가");
-    expect(generateStructuredMock).not.toHaveBeenCalled();
+  it("reserves the generation BEFORE planning, at 720p price x thinking safety margin, and settles it when the video is ready", async () => {
+    await drive(context());
+    expect(generateReservations()).toHaveLength(1);
+    expect(generateReservations()[0]).toMatchObject({ kind: "VIDEO", runId: "run-1", attempt: 1, provider: "fal", usd: 3.75, idempotencyKey: "run-1:wan:1" });
+    // Reserved first: the ledger call precedes the first AI call of the run.
+    expect(m.reserve.mock.invocationCallOrder[0]).toBeLessThan(m.aiCalled.mock.invocationCallOrder[0]);
+    expect(m.settle).toHaveBeenCalledWith("res-1", 3.75, expect.objectContaining({ note: "generation finished" }));
+    expect(m.release).not.toHaveBeenCalled();
   });
 
-  it("plans the skit from the character images and starts one animated clip per scene", async () => {
-    generateStructuredMock.mockResolvedValueOnce({ topic: "마케팅 대신 해주는 로봇" }).mockResolvedValueOnce(plan);
-
-    const outcome = await start();
-
-    const topicRequest = generateStructuredMock.mock.calls[0][0] as { prompt: string; system: string };
-    const planRequest = generateStructuredMock.mock.calls[1][0] as { prompt: string; system: string };
-    expect(topicRequest.system).toContain("업종: 베이커리");
-    expect(topicRequest.prompt).toContain("이지 마케팅을 소개해줘");
-    expect(planRequest.system).toContain("Hook -> Problem or first impression -> Solution or proof -> CTA");
-    expect(planRequest.system).toContain("Short storyline:");
-    expect(planRequest.prompt).toContain("1. [character] 이지 마케팅 마스코트 로봇");
-    expect(planRequest.prompt).toContain("3. [character] 놀란 표정의 고양이 일러스트");
-
-    expect(prepareFrameMock).toHaveBeenCalledTimes(5);
-    expect(uploadReferenceImageMock).toHaveBeenCalledTimes(5);
-    expect(animationProviderMock.startClip).toHaveBeenCalledTimes(5);
-    const firstClip = animationProviderMock.startClip.mock.calls[0][0] as { imageUrl: string; prompt: string };
-    expect(firstClip.imageUrl).toBe("https://signed.example.com/user-1/auto-1/frames/run-1-0.png");
-    expect(firstClip.prompt).toContain("The character panics.");
-    expect(outcome.deferred.state).toMatchObject({ stage: "ANIMATING", format: "character", animationMode: "video" });
-    expect(outcome.deferred.progress).toContain("0/5");
-    // imageIndex 8 does not exist in a 3-image list -> falls back to the first image
-    expect((outcome.deferred.state.scenes as Array<{ referenceIndex: number }>).map((scene) => scene.referenceIndex)).toEqual([1, 0, 2, 0, 0]);
-    expect(JSON.stringify(outcome.deferred.state)).not.toContain("signed.example.com");
+  it.each([
+    [20, 0, 3],
+    [25, 0, 3.75],
+    [30, 0, 4.5],
+    [25, 15, 6],
+    [30, 15, 6.75],
+  ])("reserves %i s with %i s of reference video at $%d", async (durationSec, videoSeconds, usd) => {
+    const config = { durationSec, assets: [image("a"), ...(videoSeconds ? [{ id: "v", kind: "video", origin: "upload", source: "user-1/auto-1/assets/v.mp4", label: "참고", durationSec: videoSeconds, fps: 30 }] : [])] };
+    await handler.run(context(config));
+    expect(generateReservations()[0].usd).toBeCloseTo(usd, 6);
   });
 
-  it("waits while clips are pending, then renders the movie from the finished clips", async () => {
-    generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(plan);
-    const started = await start();
-
-    let calls = 0;
-    animationProviderMock.getClip.mockImplementation(async (h: { requestId: string }) =>
-      (++calls <= 3 ? { state: "pending" } : { state: "done", videoUrl: `https://v3.fal.media/${h.requestId}.mp4` }));
-    const waiting = await resume(started.deferred.state);
-    expect(waiting.deferred.progress).toContain("2/5");
-    expect(startMovieRenderMock).not.toHaveBeenCalled();
-
-    const composing = await resume(waiting.deferred.state);
-    expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING", projectId: "project-1" });
-    const movie = startMovieRenderMock.mock.calls[0][0] as { scenes: Array<{ elements: Array<{ type: string; src?: string }> }> };
-    expect(movie.scenes).toHaveLength(5);
-    expect(movie.scenes[0].elements.map((element) => element.type)).toEqual(["voice", "video"]); // no captions or bubbles
-    expect(movie.scenes.every((scene) => scene.elements[1].src?.startsWith("https://v3.fal.media/"))).toBe(true);
+  it("refuses to start when the budget has no room, before any planning is paid for", async () => {
+    m.reserve.mockRejectedValue(new BudgetError("BUDGET_CAP_EXCEEDED", "cap"));
+    await expect(handler.run(context())).rejects.toMatchObject({ code: "BUDGET_CAP_EXCEEDED" });
+    expect(m.aiRequests).toHaveLength(0);
+    expect(m.wanSubmit).not.toHaveBeenCalled();
   });
 
-  it("finishes with the video URL, cleans up the frames and records the animation mode", async () => {
-    generateStructuredMock.mockResolvedValueOnce({ topic: "마케팅 대신 해주는 로봇" }).mockResolvedValueOnce(plan);
-    const composing = await resume((await start()).deferred.state);
-
-    getMovieRenderStatusMock.mockResolvedValueOnce({ state: "pending" });
-    const still = await resume(composing.deferred.state);
-    expect(still.deferred.progress).toContain("합치는 중");
-
-    getMovieRenderStatusMock.mockResolvedValueOnce({ state: "done", videoUrl: "https://cdn.example.com/skit.mp4" });
-    const done = (await handler.resume!(baseContext(), still.deferred.state as never)) as AutomationHandlerResult;
-
-    expect(done.output).toMatchObject({
-      videoUrl: "https://cdn.example.com/skit.mp4",
-      format: "character",
-      animationMode: "video",
-      hook: "사장님, 큰일 났어요!",
-      topic: "마케팅 대신 해주는 로봇",
-      publicationResults: {},
-      // The test renderer is not a real one: the result is flagged as a sample so it is never shown or posted as a finished video.
-      sampleVideo: true,
-    });
-    expect(done.content).toBe(plan.scenes.map((scene) => scene.text).join(" "));
-    expect(done).toMatchObject({ externalUrl: "https://cdn.example.com/skit.mp4", title: plan.hook, contentType: "shorts" });
-    expect(deleteReferenceImagesMock).toHaveBeenCalledWith(expect.anything(), expect.arrayContaining([expect.stringContaining("frames/run-1-0.png")]));
-    expect(JSON.stringify(done.output)).not.toContain("signed.example.com");
-    expect(instagramPublishMock).not.toHaveBeenCalled();
+  it("releases the reservation when planning fails (nothing was sent to the video service)", async () => {
+    m.aiFail.purpose = "video.plan";
+    await expect(handler.run(context())).rejects.toThrow("video.plan failed");
+    expect(m.release).toHaveBeenCalledWith("res-1", expect.any(String));
+    expect(m.wanSubmit).not.toHaveBeenCalled();
   });
 
-  it("publishes to the configured platform only for non-preview runs", async () => {
-    generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(plan);
-    const started = (await handler.run(baseContext({ config: configWith({ platforms: ["instagram"] }) }))) as unknown as Deferred;
-    expect(started.deferred.state).toMatchObject({ platforms: ["instagram"], previewOnly: false });
-    const composing = await resume(started.deferred.state);
-    getMovieRenderStatusMock.mockResolvedValueOnce({ state: "done", videoUrl: "https://cdn.example.com/skit.mp4" });
-
-    const done = (await handler.resume!(baseContext(), composing.deferred.state as never)) as AutomationHandlerResult;
-
-    // The posted caption is the posting text written for this video, composed for Instagram.
-    const posting = shortsPublishingSchema.parse((composing.deferred.state as { publishing: unknown }).publishing);
-    expect(instagramPublishMock).toHaveBeenCalledWith({ content: instagramCaption(posting), mediaType: "REELS", videoUrl: "https://cdn.example.com/skit.mp4" });
-    expect(done.output).toMatchObject({ publishing: { title: expect.any(String), hashtags: expect.any(Array) } });
-    expect(done.output).toMatchObject({ publicationResults: { instagram: { externalId: "reel-media-1" } } });
+  it("needs a photo or a reference video, and checks that before anything is reserved", async () => {
+    await expect(handler.run(context({ assets: [] }))).rejects.toThrow("사진이나 참고 영상");
+    expect(m.reserve).not.toHaveBeenCalled();
   });
 
-  it("retries a failed clip once and fails the run when it fails again", async () => {
-    generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(plan);
-    const started = await start();
+  it("saves the job id before the step ends, and never submits twice when resumed from a saved WAIT state", async () => {
+    const ctx = context();
+    const started = (await handler.run(ctx)) as Deferred;
+    const submitted = (await handler.resume!(ctx, started.deferred.state as never)) as Deferred;
+    expect(ctx.checkpoint).toHaveBeenCalledWith(expect.objectContaining({ stage: "WAIT", wan: expect.objectContaining({ requestId: "r1" }) }));
+    expect(m.wanSubmit).toHaveBeenCalledTimes(1);
 
-    animationProviderMock.getClip.mockResolvedValueOnce({ state: "failed", message: "policy" }).mockResolvedValue({ state: "pending" });
-    const retried = await resume(started.deferred.state);
-    expect(animationProviderMock.startClip).toHaveBeenCalledTimes(6);
-    expect((retried.deferred.state.clips as Array<{ attempts: number }>)[0].attempts).toBe(2);
-
-    animationProviderMock.getClip.mockResolvedValueOnce({ state: "failed", message: "policy again" });
-    await expect(resume(retried.deferred.state)).rejects.toThrow("policy again");
+    // The process died after the checkpoint: the next step starts from the saved state and only polls.
+    m.wanStatus.mockResolvedValueOnce({ state: "pending" });
+    const polling = (await handler.resume!(ctx, submitted.deferred.state as never)) as Deferred;
+    expect(polling.deferred.state.stage).toBe("WAIT");
+    expect(m.wanSubmit).toHaveBeenCalledTimes(1);
+    expect(generateReservations()).toHaveLength(1);
   });
 
-  it("gives up on a run that has been going too long", async () => {
-    generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(plan);
-    const started = await start();
-    const stale = { ...started.deferred.state, startedAt: new Date(Date.now() - 31 * 60_000).toISOString() };
-    await expect(resume(stale)).rejects.toThrow("너무 오래");
+  it("gives up on a generation that never finishes and keeps it booked as spent", async () => {
+    const ctx = context();
+    const started = (await handler.run(ctx)) as Deferred;
+    const submitted = (await handler.resume!(ctx, started.deferred.state as never)) as Deferred;
+    m.wanStatus.mockResolvedValue({ state: "pending" });
+    const old = { ...submitted.deferred.state, wanSubmittedAt: new Date(Date.now() - 31 * 60_000).toISOString() };
+    const retry = (await handler.resume!(ctx, old as never)) as Deferred;
+    expect(m.settle).toHaveBeenCalledWith("res-1", 3.75, expect.objectContaining({ note: "generation timed out" }));
+    expect(retry.deferred.state).toMatchObject({ stage: "SUBMIT", attempt: 2 });
   });
 
-  it("falls back to the simple motion effect, with a note, when the monthly animation allowance is used up", async () => {
-    canUseAnimatedShortsMock.mockResolvedValue({ allowed: false, reason: "스타터 요금제의 이번 달 움직이는 캐릭터 영상 한도(2건)를 모두 썼어요." });
-    generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(plan);
-
-    const outcome = await start();
-
-    expect(animationProviderMock.startClip).not.toHaveBeenCalled();
-    expect(outcome.deferred.state).toMatchObject({ stage: "COMPOSING", animationMode: "tween" });
-    expect(String(outcome.deferred.state.animationNote)).toContain("한도");
-    const movie = startMovieRenderMock.mock.calls[0][0] as { scenes: Array<{ elements: Array<{ type: string; src?: string }> }> };
-    expect(movie.scenes[0].elements.map((element) => element.type)).toEqual(["voice", "image"]);
-    expect(movie.scenes[0].elements[1].src).toBe(imageUrls[1]);
-  });
-
-  it("falls back to the simple motion effect when the animation service is not configured", async () => {
-    isAnimationAvailableMock.mockReturnValue(false);
-    generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(plan);
-
-    const outcome = await start();
-
-    expect(canUseAnimatedShortsMock).not.toHaveBeenCalled();
-    expect(outcome.deferred.state).toMatchObject({ animationMode: "tween" });
-    expect(String(outcome.deferred.state.animationNote)).toContain("연결되지 않아");
-
-    getMovieRenderStatusMock.mockResolvedValueOnce({ state: "done", videoUrl: "https://cdn.example.com/tween.mp4" });
-    const done = (await handler.resume!(baseContext(), outcome.deferred.state as never)) as AutomationHandlerResult;
-    expect(done.output).toMatchObject({ animationMode: "tween", animationNote: expect.stringContaining("연결되지 않아") });
-  });
-
-  it("surfaces a failed render so the run is marked failed", async () => {
-    isAnimationAvailableMock.mockReturnValue(false);
-    generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(plan);
-    const outcome = await start();
-    getMovieRenderStatusMock.mockResolvedValueOnce({ state: "failed", message: "JSON2Video 렌더링에 실패했습니다: bad asset" });
-    await expect(resume(outcome.deferred.state)).rejects.toThrow("bad asset");
-  });
-
-  it("stops without starting any clip when planning fails", async () => {
-    generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockRejectedValueOnce(new Error("generation failed"));
-    await expect(start()).rejects.toThrow("generation failed");
-    expect(animationProviderMock.startClip).not.toHaveBeenCalled();
-    expect(startMovieRenderMock).not.toHaveBeenCalled();
-  });
-
-  it("keeps a calendar-fixed topic and skips topic generation", async () => {
-    generateStructuredMock.mockResolvedValueOnce(plan);
-    await start({
-      calendarItem: {
-        id: "cal-1", businessId: "biz-1", plannedDate: "2026-10-12", platform: "YOUTUBE_SHORTS", contentType: "shorts",
-        topic: "신메뉴 소개", goal: "신규 방문", summary: "신메뉴를 소개", cta: "예약하기",
-      } as never,
-    });
-    expect(generateStructuredMock).toHaveBeenCalledTimes(2); // the plan, then the posting text
-    const request = generateStructuredMock.mock.calls[0][0] as { prompt: string };
-    expect(request.prompt).toContain("신메뉴 소개");
-    expect(request.prompt).toContain("신규 방문");
-  });
-
-  it("regenerates a near-duplicate topic exactly once, and leaves a distinct topic alone", async () => {
-    generateStructuredMock
-      .mockResolvedValueOnce({ topic: "겨울철 난방비 절약 팁" })
-      .mockResolvedValueOnce({ topic: "출근길 소금빵 예약 팁" })
-      .mockResolvedValueOnce(plan);
-    const outcome = await start({ recentTopics: ["겨울철 난방비 절약하는 방법"] });
-    expect(generateStructuredMock).toHaveBeenCalledTimes(4); // two topics, the plan, the posting text
-    expect(outcome.deferred.state).toMatchObject({ topic: "출근길 소금빵 예약 팁" });
-    expect((generateStructuredMock.mock.calls[1][0] as { prompt: string }).prompt).toContain("겨울철 난방비 절약 팁");
-
-    generateStructuredMock.mockReset();
-    generateStructuredMock.mockResolvedValueOnce({ topic: "출근길 소금빵 예약 팁" }).mockResolvedValueOnce(plan);
-    await start({ recentTopics: ["여름 휴가지 추천"] });
-    expect(generateStructuredMock).toHaveBeenCalledTimes(3);
-  });
-
-  describe("promo (product / place photos)", () => {
-    const photos = [
-      { id: "u-bread", kind: "upload", source: "user-1/auto-1/bread.png", label: "소금빵", subject: "product", summary: "갓 구운 소금빵 클로즈업" },
-      { id: "u-shop", kind: "upload", source: "user-1/auto-1/shop.png", label: "매장", subject: "place", summary: "아늑한 베이커리 매장 내부" },
-      { id: "u-owner", kind: "upload", source: "user-1/auto-1/owner.png", label: "사장님", subject: "person", summary: "웃고 있는 사장님" },
-    ];
-    const promoConfig = (extra: Record<string, unknown> = {}) => ({ references: photos, shortsStyle: "auto", shortsBrief: "신메뉴 소금빵을 홍보해줘", ...extra }) as never;
-    const promoPlan = {
-      format: "promo" as const,
-      hook: "아직도 모르세요?",
-      scenes: [
-        { text: "아직도 모르세요?", imageIndex: 1, camera: "push-in" as const, animate: true, motionPrompt: "Slow push-in; steam rises.", durationSec: 3, visualPrompt: "v" },
-        { text: "직접 구운 소금빵을 만나보세요", imageIndex: 2, camera: "pan-left" as const, animate: false, motionPrompt: "", durationSec: 5, visualPrompt: "v" },
-        { text: "사장님이 매일 새벽에 구워요", imageIndex: 3, camera: "pull-out" as const, animate: true, motionPrompt: "Gentle pull-back.", durationSec: 5, visualPrompt: "v" },
-        { text: "오늘 바로 들러 보세요", imageIndex: 9, camera: "tilt-up" as const, animate: false, motionPrompt: "", durationSec: 5, visualPrompt: "v" },
-      ],
-      caption: "동네 빵집 소개 #동네빵집 #소금빵 #숏폼",
-      privacy: "private" as const,
-    };
-    const frames = (movie: { scenes: Array<{ elements: Array<{ type: string; src?: string; text?: string }> }> }) => movie.scenes.map((scene) => scene.elements.find((element) => element.type === "image" || element.type === "video"));
-
-    it("plans a promo from the photos, frames every scene and animates only the scenes the plan asks for (never a person)", async () => {
-      generateStructuredMock.mockResolvedValueOnce({ topic: "신메뉴 소금빵" }).mockResolvedValueOnce(promoPlan);
-
-      const outcome = await start({ config: promoConfig() });
-
-      const planRequest = generateStructuredMock.mock.calls[1][0] as { prompt: string; schema: { safeParse(value: unknown): { success: boolean } } };
-      expect(planRequest.prompt).toContain("1. [product] 갓 구운 소금빵 클로즈업 (사장님 설명: 소금빵)");
-      expect(planRequest.prompt).toContain("3. [person] 웃고 있는 사장님");
-      expect(planRequest.prompt).toContain('Use format "promo".');
-      expect(planRequest.schema.safeParse(plan).success).toBe(false);
-
-      expect(preparePhotoMock).toHaveBeenCalledTimes(4);
-      expect(uploadReferenceImageMock).toHaveBeenCalledTimes(4);
-      expect(uploadReferenceImageMock.mock.calls.every((call) => String(call[1]).endsWith(".jpg") && call[3] === "jpeg")).toBe(true);
-      // scene 1 (product) animates; scene 3 asked to animate but shows the person -> not animated; scene 4 imageIndex 9 falls back to photo 1
-      expect(animationProviderMock.startClip).toHaveBeenCalledTimes(1);
-      const clip = animationProviderMock.startClip.mock.calls[0][0] as { prompt: string };
-      expect(clip.prompt).toContain("Slow push-in; steam rises.");
-      expect(clip.prompt).toContain("Keep the product");
-      expect(outcome.deferred.state).toMatchObject({ stage: "ANIMATING", format: "promo", animationMode: "video" });
-      expect(outcome.deferred.progress).toContain("0/1");
-      const scenes = outcome.deferred.state.scenes as Array<{ referenceIndex: number; animate: boolean }>;
-      expect(scenes.map((scene) => scene.referenceIndex)).toEqual([0, 1, 2, 0]);
-      expect(scenes.map((scene) => scene.animate)).toEqual([true, false, false, false]);
-      expect(JSON.stringify(outcome.deferred.state)).not.toContain("signed.example.com");
+  describe("failed generations", () => {
+    it("books a failed job as spent (it may be billed) and tries once more on a new reservation", async () => {
+      m.wanStatus.mockResolvedValueOnce({ state: "failed", message: "content policy" }).mockResolvedValue(done());
+      const result = await drive(context());
+      expect(generateReservations().map((input) => input.attempt)).toEqual([1, 2]);
+      expect(m.settle).toHaveBeenCalledWith("res-1", 3.75, expect.objectContaining({ note: expect.stringContaining("content policy") }));
+      expect((result.output as { generation: { attempts: Array<{ outcome: string }> } }).generation.attempts.map((item) => item.outcome)).toEqual(["failed", "accepted"]);
+      expect(m.wanSubmit).toHaveBeenCalledTimes(2);
     });
 
-    it("composes the finished clips with the still photos, the business name and a closing card from the profile", async () => {
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(promoPlan);
-      const started = await start({ config: promoConfig() });
-
-      const composing = await resume(started.deferred.state);
-
-      expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING", projectId: "project-1" });
-      const movie = startMovieRenderMock.mock.calls[0][0] as { scenes: Array<{ elements: Array<{ type: string; src?: string; text?: string }> }> };
-      expect(movie.scenes).toHaveLength(4);
-      const media = frames(movie);
-      expect(media[0]).toMatchObject({ type: "video" });
-      expect(media[0]?.src).toMatch(/^https:\/\/v3\.fal\.media\//);
-      expect(media[1]).toMatchObject({ type: "image" });
-      expect(media[1]?.src).toBe("https://signed.example.com/user-1/auto-1/frames/run-1-1.jpg");
-      const closing = movie.scenes[3].elements.find((element) => element.type === "text" && element.text?.includes("우리동네 빵집"));
-      expect(closing?.text).toContain("📍 서울 마포구");
-      expect(movie.scenes[0].elements.some((element) => element.type === "text" && element.text === "우리동네 빵집")).toBe(true);
+    it("stops after the second failure: no third generation, nothing more reserved", async () => {
+      m.wanStatus.mockResolvedValue({ state: "failed", message: "boom" });
+      await expect(drive(context())).rejects.toThrow("영상을 만들지 못했어요");
+      expect(m.wanSubmit).toHaveBeenCalledTimes(2);
+      expect(generateReservations()).toHaveLength(2);
     });
 
-    it("finishes with the video URL, the promo format and no leftover frames", async () => {
-      generateStructuredMock.mockResolvedValueOnce({ topic: "신메뉴 소금빵" }).mockResolvedValueOnce(promoPlan);
-      const composing = await resume((await start({ config: promoConfig() })).deferred.state);
-      getMovieRenderStatusMock.mockResolvedValueOnce({ state: "done", videoUrl: "https://cdn.example.com/promo.mp4" });
-
-      const done = (await handler.resume!(baseContext(), composing.deferred.state as never)) as AutomationHandlerResult;
-
-      expect(done.output).toMatchObject({ format: "promo", animationMode: "video", videoUrl: "https://cdn.example.com/promo.mp4", hook: "아직도 모르세요?" });
-      expect(done.content).toBe(promoPlan.scenes.map((scene) => scene.text).join(" "));
-      expect(deleteReferenceImagesMock).toHaveBeenCalledWith(expect.anything(), expect.arrayContaining([expect.stringContaining("frames/run-1-0.jpg")]));
+    it("does not pay for a regeneration the budget cannot afford: the run ends with the budget's own message", async () => {
+      m.wanStatus.mockResolvedValue({ state: "failed", message: "boom" });
+      m.reserve.mockImplementation(async (input: { usd: number; attempt?: number }) => {
+        if (input.attempt === 2) throw new BudgetError("BUDGET_ITEM_CAP_EXCEEDED", "item cap");
+        return { id: "res-1", usd: input.usd };
+      });
+      await expect(drive(context())).rejects.toMatchObject({ code: "BUDGET_ITEM_CAP_EXCEEDED" });
+      expect(m.wanSubmit).toHaveBeenCalledTimes(1);
     });
 
-    it("skips the animation service entirely when no scene is animated, and renders the framed photos", async () => {
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce({ ...promoPlan, scenes: promoPlan.scenes.map((scene) => ({ ...scene, animate: false, motionPrompt: "" })) });
-
-      const outcome = await start({ config: promoConfig() });
-
-      expect(canUseAnimatedShortsMock).not.toHaveBeenCalled();
-      expect(animationProviderMock.startClip).not.toHaveBeenCalled();
-      expect(outcome.deferred.state).toMatchObject({ stage: "COMPOSING", format: "promo", animationMode: "photos", projectId: "project-1" });
-      const movie = startMovieRenderMock.mock.calls[0][0] as { scenes: Array<{ elements: Array<{ type: string; src?: string }> }> };
-      expect(frames(movie).every((media) => media?.type === "image")).toBe(true);
+    it("releases the reservation when fal rejects the request outright (nothing was queued)", async () => {
+      m.wanSubmit.mockRejectedValue(new ConnectorError("fal", "UPSTREAM_CLIENT_ERROR", "HTTP 422"));
+      await expect(drive(context())).rejects.toMatchObject({ code: "UPSTREAM_CLIENT_ERROR" });
+      expect(m.release).toHaveBeenCalledWith("res-1", "submit rejected");
+      expect(m.settle).not.toHaveBeenCalled();
+      expect(m.wanSubmit).toHaveBeenCalledTimes(1);
     });
 
-    it("falls back to panned photos with a note when the allowance is used up or the service is missing", async () => {
-      canUseAnimatedShortsMock.mockResolvedValue({ allowed: false, reason: "스타터 요금제의 이번 달 움직이는 캐릭터 영상 한도(2건)를 모두 썼어요." });
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(promoPlan);
-      const limited = await start({ config: promoConfig() });
-      expect(animationProviderMock.startClip).not.toHaveBeenCalled();
-      expect(limited.deferred.state).toMatchObject({ stage: "COMPOSING", animationMode: "photos" });
-      expect(String(limited.deferred.state.animationNote)).toContain("한도");
-
-      isAnimationAvailableMock.mockReturnValue(false);
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(promoPlan);
-      const missing = await start({ config: promoConfig() });
-      expect(String(missing.deferred.state.animationNote)).toContain("연결되지 않아");
-    });
-
-    it("retries a failed promo clip with the product-preserving prompt", async () => {
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(promoPlan);
-      const started = await start({ config: promoConfig() });
-      animationProviderMock.getClip.mockResolvedValueOnce({ state: "failed", message: "policy" }).mockResolvedValue({ state: "pending" });
-
-      await resume(started.deferred.state);
-
-      expect(animationProviderMock.startClip).toHaveBeenCalledTimes(2);
-      expect((animationProviderMock.startClip.mock.calls[1][0] as { prompt: string }).prompt).toContain("Slow push-in; steam rises.");
-    });
-
-    it("looks at images that were never analysed before planning, and only those", async () => {
-      analyzeMock.mockResolvedValue({ subject: "place", summary: "카페 외관" });
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(promoPlan);
-      const unanalysed = [{ id: "u-old", kind: "upload", source: "user-1/auto-1/old.png", label: "" }, photos[0]];
-
-      await start({ config: promoConfig({ references: unanalysed }) });
-
-      expect(analyzeMock).toHaveBeenCalledTimes(1);
-      const planRequest = generateStructuredMock.mock.calls[1][0] as { prompt: string };
-      expect(planRequest.prompt).toContain("1. [place] 카페 외관");
-      expect(planRequest.prompt).toContain("2. [product] 갓 구운 소금빵 클로즈업");
-    });
-
-    it("picks the format from the images when both kinds are present and only offers the allowed one when pinned", async () => {
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(promoPlan);
-      await start({ config: promoConfig({ references: [...references, ...photos], shortsStyle: "promo" }) });
-      expect((generateStructuredMock.mock.calls[1][0] as { prompt: string }).prompt).toContain('Use format "promo".');
-
-      generateStructuredMock.mockReset();
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(promoPlan);
-      await start({ config: promoConfig({ references: [...references, ...photos], shortsStyle: "auto" }) });
-      expect((generateStructuredMock.mock.calls[1][0] as { prompt: string }).prompt).toContain("Choose \"format\" yourself");
-    });
-  });
-
-  describe("background music and model quality", () => {
-    const musicPlan = { ...plan, music: "Playful, bouncy instrumental with ukulele." };
-
-    it("queues the track the plan asks for next to the clips and mixes it under the whole movie", async () => {
-      animationProviderMock.startMusic.mockResolvedValue(handle("music-1"));
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
-
-      const started = await start();
-      expect(animationProviderMock.startMusic).toHaveBeenCalledWith({ prompt: "Playful, bouncy instrumental with ukulele." });
-      expect(started.deferred.state.music).toMatchObject({ status: "pending" });
-
-      const composing = await resume(started.deferred.state);
-      const movie = startMovieRenderMock.mock.calls[0][0] as { elements?: Array<{ type: string; src: string; volume: number; loop: number; duration: number }> };
-      expect(movie.elements).toEqual([expect.objectContaining({ type: "audio", src: "https://v3.fal.media/music.wav", volume: 0.2, loop: -1, duration: -2 })]);
-      expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING", music: { status: "done" } });
-    });
-
-    it("waits for a slow track before rendering, but leaves it out when it fails", async () => {
-      animationProviderMock.startMusic.mockResolvedValue(handle("music-1"));
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
-      const started = await start();
-
-      animationProviderMock.getMusic.mockResolvedValueOnce({ state: "pending" });
-      const waiting = await resume(started.deferred.state);
-      expect(waiting.deferred.progress).toContain("배경음악");
-      expect(startMovieRenderMock).not.toHaveBeenCalled();
-
-      animationProviderMock.getMusic.mockResolvedValueOnce({ state: "failed", message: "boom" });
-      const composing = await resume(waiting.deferred.state);
-      expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING", music: { status: "failed" } });
-      expect(startMovieRenderMock.mock.calls[0][0]).not.toHaveProperty("elements");
-    });
-
-    it("makes the video without music when the track cannot even be queued", async () => {
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
-      const started = await start();
-      expect(started.deferred.state.music).toBeUndefined();
-      const composing = await resume(started.deferred.state);
-      expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING" });
-      expect(startMovieRenderMock.mock.calls[0][0]).not.toHaveProperty("elements");
-    });
-
-    it("renders a fallback (no clips) video only after the track is ready", async () => {
-      isAnimationAvailableMock.mockReturnValue(false);
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
-      // music is only attempted when the animation provider is available, so no track here and an immediate render
-      const started = await start();
-      expect(started.deferred.state).toMatchObject({ stage: "COMPOSING", animationMode: "tween" });
-
-      isAnimationAvailableMock.mockReturnValue(true);
-      canUseAnimatedShortsMock.mockResolvedValue({ allowed: false, reason: "한도를 모두 썼어요." });
-      animationProviderMock.startMusic.mockResolvedValue(handle("music-2"));
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(musicPlan);
-      startMovieRenderMock.mockClear();
-      const limited = await start();
-      expect(limited.deferred.state).toMatchObject({ stage: "ANIMATING", animationMode: "tween", music: { status: "pending" } });
-      expect(startMovieRenderMock).not.toHaveBeenCalled();
-
-      const composing = await resume(limited.deferred.state);
-      const movie = startMovieRenderMock.mock.calls[0][0] as { scenes: Array<{ elements: Array<{ type: string }> }>; elements?: unknown[] };
-      expect(movie.scenes[0].elements.map((element) => element.type)).toEqual(["voice", "image"]);
-      expect(movie.elements).toHaveLength(1);
-      expect(composing.deferred.state).toMatchObject({ stage: "COMPOSING" });
-    });
-
-    it("uses the model quality of the plan for every clip, including a retry", async () => {
-      canUseAnimatedShortsMock.mockResolvedValue({ allowed: true, animationQuality: "premium" });
-      generateStructuredMock.mockResolvedValueOnce({ topic: "t" }).mockResolvedValueOnce(plan);
-
-      const started = await start();
-      for (const call of animationProviderMock.startClip.mock.calls) expect(call[1]).toEqual({ quality: "premium" });
-      expect(started.deferred.state).toMatchObject({ quality: "premium" });
-
-      animationProviderMock.getClip.mockResolvedValueOnce({ state: "failed", message: "x" }).mockResolvedValue({ state: "pending" });
-      await resume(started.deferred.state);
-      expect(animationProviderMock.startClip.mock.calls.at(-1)?.[1]).toEqual({ quality: "premium" });
-    });
-  });
-
-  describe("without a real video renderer", () => {
-    it("refuses to start in production (nothing to render with) but still lets an existing preview be posted", async () => {
-      const { shortsAutomationHandler } = await import("./shorts");
-      vi.stubEnv("NODE_ENV", "production");
+    it("releases (does not book) the reservation when the request cannot even be prepared, e.g. a file address cannot be signed", async () => {
+      const assets = await import("@/server/shorts/assets");
+      const spy = vi.spyOn(assets, "resolveAssetUrls").mockRejectedValueOnce(new Error("storage unreachable"));
       try {
-        const ctx = { automation: {}, business: {}, config: {}, recentTopics: [], runId: "r" } as never;
-        expect(shortsAutomationHandler.preflight?.(ctx)).toContain("영상 제작 서비스가 아직 연결되지 않아");
-        expect(shortsAutomationHandler.preflight?.({ ...(ctx as object), shorts: { publish: { sourceRunId: "s", platforms: ["youtube"] } } } as never)).toBeNull();
+        await expect(drive(context())).rejects.toThrow("storage unreachable");
       } finally {
-        vi.unstubAllEnvs();
+        spy.mockRestore();
+      }
+      expect(m.release).toHaveBeenCalledWith("res-1", "request could not be prepared");
+      expect(m.settle).not.toHaveBeenCalled();
+      expect(m.wanSubmit).not.toHaveBeenCalled();
+    });
+
+    it("books a submit that timed out as spent (a job may exist that we have no id for) and retries once", async () => {
+      m.wanSubmit.mockRejectedValueOnce(new ConnectorError("fal", "TIMEOUT", "slow")).mockResolvedValue({ requestId: "r2", statusUrl: "https://queue.fal.run/x/requests/r2/status", responseUrl: "https://queue.fal.run/x/requests/r2" });
+      const result = await drive(context());
+      expect(m.settle).toHaveBeenCalledWith("res-1", 3.75, expect.objectContaining({ note: "submit outcome unknown" }));
+      expect(generateReservations().map((input) => input.attempt)).toEqual([1, 2]);
+      expect(result.contentType).toBe("shorts");
+    });
+  });
+
+  describe("quality gate", () => {
+    const blackVideo = analysisOf({ black: { seconds: 4, spans: [{ start: 10, end: 14 }] } });
+
+    it("rejects a clearly broken video automatically and regenerates ONCE, with a correction in the new prompt", async () => {
+      m.getAnalysis.mockResolvedValueOnce({ state: "done", result: blackVideo }).mockResolvedValue({ state: "done", result: analysisOf() });
+      const result = await drive(context());
+      expect(m.wanSubmit).toHaveBeenCalledTimes(2);
+      expect(String((m.wanSubmit.mock.calls[1][0] as WanRequest).prompt)).toContain("Correction for this attempt");
+      expect(String((m.wanSubmit.mock.calls[1][0] as WanRequest).prompt)).toContain("no black frames");
+      expect((result.output as { generation: { attempts: Array<{ outcome: string }> } }).generation.attempts.map((item) => item.outcome)).toEqual(["rejected", "accepted"]);
+    });
+
+    it("fails the run when the second video is rejected too: no third generation, and the user is told why", async () => {
+      m.getAnalysis.mockResolvedValue({ state: "done", result: blackVideo });
+      await expect(drive(context())).rejects.toThrow(/품질 점검을 통과하지 못했어요/);
+      expect(m.wanSubmit).toHaveBeenCalledTimes(2);
+      expect(m.startCompose).not.toHaveBeenCalled();
+    });
+
+    it("sends the sampled frames to the vision model together with the plan, and a high-severity finding rejects", async () => {
+      const bad = { checks: Object.fromEntries(["hook", "concept", "productFidelity", "brandText", "uiFabrication", "subtitles", "artifacts", "continuity"].map((key) => [key, { ok: true, note: "" }])), problems: [{ code: "label-wrong", severity: "high", note: "라벨 글자가 달라요" }], summary: "라벨 문제" };
+      const { MockAIProvider } = await import("@/server/ai/providers/mock");
+      const original = MockAIProvider.prototype.generateText;
+      let calls = 0;
+      MockAIProvider.prototype.generateText = async function (params) {
+        if (params.prompt.includes("AUTOBIZ_AD_QA_V1") && calls++ === 0) return { text: JSON.stringify(bad) };
+        return original.call(this, params);
+      };
+      try {
+        const result = await drive(context());
+        const qaRequests = m.aiRequests.filter((request) => request.purpose === "video.qa");
+        expect(qaRequests).toHaveLength(2);
+        expect(qaRequests[0].role).toBe("vision");
+        expect(qaRequests[0].prompt).toContain("frame 1 at 3s");
+        expect(m.wanSubmit).toHaveBeenCalledTimes(2);
+        expect(String((m.wanSubmit.mock.calls[1][0] as WanRequest).prompt)).toContain("label");
+        expect((result.output as { generation: { attempts: Array<{ outcome: string }> } }).generation.attempts[0].outcome).toBe("rejected");
+      } finally {
+        MockAIProvider.prototype.generateText = original;
       }
     });
 
-    it("is fine in development (the sample is clearly labelled instead)", async () => {
-      const { shortsAutomationHandler } = await import("./shorts");
-      expect(shortsAutomationHandler.preflight?.({ automation: {}, business: {}, config: {}, recentTopics: [], runId: "r" } as never)).toBeNull();
+    it("keeps going with a warning when the vision check is unavailable, and never calls the video 'approved'", async () => {
+      m.aiFail.purpose = "video.qa";
+      const result = await drive(context());
+      const qa = (result.output as { qa: { status: string; aiChecked: boolean; notes: string[] } }).qa;
+      expect(qa).toMatchObject({ status: "NEEDS_HUMAN_CHECK", aiChecked: false });
+      expect(qa.notes.join(" ")).toContain("AI 화면 점검을 하지 못했어요");
+    });
+
+    it("warns, but does not reject, when the video service reports a prompt without the standing rules", async () => {
+      m.wanStatus.mockResolvedValue(done({ actualPrompt: "A lovely cinematic ad for bread." }));
+      const result = await drive(context());
+      const qa = (result.output as { qa: { findings: Array<{ code: string; severity: string; message: string }>; notes: string[] } }).qa;
+      expect(qa.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code: "prompt-rules-dropped", severity: "warn", message: expect.stringContaining("금지 규칙") })]));
+      expect(qa.notes).toEqual([]);
+      expect(m.wanSubmit).toHaveBeenCalledTimes(1);
+    });
+
+    it("carries on, with a note, when the worker cannot measure the video", async () => {
+      m.getAnalysis.mockResolvedValue({ state: "failed", message: "ffmpeg exploded" });
+      const result = await drive(context());
+      expect(JSON.stringify(result.output)).toContain("자동 품질 점검을 하지 못했어요");
+    });
+  });
+
+  describe("voice", () => {
+    const silent = analysisOf({ probe: { ...probe, hasAudio: false }, audio: null });
+
+    it("uses the video's own voice when it has one, and records the voice call as not needed", async () => {
+      await drive(context());
+      expect(m.tts).not.toHaveBeenCalled();
+      expect(m.startCompose.mock.calls[0][0]).toMatchObject({ audioMode: "native" });
+    });
+
+    it("falls back to a Korean narration (paid from the video budget) when the video came out silent, and mixes it in", async () => {
+      m.getAnalysis.mockResolvedValue({ state: "done", result: silent });
+      const result = await drive(context());
+      expect(m.tts).toHaveBeenCalledWith(expect.stringContaining("오늘 소개할 건"));
+      expect(m.reserve.mock.calls.map((call) => call[0].step)).toContain("video.tts");
+      expect(m.uploads).toContainEqual({ bucket: "shorts-videos", path: "user-1/auto-1/run-1/voice-1.mp3" });
+      expect(m.startCompose.mock.calls[0][0]).toMatchObject({ audioMode: "voice_only", voiceUrl: expect.stringContaining("voice-1.mp3") });
+      expect(result.output).toMatchObject({ voiceFallback: true });
+    });
+
+    it("always adds the Korean voice when the owner chose it, mixed over the video's music and effects", async () => {
+      const result = await drive(context({ voiceMode: "tts" }));
+      expect(String((m.wanSubmit.mock.calls[0][0] as WanRequest).prompt)).toContain("No speech, no singing and no vocals");
+      expect(m.tts).toHaveBeenCalledTimes(1);
+      expect(m.startCompose.mock.calls[0][0]).toMatchObject({ audioMode: "mix" });
+      expect(result.output).toMatchObject({ voiceMode: "tts", voiceFallback: false });
+    });
+
+    it("finishes the video, with a note, when the voice cannot be made", async () => {
+      m.tts.mockRejectedValue(new ConnectorError("elevenlabs", "UPSTREAM_SERVER_ERROR", "503"));
+      const result = await drive(context({ voiceMode: "tts" }));
+      expect(JSON.stringify(result.output)).toContain("한국어 음성을 입히지 못해서");
+      expect(m.startCompose.mock.calls[0][0]).toMatchObject({ audioMode: "native" });
+    });
+  });
+
+  describe("finishing with FFmpeg", () => {
+    it("lays the logo, the call to action and exact images over the finished video through the worker", async () => {
+      const logo = { id: "logo", kind: "logo", origin: "upload", source: "user-1/auto-1/assets/logo.png", label: "" };
+      const exact = image("c", { role: "exact", label: "라벨" });
+      await drive(context({ assets: [image("a"), exact, logo] }));
+      const spec = m.startCompose.mock.calls[0][0];
+      expect(spec.videoUrl).toBe("https://v3.fal.media/files/out.mp4");
+      expect(spec.uploadUrl).toContain("/upload/shorts-videos/user-1/auto-1/run-1/final.mp4");
+      expect(spec.target).toEqual({ width: 720, height: 1280, fps: 30 });
+      const kinds = spec.overlays.map((overlay: { kind: string; position: string }) => `${overlay.kind}:${overlay.position}`);
+      expect(kinds).toContain("image:top-right"); // the logo
+      expect(kinds).toContain("image:center"); // the exact image
+      expect(kinds).toContain("text:bottom"); // the call to action
+      expect(spec.overlays.find((overlay: { kind: string; text?: string }) => overlay.kind === "text")?.text).toBeTruthy();
+    });
+
+    it("writes the business name when there is no logo", async () => {
+      await drive(context());
+      expect(m.startCompose.mock.calls[0][0].overlays).toContainEqual(expect.objectContaining({ kind: "text", text: "우리동네 빵집", position: "top-left" }));
+    });
+
+    it("sends the job again when the worker lost it, and fails after three tries (the work is free, so retrying is fine)", async () => {
+      m.getCompose.mockResolvedValueOnce({ state: "failed", message: "gone", lost: true }).mockResolvedValue({ state: "done", result: { probe } });
+      await drive(context());
+      expect(m.startCompose).toHaveBeenCalledTimes(2);
+
+      m.startCompose.mockClear();
+      m.getCompose.mockResolvedValue({ state: "failed", message: "ffmpeg exited with 1" });
+      await expect(drive(context())).rejects.toThrow("영상 마무리 작업에 실패했어요");
+      expect(m.startCompose).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  it("gives up on a run that has been going too long", async () => {
+    const ctx = context();
+    const started = (await handler.run(ctx)) as Deferred;
+    const stale = { ...started.deferred.state, startedAt: new Date(Date.now() - 81 * 60_000).toISOString() };
+    await expect(handler.resume!(ctx, stale as never)).rejects.toThrow("너무 오래");
+  });
+
+  it("refuses the old job format with a clear message", async () => {
+    await expect(handler.resume!(context(), { v: 1, stage: "ANIMATING" } as never)).rejects.toThrow("읽지 못했어요");
+  });
+
+  describe("plan -> prompt", () => {
+    it("builds the video prompt from the plan by rules, mentioning each reference by position and carrying the standing rules", async () => {
+      const started = (await handler.run(context({ assets: [image("a"), image("b"), { id: "v", kind: "video", origin: "upload", source: "user-1/auto-1/assets/v.mp4", label: "", durationSec: 8, fps: 30 }] }))) as Deferred;
+      const prompt = String(started.deferred.state.wanPrompt);
+      expect(prompt).toContain("Image 1:");
+      expect(prompt).toContain("Image 2:");
+      expect(prompt).toContain("Video 1:");
+      expect(prompt).toContain('Korean voice-over');
+      expect(prompt).toContain("Do not render any text, subtitles, captions, watermarks or logos");
+      expect(prompt.length).toBeLessThanOrEqual(2_000);
+      expect(m.aiRequests.map((request) => `${request.role}:${request.purpose}`)).toEqual(["vision:video.analyze", "planner:video.plan", "reviewer:video.publishing"]);
+    });
+
+    it("keeps a calendar topic fixed", async () => {
+      const calendarItem = { id: "c1", businessId: "biz-1", plannedDate: "2026-10-01", platform: "youtube_shorts" as const, contentType: "숏폼", topic: "아침 소금빵 소개", goal: "방문 늘리기", summary: "요약", cta: "예약하기" };
+      const started = (await handler.run(context({}, { calendarItem }))) as Deferred;
+      expect(started.deferred.state.topic).toBe("아침 소금빵 소개");
+    });
+
+    it("does not analyse photos that already have a description, and looks at the others in ONE call", async () => {
+      await handler.run(context({ assets: [image("a", { summary: "갓 구운 소금빵", role: "product" }), image("b"), image("c")] }));
+      const analysis = m.aiRequests.filter((request) => request.purpose === "video.analyze");
+      expect(analysis).toHaveLength(1);
+      expect(analysis[0].prompt).toContain("Image 2 label");
+      expect(analysis[0].prompt).not.toContain("Image 3 label");
+    });
+  });
+
+  describe("publishing", () => {
+    it("posts to the platforms the automation opted into, from a freshly signed address of the private video", async () => {
+      m.publishToPlatforms.mockResolvedValue({ youtube: { externalId: "yt1", externalUrl: "https://youtu.be/yt1", privacy: "private" } });
+      const result = await drive(context({ platforms: ["youtube"] }, { shorts: undefined }));
+      expect(m.publishToPlatforms).toHaveBeenCalledWith(expect.objectContaining({ platforms: ["youtube"], videoUrl: expect.stringContaining("/sign/shorts-videos/") }));
+      expect(result.output).toMatchObject({ publicationResults: { youtube: { externalId: "yt1" } } });
+    });
+
+    it("never posts a preview run", async () => {
+      await drive(context({ platforms: ["youtube", "instagram"] }));
+      expect(m.publishToPlatforms).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("mock mode (no keys, no money)", () => {
+    beforeEach(() => {
+      m.real.value = false;
+      m.wanStatus.mockResolvedValue(done({ videoUrl: "https://wan-mock.invalid/mock-1-25.mp4" }));
+    });
+
+    it("never touches the ledger and returns a flagged sample instead of a video", async () => {
+      const result = await drive(context());
+      expect(m.reserve).not.toHaveBeenCalled();
+      expect(m.settle).not.toHaveBeenCalled();
+      expect(result.output).toMatchObject({ sampleVideo: true, videoUrl: "https://wan-mock.invalid/mock-1-25.mp4" });
+      expect(result.output).not.toHaveProperty("videoPath");
+    });
+  });
+
+  describe("budget gating", () => {
+    it("draws on the video budget when videos (or any AI) are really paid for, and not for a re-publish", () => {
+      const ctx = context();
+      m.real.value = true;
+      expect(handler.metered!(ctx)).toBe("VIDEO");
+      expect(handler.metered!(context({}, { shorts: { publish: { sourceRunId: "r", platforms: ["youtube"] } } }))).toBeNull();
+      m.real.value = false;
+      expect(handler.metered!(ctx)).toBeNull();
     });
   });
 });

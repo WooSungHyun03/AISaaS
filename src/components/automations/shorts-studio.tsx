@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, Check, ExternalLink, Film, LoaderCircle, Play, Send } from "lucide-react";
+import { CalendarClock, Check, CircleAlert, CircleCheck, ExternalLink, Film, LoaderCircle, Play, Send } from "lucide-react";
 import { toast } from "sonner";
 import { advanceShortsJob, createShortsAutomation, generateShortsPreview, publishShortsNow, saveShortsSchedule } from "@/app/(app)/shorts/actions";
 import { Badge } from "@/components/ui/badge";
@@ -27,17 +27,49 @@ interface Preview {
   caption: string | null;
   script: string | null;
   scenes: Array<{ text: string; durationSec: number }>;
-  format: "character" | "promo" | null;
-  animationMode: "video" | "tween" | "photos" | null;
-  animationNote: string | null;
-  /** A placeholder from a test renderer, not a real video. */
+  format: "ad" | "character" | "promo" | null;
+  durationSec: number | null;
+  voiceFallback: boolean;
+  /** The quality check. There is no "approved" state: the owner makes the final call. */
+  qa: { status: "REJECTED" | "NEEDS_HUMAN_CHECK"; summary: string | null; aiChecked: boolean; findings: Array<{ severity: "reject" | "warn"; message: string }>; notes: string[] } | null;
+  /** A placeholder from a test generator, not a real video. */
   sample: boolean;
 }
 
-function previewBadge(format: Preview["format"], mode: Preview["animationMode"]): string | null {
-  if (!mode) return null;
-  if (format === "promo") return mode === "video" ? "상품·매장 홍보 · 움직이는 영상" : "상품·매장 홍보 영상";
-  return mode === "video" ? "움직이는 캐릭터 영상" : "캐릭터 영상 (기본 효과)";
+/** Where an in-flight video is: the stage of the background job and which attempt (a rejected video is made once more). */
+export interface ShortsJobInfo {
+  stage: "SUBMIT" | "WAIT" | "CHECK" | "VOICE" | "FINISH";
+  attempt: number;
+  needsVoice: boolean;
+}
+
+const JOB_STEPS = [
+  { key: "plan", label: "기획·준비", stages: [] as string[] },
+  { key: "generate", label: "영상 만들기", stages: ["SUBMIT", "WAIT"] },
+  { key: "check", label: "품질 점검", stages: ["CHECK"] },
+  { key: "voice", label: "한국어 음성", stages: ["VOICE"] },
+  { key: "finish", label: "마무리", stages: ["FINISH"] },
+];
+
+function JobSteps({ job }: { job: ShortsJobInfo | null }) {
+  const currentIndex = job ? Math.max(1, JOB_STEPS.findIndex((step) => step.stages.includes(job.stage))) : 0;
+  return (
+    <div className="space-y-2" role="status" aria-live="polite">
+      <ol className="flex flex-wrap gap-2" aria-label="영상 만들기 진행 단계">
+        {JOB_STEPS.filter((step) => step.key !== "voice" || job?.needsVoice || job?.stage === "VOICE").map((step) => {
+          const index = JOB_STEPS.indexOf(step);
+          const state = index < currentIndex ? "done" : index === currentIndex ? "current" : "todo";
+          return (
+            <li key={step.key} aria-current={state === "current" ? "step" : undefined} className={cn("flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold", state === "done" && "border-success/30 bg-success-soft text-success", state === "current" && "border-primary bg-brand-soft text-primary", state === "todo" && "text-muted-foreground")}>
+              {state === "done" ? <Check className="size-3.5" aria-hidden="true" /> : state === "current" ? <LoaderCircle className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" /> : null}
+              {step.label}
+            </li>
+          );
+        })}
+      </ol>
+      {job && job.attempt > 1 ? <p className="text-xs leading-5 text-muted-foreground">처음 만든 영상이 기준에 맞지 않아 한 번 더 만들고 있어요. (두 번째이자 마지막 시도예요)</p> : null}
+    </div>
+  );
 }
 
 interface Publication {
@@ -72,6 +104,7 @@ export function ShortsStudio({
   publications,
   hasInFlightRun,
   progress,
+  job,
   nextRunAt,
   referencesSlot,
   publishingSlot,
@@ -87,12 +120,13 @@ export function ShortsStudio({
   hasInFlightRun: boolean;
   /** Short status of a video that is being made in the background, if any. */
   progress: string | null;
+  job: ShortsJobInfo | null;
   nextRunAt: string | null;
-  /** The reference-image card; rendered between the preview and the schedule. */
+  /** The materials card (photos, clips, audio, logo, length, voice); rendered between the preview and the schedule. */
   referencesSlot?: ReactNode;
   /** Title, description, keywords and hashtags for the latest video (editable; what gets posted). */
   publishingSlot?: ReactNode;
-  /** Without a reference image there is nothing to build a video from yet. */
+  /** Without a photo or a clip there is nothing to build a video from yet. */
   hasImages: boolean;
 }) {
   const router = useRouter();
@@ -149,7 +183,11 @@ export function ShortsStudio({
 
   return (
     <div className="space-y-8">
-      {hasInFlightRun ? <FormMessage variant="info">{progress ? `${progress}. ` : ""}영상 생성 또는 게시가 진행 중이에요. 움직이는 영상은 몇 분 걸릴 수 있고, 이 화면을 닫아도 계속 만들어져요.</FormMessage> : null}
+      {hasInFlightRun ? <div className="space-y-3 rounded-2xl border bg-card p-4 sm:p-5">
+        <p className="text-sm font-semibold">{progress ?? "영상 만들기가 진행 중이에요"}</p>
+        <JobSteps job={job} />
+        <p className="text-xs leading-5 text-muted-foreground">광고 영상은 몇 분에서 십여 분 걸릴 수 있어요. 이 화면을 닫아도 계속 만들어지고, 끝나면 이곳에 나타나요.</p>
+      </div> : null}
       {automationStatus === "ERROR" ? <FormMessage>최근 실행 오류로 예약이 멈췄어요. 연결을 확인한 뒤 아래 예약 설정을 다시 저장해주세요.</FormMessage> : null}
 
       <section aria-labelledby="preview-heading" className="grid gap-6 lg:grid-cols-[minmax(280px,380px)_1fr]">
@@ -158,7 +196,7 @@ export function ShortsStudio({
             <div className="flex aspect-[9/16] min-h-[480px] flex-col items-center justify-center gap-3 px-8 text-center text-white" role="status">
               <span className="flex size-14 items-center justify-center rounded-2xl bg-white/10"><Film className="size-7" aria-hidden="true" /></span>
               <p className="font-bold">테스트용 샘플이에요</p>
-              <p className="text-sm leading-6 text-white/65">영상 제작 서비스(JSON2Video)가 연결되지 않은 환경이라 실제 영상은 만들어지지 않았어요. 대본·장면 구성만 확인할 수 있고, 게시할 수 없어요.</p>
+              <p className="text-sm leading-6 text-white/65">영상 제작 서비스가 연결되지 않은 환경이라 실제 영상은 만들어지지 않았어요. 대본·장면 구성만 확인할 수 있고, 게시할 수 없어요.</p>
             </div>
           ) : latestPreview ? (
             <video
@@ -173,7 +211,7 @@ export function ShortsStudio({
           ) : (
             <div className="flex aspect-[9/16] min-h-[480px] flex-col items-center justify-center gap-4 px-8 text-center text-white">
               <span className="flex size-14 items-center justify-center rounded-2xl bg-white/10"><Film className="size-7" aria-hidden="true" /></span>
-              <div><p className="font-bold">아직 미리보기가 없어요</p><p className="mt-1 text-sm leading-6 text-white/65">AI가 대본과 장면을 만들고 세로 영상을 렌더링해요.</p></div>
+              <div><p className="font-bold">아직 미리보기가 없어요</p><p className="mt-1 text-sm leading-6 text-white/65">AI가 광고 기획을 하고 20~30초 세로 영상을 한 번에 만들어요.</p></div>
             </div>
           )}
         </div>
@@ -181,7 +219,7 @@ export function ShortsStudio({
         <div className="space-y-6">
           <div>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><h2 id="preview-heading" className="text-xl font-extrabold tracking-[-0.03em]">영상 만들기와 미리보기</h2><p className="mt-1 text-sm text-muted-foreground">{hasImages ? "게시 전에 영상과 문구를 직접 확인할 수 있어요." : "먼저 아래에서 참고 이미지를 추가해주세요. 캐릭터·상품·매장 사진을 올리면 AI가 알맞은 영상으로 만들어요."}</p></div>
+              <div><h2 id="preview-heading" className="text-xl font-extrabold tracking-[-0.03em]">영상 만들기와 미리보기</h2><p className="mt-1 text-sm text-muted-foreground">{hasImages ? "게시 전에 영상과 문구를 직접 확인할 수 있어요." : "먼저 아래에서 상품·매장 사진을 추가해주세요. 사진을 올리면 AI가 그 모습을 살려 광고 영상으로 만들어요."}</p></div>
               <Button variant="spark" disabled={busy || !hasImages} onClick={() => run("generate", () => generateShortsPreview(automationId), "새 미리보기를 만들었어요.", "영상 만들기를 시작했어요. 완성되면 여기에 나타나요.")}>
                 {busy && (busyAction === "generate" || hasInFlightRun) ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Film aria-hidden="true" />}
                 {busy && (busyAction === "generate" || hasInFlightRun) ? "만드는 중…" : latestPreview ? "새 영상 만들기" : "영상 만들기"}
@@ -190,9 +228,17 @@ export function ShortsStudio({
           </div>
 
           {latestPreview ? <div className="space-y-4 rounded-2xl border bg-card p-5 sm:p-6">
-            {previewBadge(latestPreview.format, latestPreview.animationMode) ? <div className="flex flex-wrap items-center gap-2"><Badge variant="brand">{previewBadge(latestPreview.format, latestPreview.animationMode)}</Badge></div> : null}
-            {latestPreview.animationNote ? <p className="rounded-xl bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">{latestPreview.animationNote}</p> : null}
+            <div className="flex flex-wrap items-center gap-2">
+              {latestPreview.format === "ad" ? <Badge variant="brand">AI 광고 영상{latestPreview.durationSec ? ` · ${latestPreview.durationSec}초` : ""}</Badge> : null}
+              {latestPreview.voiceFallback ? <Badge variant="secondary">한국어 음성을 따로 입혔어요</Badge> : null}
+            </div>
             <div><p className="text-xs font-semibold text-muted-foreground">후킹 문구</p><p className="mt-1 text-lg font-bold leading-7">{latestPreview.hook ?? "제목 없음"}</p>{latestPreview.topic ? <p className="mt-1 text-sm text-muted-foreground">주제 · {latestPreview.topic}</p> : null}</div>
+            {latestPreview.qa ? <section aria-label="품질 점검 결과" className="space-y-2 rounded-xl bg-muted px-4 py-3">
+              <p className="flex items-center gap-2 text-sm font-bold">{latestPreview.qa.findings.some((finding) => finding.severity === "warn") || latestPreview.qa.notes.length > 0 ? <CircleAlert className="size-4 text-warning" aria-hidden="true" /> : <CircleCheck className="size-4 text-success" aria-hidden="true" />}직접 한 번 확인해 주세요</p>
+              <p className="text-xs leading-5 text-muted-foreground">AI가 화면과 소리를 자동으로 점검했지만 승인은 사람이 해요. 상품 모양, 라벨 글자, 가격·전화번호가 사실과 같은지 보고 게시해 주세요.{latestPreview.qa.aiChecked ? "" : " (이번에는 AI 화면 점검을 하지 못했어요.)"}</p>
+              {latestPreview.qa.summary ? <p className="text-sm leading-6">{latestPreview.qa.summary}</p> : null}
+              {latestPreview.qa.findings.filter((finding) => finding.severity === "warn").length + latestPreview.qa.notes.length > 0 ? <ul className="list-disc space-y-1 pl-5 text-sm leading-6">{[...latestPreview.qa.findings.filter((finding) => finding.severity === "warn").map((finding) => finding.message), ...latestPreview.qa.notes].map((message, index) => <li key={`${index}-${message}`}>{message}</li>)}</ul> : null}
+            </section> : null}
             {latestPreview.caption && !publishingSlot ? <div><p className="text-xs font-semibold text-muted-foreground">게시 문구</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6">{latestPreview.caption}</p></div> : null}
             {latestPreview.scenes.length ? <details className="group"><summary className="cursor-pointer text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring">장면 구성 {latestPreview.scenes.length}개 보기</summary><ol className="mt-3 space-y-2">{latestPreview.scenes.map((scene, index) => <li key={`${index}-${scene.text}`} className="flex gap-3 rounded-xl bg-muted px-3 py-2 text-sm"><span className="font-bold text-primary">{index + 1}</span><span className="flex-1">{scene.text}</span><span className="text-muted-foreground">{scene.durationSec}초</span></li>)}</ol></details> : null}
           </div> : null}

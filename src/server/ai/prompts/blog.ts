@@ -2,17 +2,28 @@ import { z } from "zod";
 import type { Business } from "@/types/domain";
 import type { BlogAutomationConfig } from "@/types/blog-automation";
 import { AI_TELL_PHRASES, BLOG_LENGTH, UNPROVABLE_CLAIMS } from "@/server/ai/blog-quality";
-import { blogBlockSchema, type BlogPlatform, type BlogSection } from "@/server/blog/post";
+import { blogBlockSchema, stripInlineMarkup, type BlogPlatform, type BlogPost, type BlogSection } from "@/server/blog/post";
 import { promotionFactLines, promotionGuidance, PROMOTION_STRATEGY, resolvePromotionType } from "@/server/promotion/strategy";
 
-export const blogTopicSchema = z.object({
-  topic: z.string().min(1),
-  title: z.string().min(1),
+/** One heading of the plan: what the section is for, and what to say and show there. */
+const planSectionSchema = z.object({
+  /** Sub-heading starting with one emoji. */
+  heading: z.string().trim().min(2).max(70),
+  purpose: z.string().trim().min(1).max(240),
+  /** What to say here — taken only from the facts. */
+  points: z.array(z.string().trim().min(1).max(240)).min(1).max(4),
+  /** What a photo here should show (the owner's own photo goes in this spot), or null. */
+  photo: z.string().trim().max(140).nullable().default(null),
+  extra: z.enum(["quote", "callout", "list", "none"]).default("none"),
 });
-export type BlogTopic = z.infer<typeof blogTopicSchema>;
 
-/** The plan for the whole post, made once before any section is written. */
-export const blogOutlineSchema = z.object({
+/**
+ * The plan for the whole post, made once by the planner (Opus) before anything is written: topic, what the searcher
+ * wants, keywords, the outline and where the photos go. The writer gets this as its brief.
+ */
+export const blogPlanSchema = z.object({
+  /** The topic phrase (kept short; used to avoid repeating recent posts). */
+  topic: z.string().trim().min(2).max(120),
   /** Final title: main keyword near the front, 15-35 characters, no clickbait. */
   title: z.string().trim().min(6).max(80),
   reader: z.string().trim().min(1).max(200),
@@ -20,27 +31,62 @@ export const blogOutlineSchema = z.object({
   /** What the searcher wants to get done — the post must answer exactly that. */
   searchIntent: z.string().trim().max(300).optional(),
   hookIdea: z.string().trim().min(1).max(300),
-  sections: z
-    .array(
-      z.object({
-        /** Sub-heading starting with one emoji. */
-        heading: z.string().trim().min(2).max(70),
-        purpose: z.string().trim().min(1).max(240),
-        /** What to say here — taken only from the facts. */
-        points: z.array(z.string().trim().min(1).max(240)).min(1).max(4),
-        /** What a photo here should show (the owner's own photo goes in this spot), or null. */
-        photo: z.string().trim().max(140).nullable().default(null),
-        extra: z.enum(["quote", "callout", "list", "none"]).default("none"),
-      }),
-    )
-    .min(5)
-    .max(7),
+  keywords: z.object({
+    primary: z.string().trim().min(1).max(40),
+    secondary: z.array(z.string().trim().min(1).max(40)).max(6).default([]),
+  }),
+  sections: z.array(planSectionSchema).min(5).max(7),
   closing: z.object({ takeaway: z.string().trim().min(1).max(240), cta: z.string().trim().min(1).max(240) }),
 });
-export type BlogOutline = z.infer<typeof blogOutlineSchema>;
+export type BlogPlan = z.infer<typeof blogPlanSchema>;
 
-/** One written section: the blocks that go under its heading. The app adds info boxes and hashtags itself. */
-export const blogSectionOutputSchema = z.object({ blocks: z.array(blogBlockSchema).min(1).max(12) });
+/**
+ * The whole post in one answer from the writer: an intro (no heading), one section per planned heading, a closing
+ * (no heading). Info boxes and hashtags are the app's, so the writer is not asked for them.
+ */
+export const blogDraftSchema = z
+  .object({
+    title: z.string().trim().min(6).max(120),
+    sections: z.array(z.object({ heading: z.string().trim().min(1).max(80).optional(), blocks: z.array(blogBlockSchema).min(1).max(14) })).min(7).max(10),
+  })
+  .superRefine((draft, ctx) => {
+    const last = draft.sections.length - 1;
+    if (draft.sections[0].heading) ctx.addIssue({ code: "custom", path: ["sections", 0], message: "the intro has no heading" });
+    if (draft.sections[last].heading) ctx.addIssue({ code: "custom", path: ["sections", last], message: "the closing has no heading" });
+    draft.sections.slice(1, last).forEach((section, offset) => {
+      if (!section.heading) ctx.addIssue({ code: "custom", path: ["sections", offset + 1], message: "every body section has a heading" });
+    });
+  });
+export type BlogDraft = z.infer<typeof blogDraftSchema>;
+
+/** Rewritten sections only, by their index in the post: what the targeted fix returns. */
+export const blogFixSchema = z.object({
+  sections: z.array(z.object({ index: z.number().int().min(0).max(12), heading: z.string().trim().min(1).max(80).optional(), blocks: z.array(blogBlockSchema).min(1).max(14) })).min(1).max(6),
+});
+export type BlogFix = z.infer<typeof blogFixSchema>;
+
+/** The reviewer's fact check: claims the facts do not support, section by section. */
+export const blogReviewSchema = z.object({
+  unsupported: z
+    .array(
+      z.object({
+        section: z.number().int().min(0).max(12),
+        quote: z.string().trim().max(240).default(""),
+        reason: z.string().trim().min(1).max(300),
+        severity: z.enum(["high", "low"]).default("low"),
+      }),
+    )
+    .max(12)
+    .default([]),
+  seo: z
+    .object({
+      titleNote: z.string().trim().max(240).optional().catch(undefined),
+      keywordNote: z.string().trim().max(240).optional().catch(undefined),
+    })
+    .optional()
+    .catch(undefined),
+});
+export type BlogReview = z.infer<typeof blogReviewSchema>;
 
 /** Facts the writer may rely on, as lines, plus the same text for the numeric fact check. */
 export function buildBlogFacts(business: Business, config?: BlogAutomationConfig, calendar?: { goal: string; summary: string; cta: string }): { lines: string[]; text: string } {
@@ -95,129 +141,125 @@ function buildSystem(business: Business, platform: Exclude<BlogPlatform, "generi
   ].filter(Boolean).join("\n");
 }
 
-/**
- * Stage 1: pick a topic + working title. Kept cheap (small maxTokens) so a
- * near-duplicate topic can be regenerated once without planning a whole post.
- */
-export function buildBlogTopicPrompt(
-  business: Business,
-  recentTopics: string[],
-  config?: BlogAutomationConfig,
-  rejectedTopic?: string,
-) {
-  const system = buildSystem(business, config?.platform ?? "naver", config);
-  const avoidTopics = rejectedTopic ? [...recentTopics, rejectedTopic] : recentTopics;
-  const avoid = avoidTopics.length
-    ? `Do not reuse or closely resemble these recently used topics — pick something clearly different: ${avoidTopics.join(", ")}.`
-    : "";
-
-  const prompt = [
-    "Pick one specific blog topic that a customer searching Naver or Google would click, relevant to what is promoted.",
-    `Choose one of these angles (and vary it from recent topics): ${PROMOTION_STRATEGY[resolvePromotionType(business)].angles.join(" | ")}.`,
-    avoid,
-    "Return JSON with exactly these fields:",
-    '{ "topic": "short topic phrase", "title": "catchy blog title" }',
-  ]
-    .filter(Boolean)
-    .join("\n");
-
-  return { system, prompt };
-}
-
 export interface BlogPlanInput {
   business: Business;
-  topic: string;
-  title: string;
   config?: BlogAutomationConfig;
   calendar?: { goal: string; summary: string; cta: string };
 }
 
-/** Stage 2: the outline for the whole post (one call, quality tier). */
-export function buildBlogOutlinePrompt({ business, topic, title, config, calendar }: BlogPlanInput) {
+/** Step 1 (planner): topic, search intent, keywords, outline and photo spots — one call. A calendar item fixes the topic. */
+export function buildBlogPlanPrompt({ business, config, calendar, recentTopics, rejectedTopic, fixedTopic }: BlogPlanInput & { recentTopics: string[]; rejectedTopic?: string; fixedTopic?: string }) {
   const platform = config?.platform ?? "naver";
   const system = buildSystem(business, platform, config, calendar);
+  const avoidTopics = rejectedTopic ? [...recentTopics, rejectedTopic] : recentTopics;
   const prompt = [
-    "AUTOBIZ_BLOG_OUTLINE_V1",
-    `Plan one marketing blog post about "${topic}" (working title: "${title}").`,
+    "AUTOBIZ_BLOG_PLAN_V2",
+    fixedTopic
+      ? `Plan one marketing blog post about exactly this planned topic, without replacing it: "${fixedTopic}".`
+      : [
+        "Pick one specific blog topic that a customer searching Naver or Google would click, relevant to what is promoted, then plan the post.",
+        `Choose one of these angles (and vary it from recent topics): ${PROMOTION_STRATEGY[resolvePromotionType(business)].angles.join(" | ")}.`,
+        avoidTopics.length ? `Do not reuse or closely resemble these recently used topics — pick something clearly different: ${avoidTopics.join(", ")}.` : "",
+      ].filter(Boolean).join("\n"),
     `Length target: about ${BLOG_LENGTH.targetTotal} Korean characters without spaces in total, as an intro, 5-7 sub-headed sections and a closing.`,
     ...promotionGuidance(resolvePromotionType(business), "blog").slice(3),
     "Choose one angle that a real reader searching this topic would want answered, and build the sections so each one gives a reason to keep reading and a reason to choose what is promoted.",
-    "State the searcher's intent in searchIntent and make the post answer exactly that, early.",
+    "State the searcher's intent in searchIntent and make the post answer exactly that, early. Choose one primary keyword (what the searcher types) and up to four secondary keywords, taken from the facts or the owner's keywords.",
     "Every section's points must come from the FACTS; where facts are thin, plan sections about the reader's situation, how to choose, what to look for, or how the business works — never invented specifics.",
     "Distribute photo spots (what the owner's own photo should show) across at least 4 sections, one quote section and one callout section, and a list where it helps.",
-    "The final title: main keyword near the front, 15-35 characters, specific and honest.",
+    "The final title: primary keyword near the front, 15-35 characters, specific and honest.",
     "Return JSON with exactly these fields:",
-    '{ "title": "final title", "reader": "who this is for and what they want", "angle": "the one angle of this post", "searchIntent": "what the searcher wants to get done", "hookIdea": "how the first two sentences hook the reader", "sections": [{ "heading": "🥐 sub-heading starting with one emoji", "purpose": "what this section does for the reader", "points": ["fact-based point"], "photo": "what the photo here shows or null", "extra": "quote|callout|list|none" }], "closing": { "takeaway": "one-line takeaway", "cta": "one soft, specific call to action" } }',
+    '{ "topic": "short topic phrase", "title": "final title", "reader": "who this is for and what they want", "angle": "the one angle of this post", "searchIntent": "what the searcher wants to get done", "hookIdea": "how the first two sentences hook the reader", "keywords": { "primary": "...", "secondary": ["..."] }, "sections": [{ "heading": "🥐 sub-heading starting with one emoji", "purpose": "what this section does for the reader", "points": ["fact-based point"], "photo": "what the photo here shows or null", "extra": "quote|callout|list|none" }], "closing": { "takeaway": "one-line takeaway", "cta": "one soft, specific call to action" } }',
+  ].filter(Boolean).join("\n");
+  return { system, prompt };
+}
+
+const BLOCK_TYPES =
+  'Block types: {"type":"paragraph","text":"…"}, {"type":"quote","text":"…"}, {"type":"list","style":"check|bullet|number","items":["…","…"]}, {"type":"callout","label":"💡 꿀팁","text":"…"}, {"type":"photo","slot":"what the photo shows","caption":"short caption"}. Write inline **bold** and ==highlight== inside the text values.';
+
+function planBrief(plan: BlogPlan): string {
+  return [
+    `Post title: ${plan.title}`,
+    `Reader: ${plan.reader}. Angle: ${plan.angle}.`,
+    plan.searchIntent ? `What the searcher wants: ${plan.searchIntent}` : null,
+    `Primary keyword: ${plan.keywords.primary}${plan.keywords.secondary.length ? `; secondary: ${plan.keywords.secondary.join(", ")}` : ""}`,
+    `Hook idea: ${plan.hookIdea}`,
+    "Sections, in order:",
+    ...plan.sections.map(
+      (section, index) =>
+        `${index + 1}. ${section.heading} — purpose: ${section.purpose}. Points (facts only): ${section.points.join(" / ")}.${section.photo ? ` Photo block: slot = "${section.photo}", plus a short caption.` : " No photo block."}${section.extra === "quote" ? " Include one quote block." : section.extra === "callout" ? ' Include one callout block with a label like "💡 꿀팁" or "📌 포인트".' : section.extra === "list" ? " Include one list block (3-5 short items)." : ""}`,
+    ),
+    `Closing: takeaway: ${plan.closing.takeaway}. CTA: ${plan.closing.cta}.`,
+  ].filter(Boolean).join("\n");
+}
+
+/** Step 2 (writer): the whole post in one call, so voice, rhythm and flow stay consistent from the first line to the last. */
+export function buildBlogDraftPrompt({ business, config, calendar, plan }: BlogPlanInput & { plan: BlogPlan }) {
+  const system = buildSystem(business, config?.platform ?? "naver", config, calendar);
+  const prompt = [
+    "AUTOBIZ_BLOG_DRAFT_V2",
+    "Write the whole blog post now, following this plan.",
+    planBrief(plan),
+    `Structure: first the INTRO (no heading): 2-3 short paragraphs, about 250-400 characters without spaces, the main keyword within the first 100 characters, ending with a one-line quote block that sums up the promise. Then one section per planned heading, in order, using the planned heading text exactly: 2-3 paragraphs, about 330-480 characters without spaces each. Then the CLOSING (no heading): 2 short paragraphs, about 200-320 characters without spaces: the takeaway, then one soft, specific call to action.`,
+    `The whole post is about ${BLOG_LENGTH.targetTotal} characters without spaces. Do not repeat ideas or openings between sections. Do not write the business information box or hashtags (the app adds them).`,
+    BLOCK_TYPES,
+    'Return JSON with exactly this shape: { "title": "the final title", "sections": [ { "blocks": [ … ] }, { "heading": "🥐 …", "blocks": [ … ] }, …, { "blocks": [ … ] } ] }',
   ].join("\n");
   return { system, prompt };
 }
 
-export type BlogSectionKind = "intro" | "body" | "closing";
+export interface BlogProblemSection {
+  index: number;
+  section: BlogSection;
+  problems: string[];
+}
 
-export interface BlogSectionPromptInput extends BlogPlanInput {
-  outline: BlogOutline;
-  kind: BlogSectionKind;
-  /** Index into outline.sections for a body section. */
-  bodyIndex?: number;
-  /** Sections already written, in order (used to keep flow and avoid repeating). */
-  written: BlogSection[];
-  /** Problems found in a previous version of this section — fix every one. */
-  fixes?: string[];
-  /** The previous version of this section (when rewriting). */
-  previous?: BlogSection;
+/** Step 3 (writer): rewrite only the sections that failed the quality gate or the fact check, fixing every listed problem. */
+export function buildBlogFixPrompt({ business, config, calendar, plan, post, targets }: BlogPlanInput & { plan: BlogPlan; post: BlogSection[]; targets: BlogProblemSection[] }) {
+  const system = buildSystem(business, config?.platform ?? "naver", config, calendar);
+  const prompt = [
+    "AUTOBIZ_BLOG_FIX_V2",
+    "Part of an already written blog post has problems. Rewrite ONLY the sections listed below, fixing every problem and keeping what already works. Do not touch the other sections.",
+    planBrief(plan),
+    `The whole post as it stands (for flow — do not repeat these ideas):\n${summarize(post)}`,
+    ...targets.map(
+      (target) =>
+        `SECTION ${target.index}${target.section.heading ? ` (heading: ${target.section.heading})` : target.index === 0 ? " (intro, no heading)" : " (closing, no heading)"}\nCurrent blocks: ${JSON.stringify(target.section.blocks)}\nProblems to fix:\n${target.problems.map((problem) => `- ${problem}`).join("\n")}`,
+    ),
+    BLOCK_TYPES,
+    'Return JSON with exactly this shape, one entry per section above and no others: { "sections": [ { "index": 3, "heading": "keep the heading of a body section", "blocks": [ … ] } ] }',
+  ].join("\n");
+  return { system, prompt };
 }
 
 function summarize(sections: BlogSection[]): string {
   return sections
-    .map((section) => {
+    .map((section, index) => {
       const text = section.blocks.map((block) => ("text" in block ? block.text : block.type === "list" ? block.items.join(" / ") : "")).filter(Boolean).join(" ");
-      return `- ${section.heading ?? "(intro)"}: ${text.slice(0, 120)}…`;
+      return `${index}. ${section.heading ?? (index === 0 ? "(intro)" : "(closing)")}: ${text.slice(0, 140)}…`;
     })
     .join("\n");
 }
 
-/** Stage 3: write one section (intro, one body section, or the closing). */
-export function buildBlogSectionPrompt(input: BlogSectionPromptInput) {
-  const { business, config, calendar, outline, kind, bodyIndex = 0, written, fixes = [], previous } = input;
-  const platform = config?.platform ?? "naver";
-  const system = buildSystem(business, platform, config, calendar);
-  const section = kind === "body" ? outline.sections[bodyIndex] : undefined;
-
-  const task =
-    kind === "intro"
-      ? [
-        "Write the INTRO (no heading): 2-3 short paragraphs, about 250-400 characters without spaces.",
-        `Hook idea: ${outline.hookIdea}. Put the main keyword in the first 100 characters. Say who this is for and what they will get, in a friendly way.`,
-        "End the intro with a one-line quote block that sums up the promise.",
-      ].join(" ")
-      : kind === "closing"
-        ? [
-          "Write the CLOSING (no heading): 2 short paragraphs, about 200-320 characters without spaces: the takeaway, then one soft, specific call to action.",
-          `Takeaway: ${outline.closing.takeaway}. CTA: ${outline.closing.cta}.`,
-          "Do not repeat the business information box (the app adds it) and do not write hashtags (the app adds them).",
-        ].join(" ")
-        : [
-          `Write the section "${section?.heading}": 2-3 paragraphs, about 330-480 characters without spaces in total.`,
-          `Purpose: ${section?.purpose}. Cover these points in your own words, using only the facts: ${section?.points.join(" / ")}.`,
-          section?.photo ? `Include one photo block where it fits best: slot = "${section.photo}", plus a short caption.` : "Include no photo block.",
-          section?.extra === "quote" ? "Include one quote block (one memorable line)." : section?.extra === "callout" ? 'Include one callout block with a label like "💡 꿀팁" or "📌 포인트".' : section?.extra === "list" ? "Include one list block (check or bullet style, 3-5 short items)." : "",
-        ].filter(Boolean).join(" ");
-
+/** Step 4 (reviewer): checks the finished post against the facts. It never rewrites; it points at what is not supported. */
+export function buildBlogReviewPrompt({ plan, post, facts }: { plan: BlogPlan; post: BlogPost; facts: string }) {
+  const system = [
+    "You are a strict fact checker for Korean marketing blog posts written for a small business.",
+    "A claim is SUPPORTED only if the FACTS state it or it is plainly a general, harmless statement (a feeling, an invitation, advice). Flag: invented prices, numbers with units, hours, addresses, awards, rankings, statistics, customer reviews or visits, effects/efficacy, features, menu items or services that the FACTS do not mention.",
+    "severity high = a concrete, checkable claim that is not in the FACTS (must be removed). severity low = vague or borderline wording. Do not flag style. Do not flag things the FACTS support. Write every reason in Korean.",
+    "FACTS:",
+    facts,
+  ].join("\n");
   const prompt = [
-    "AUTOBIZ_BLOG_SECTION_V1",
-    `KIND=${kind}${kind === "body" ? ` INDEX=${bodyIndex}` : ""}`,
-    `Post title: ${outline.title}`,
-    `Reader: ${outline.reader}. Angle: ${outline.angle}.`,
-    `Outline headings: ${outline.sections.map((item) => item.heading).join(" | ")}`,
-    written.length > 0 ? `Already written (do not repeat these ideas or openings; continue naturally from the last one):\n${summarize(written)}` : null,
-    task,
-    previous
-      ? `The previous version of this section (rewrite it, keeping what works):\n${JSON.stringify(previous.blocks)}`
-      : null,
-    fixes.length ? `It had these problems. Fix every one:\n${fixes.map((fix) => `- ${fix}`).join("\n")}` : null,
-    'Block types: {"type":"paragraph","text":"…"}, {"type":"quote","text":"…"}, {"type":"list","style":"check|bullet|number","items":["…","…"]}, {"type":"callout","label":"💡 꿀팁","text":"…"}, {"type":"photo","slot":"what the photo shows","caption":"short caption"}. Write inline **bold** and ==highlight== inside the text values.',
-    'Return JSON with exactly this shape: { "blocks": [ … ] }',
-  ].filter(Boolean).join("\n");
-
+    "AUTOBIZ_BLOG_REVIEW_V2",
+    `Primary keyword: ${plan.keywords.primary}`,
+    "The post, section by section (index. heading: text):",
+    ...post.sections.map((section, index) => {
+      const text = section.blocks.map((block) => ("text" in block ? block.text : block.type === "list" ? block.items.join(" / ") : block.type === "photo" ? "" : "")).filter(Boolean).join(" ");
+      return `${index}. ${section.heading ?? (index === 0 ? "(intro)" : "(closing)")}: ${stripInlineMarkup(text)}`;
+    }),
+    "Also give one short SEO note if the title or the first 100 characters do not contain the primary keyword.",
+    'Return JSON with exactly this shape: { "unsupported": [ { "section": 2, "quote": "the exact claim", "reason": "why the facts do not support it", "severity": "high" } ], "seo": { "titleNote": "…", "keywordNote": "…" } }. Use an empty unsupported array when everything is supported.',
+  ].join("\n");
   return { system, prompt };
 }

@@ -1,4 +1,5 @@
 import { AppError } from "@/server/shared/errors";
+import type { ClaudeUsage } from "./models";
 
 /**
  * Standard error taxonomy for AI provider calls. Automation handlers only
@@ -12,7 +13,9 @@ export type AIErrorCode =
   | "PROVIDER_UNAVAILABLE"
   | "INVALID_STRUCTURED_RESPONSE"
   | "NETWORK_FAILURE"
-  | "UNSUPPORTED_INPUT";
+  | "UNSUPPORTED_INPUT"
+  | "REFUSED"
+  | "BAD_REQUEST";
 
 const RETRYABLE_CODES: ReadonlySet<AIErrorCode> = new Set([
   "TIMEOUT",
@@ -25,11 +28,14 @@ const RETRYABLE_CODES: ReadonlySet<AIErrorCode> = new Set([
 export class AIProviderError extends AppError {
   declare readonly code: AIErrorCode;
   readonly provider: string;
+  /** What a call that answered but failed (cut off, refused) was still billed: the spend ledger settles it exactly. */
+  readonly billed?: { model: string; usage: ClaudeUsage };
 
-  constructor(code: AIErrorCode, provider: string, message: string, options?: { cause?: unknown }) {
+  constructor(code: AIErrorCode, provider: string, message: string, options?: { cause?: unknown; billed?: { model: string; usage: ClaudeUsage } }) {
     super(provider, code, `[${provider}] ${message}`, { cause: options?.cause, retryable: RETRYABLE_CODES.has(code) });
     this.name = "AIProviderError";
     this.provider = provider;
+    this.billed = options?.billed;
   }
 }
 

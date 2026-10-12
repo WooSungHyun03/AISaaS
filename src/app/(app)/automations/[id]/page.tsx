@@ -22,7 +22,7 @@ function resultOutput(value: Json | null): Record<string, Json | undefined> | nu
 }
 
 /** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export default async function AutomationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

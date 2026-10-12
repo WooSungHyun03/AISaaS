@@ -21,7 +21,8 @@
 - `src/app/(public)` — 랜딩, AI 디렉토리, 가이드, 요금제 (인증 불필요)
 - `src/app/(auth)` — 로그인/회원가입
 - `src/app/(app)` — 대시보드, 자동화, 사업체, 결제, 설정 (인증 필요, `proxy.ts`에서 보호)
-- `src/server/` — AI, 자동화 실행/스케줄러, 커넥터, 결제 도메인 로직 (UI와 완전 분리)
+- `src/server/` — AI, 자동화 실행/스케줄러, 커넥터, 결제, 유료 호출 예산(`budget`) 도메인 로직 (UI와 완전 분리)
+- `worker/ffmpeg` — 광고 영상 후처리 FFmpeg 워커 (별도 Docker 서비스, [README](worker/ffmpeg/README.md))
 - `supabase/migrations` — 스키마 + RLS 정책
 - `supabase/functions` — cron 트리거용 Edge Function (얇은 wrapper)
 
@@ -135,7 +136,8 @@ supabase/
   migrations/     # SQL 스키마 + RLS
   functions/      # Edge Function (cron 트리거)
   seed.sql        # 초기 데이터
-docs/             # ARCHITECTURE.md, TEAM_GUIDE.md
+worker/ffmpeg/    # 광고 영상 후처리 워커 (Node + FFmpeg, Docker)
+docs/             # ARCHITECTURE.md, TEAM_GUIDE.md, AD_SHORTS.md, AI_SETUP.md
 .github/workflows/ci.yml   # lint/typecheck/test/build/docker build
 Dockerfile, .dockerignore, compose.yaml   # 컨테이너 빌드/로컬 실행
 ```

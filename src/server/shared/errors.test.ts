@@ -34,13 +34,19 @@ describe("describeAutomationRunError", () => {
 });
 
 describe("describeAutomationRunError — video, YouTube and plan limits", () => {
-  it("never echoes raw provider text for video rendering failures", () => {
-    const raw = "JSON2Video 렌더링에 실패했습니다: template var voice_script missing at secret-internal-path";
+  it("never echoes raw provider text for video generation failures", () => {
+    const raw = "영상 생성 상태를 확인하지 못했습니다. (HTTP 500: template var voice_script missing at secret-internal-path)";
     const result = describeAutomationRunError(raw);
     expect(result).toContain("영상");
     expect(result).not.toContain("secret-internal-path");
-    expect(describeAutomationRunError("JSON2Video 렌더링이 제한 시간 내에 완료되지 않았습니다. timeout")).toContain("오래 걸려");
-    expect(describeAutomationRunError("JSON2Video 렌더링 설정이 없습니다. VIDEO_RENDER_API_KEY와 ... NOT_CONFIGURED")).toContain("설정");
+    expect(describeAutomationRunError("영상 생성 서비스 응답이 늦어요 (요청 시간 초과)")).toContain("오래 걸려");
+    expect(describeAutomationRunError("영상 생성 서비스 설정이 없습니다. FAL_KEY를 확인해주세요.")).toContain("설정");
+    expect(describeAutomationRunError("영상 생성 서비스 설정이 없습니다. FAL_KEY를 확인해주세요.")).not.toContain("FAL_KEY");
+  });
+
+  it("shows the budget and quality messages, which are already plain Korean", () => {
+    expect(describeAutomationRunError("이번 달 제작 예산을 모두 사용해서 더 만들 수 없어요. 이용권은 차감되지 않았어요.")).toContain("제작 예산");
+    expect(describeAutomationRunError("만든 영상이 품질 점검을 통과하지 못했어요. (영상 길이가 달라요)")).toContain("품질 점검");
   });
 
   it("explains YouTube upload failures in plain Korean", () => {

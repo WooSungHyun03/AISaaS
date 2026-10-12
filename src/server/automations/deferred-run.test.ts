@@ -84,3 +84,48 @@ describe("advanceDeferredRun", () => {
     expect((updates[0] as { output: { job: { rev: number; leaseUntil: string } } }).output.job).toMatchObject({ rev: 4 });
   });
 });
+
+describe("advanceDeferredRun — resuming a handler", () => {
+  const runRow = { id: "r", automation_id: "a", status: "RUNNING", source: "MANUAL", created_at: "2026-10-10T00:00:00.000Z", input: {}, output: job({ state: { stage: "WAIT" } }) };
+  const rows = [
+    { data: runRow },
+    { data: [{ id: "r" }] }, // the lease claim
+    { data: { id: "a", user_id: "u", business_id: "b", template_id: "t" } },
+    { data: { id: "b", name: "빵집" } },
+    { data: { id: "t", slug: "shorts" } },
+  ];
+
+  it("lets the handler save its state before the step ends (at the revision the step holds the lease for), then stores the step's result", async () => {
+    const { getHandler } = await import("./handlers");
+    const resume = vi.fn(async (ctx: { checkpoint?: (state: unknown) => Promise<void> }) => {
+      await ctx.checkpoint?.({ stage: "WAIT", wan: { requestId: "r1" } });
+      return { deferred: { state: { stage: "WAIT", wan: { requestId: "r1" }, polled: true }, progress: "AI가 영상을 만드는 중이에요" } };
+    });
+    vi.mocked(getHandler).mockReturnValue({ templateSlug: "shorts", run: vi.fn(), resume } as never);
+    const { admin, updates } = fakeAdmin([...rows, { data: [{ id: "r" }] }, { data: [{ id: "r" }] }]);
+    createAdminClientMock.mockReturnValue(admin);
+
+    expect(await advanceDeferredRun("r")).toMatchObject({ status: "RUNNING", progress: "AI가 영상을 만드는 중이에요" });
+
+    const written = updates.map((update) => (update as { output: { job: { rev: number; state: { wan?: unknown; polled?: boolean } } } }).output.job);
+    expect(written.map((item) => item.rev)).toEqual([4, 4, 5]); // lease claim, checkpoint (same revision), final save
+    expect(written[1].state).toEqual({ stage: "WAIT", wan: { requestId: "r1" } });
+    expect(written[2].state).toMatchObject({ polled: true });
+  });
+
+  it("fails the step, instead of carrying on, when the checkpoint cannot be saved (the lease was lost)", async () => {
+    const { getHandler } = await import("./handlers");
+    const resume = vi.fn(async (ctx: { checkpoint?: (state: unknown) => Promise<void> }) => {
+      await ctx.checkpoint?.({ stage: "WAIT" });
+      return { deferred: { state: { stage: "WAIT" } } };
+    });
+    vi.mocked(getHandler).mockReturnValue({ templateSlug: "shorts", run: vi.fn(), resume } as never);
+    const { admin } = fakeAdmin([...rows, { data: [] }, { data: null }, { data: null }, { data: null }]);
+    createAdminClientMock.mockReturnValue(admin);
+
+    const result = await advanceDeferredRun("r");
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorMessage).toContain("작업 상태를 저장하지 못했어요");
+  });
+});

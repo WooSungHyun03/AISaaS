@@ -8,6 +8,12 @@ export interface ProviderFetchOptions {
   provider: string;
   timeoutMs?: number;
   maxRetries?: number;
+  /**
+   * Retry a request that timed out or lost its connection. Turn it off for paid calls: a request cut off on our side
+   * may still have been computed (and billed) by the provider, so repeating it would pay twice for one answer.
+   * Rejections the provider answered (429, 5xx) are still retried: nothing was computed for those.
+   */
+  retryTimeouts?: boolean;
 }
 
 function sleep(ms: number) {
@@ -32,6 +38,10 @@ function classifyResponseError(provider: string, response: Response, body: strin
       `Upstream error (${response.status}): ${body.slice(0, 300)}`,
     );
   }
+  // The request itself is wrong (a rejected parameter, a malformed body): sending it again cannot help.
+  if ([400, 404, 413, 422].includes(response.status)) {
+    return new AIProviderError("BAD_REQUEST", provider, `Request rejected (${response.status}): ${body.slice(0, 500)}`);
+  }
   return new AIProviderError(
     "PROVIDER_UNAVAILABLE",
     provider,
@@ -50,7 +60,7 @@ function classifyResponseError(provider: string, response: Response, body: strin
 export async function fetchWithRetry(
   url: string,
   init: RequestInit,
-  { provider, timeoutMs = serverEnv.AI_REQUEST_TIMEOUT_MS, maxRetries = serverEnv.AI_MAX_RETRIES }: ProviderFetchOptions,
+  { provider, timeoutMs = serverEnv.AI_REQUEST_TIMEOUT_MS, maxRetries = serverEnv.AI_MAX_RETRIES, retryTimeouts = true }: ProviderFetchOptions,
 ): Promise<Response> {
   let lastError: AIProviderError | undefined;
 
@@ -76,11 +86,11 @@ export async function fetchWithRetry(
         lastError = cause;
       } else if (cause instanceof Error && cause.name === "AbortError") {
         const error = new AIProviderError("TIMEOUT", provider, `Request timed out after ${timeoutMs}ms`, { cause });
-        if (attempt === maxRetries) throw error;
+        if (attempt === maxRetries || !retryTimeouts) throw error;
         lastError = error;
       } else {
         const error = new AIProviderError("NETWORK_FAILURE", provider, "Network request failed", { cause });
-        if (attempt === maxRetries) throw error;
+        if (attempt === maxRetries || !retryTimeouts) throw error;
         lastError = error;
       }
     }

@@ -501,45 +501,16 @@ handlers never touch a vendor SDK or fetch call directly. The real adapters
 at most once if the model's response doesn't parse or validate, throwing
 `AIProviderError("INVALID_STRUCTURED_RESPONSE", ...)` if it still fails.
 
-## Blog AI Pipeline (Day 4)
+## Content pipelines and the spend budget
 
-`src/server/automations/handlers/blog.ts` runs a two-stage pipeline instead
-of one single-shot generation:
+Two paid pipelines, both **deferred runs** (one quick step per call; the open page and the cron tick advance them; state lives in `automation_runs.output.job`, a lease on `job.rev` keeps two callers from stepping the same run, `ctx.checkpoint` saves an unrepeatable step's job id before the step ends):
 
-- **Stage 1 — topic.** `buildBlogTopicPrompt()` (`src/server/ai/prompts/blog.ts`)
-  asks for just `{ topic, title }` (cheap, small `maxTokens`), fed with the
-  business's `name`/`industry`/`location`/`description`/`target_customer`/
-  `brand_tone`/`keywords` plus the automation's own `objective`/`tone`/
-  `keywords` and the last 5 `content_history` topics for this automation
-  (`ctx.recentTopics`, loaded by `runner.ts`).
-- **Near-duplicate check.** `src/server/ai/similarity.ts#isNearDuplicateTopic()`
-  compares the candidate topic against `recentTopics` with character-bigram
-  Jaccard similarity on normalized text (lowercased, NFKC, punctuation/
-  whitespace stripped) — no embeddings/vector infra. Bigrams (not
-  whitespace-tokenized words) were chosen because Korean topic phrases often
-  have no natural word boundaries. Default threshold `0.5`
-  (`NEAR_DUPLICATE_THRESHOLD`). If the candidate is a near-duplicate,
-  `generateTopic()` regenerates **exactly once** (passing the rejected topic
-  back in the prompt's avoid-list) and accepts whatever comes back — bounded,
-  never a loop.
-- **Stage 2 — body.** `buildBlogBodyPrompt()` takes the accepted topic+title
-  and asks for `{ excerpt, bodyHtml, keywords, callToAction }`.
-- **Unified shape.** `blogContentSchema` (`blogTopicSchema.merge(blogBodySchema)`)
-  is `{ topic, title, excerpt, bodyHtml, keywords, callToAction }` — the
-  single source of truth for what "AI blog content" looks like, replacing
-  the old single-stage `{ topic, title, content }` shape. `PublishContentParams`
-  gained an optional `excerpt` field so `WordPressConnector.publish()` can
-  send it through to `/wp-json/wp/v2/posts`; other connectors ignore it.
-  `content_history.content` (a plain-text column, rendered with
-  `whitespace-pre-line` by the automation detail page) stores a tags-stripped
-  rendering of `bodyHtml`, not the raw HTML — `automation_runs.output` keeps
-  the full structured object (including raw `bodyHtml`) for any future
-  consumer that wants it.
-- **Success-only persistence.** Unchanged from before this Day:
-  `runner.ts#executeAutomation()` only inserts into `content_history` after
-  `handler.run()` resolves; any throw from either generation stage (or from
-  a configured WordPress publish) is caught by the runner, marks the run
-  `FAILED`, and never writes a partial/corrupt history row.
+- **Blog posts** (`handlers/blog.ts`, `docs/BLOG_QUALITY.md`): PLAN (Opus 5.5) → DRAFT (Fable 5.1, the whole post in one call) → quality gate (`blog-quality.ts`) → targeted FIX (Fable) → REVIEW fact check (Sonnet 5.5) → GUIDE (Sonnet) → save/preview/copy/edit as before.
+- **Ad Shorts** (`handlers/shorts.ts`, `docs/AD_SHORTS.md`): vision + ad plan → Wan 3.0 one-pass generation (fal queue) → FFmpeg measurements + vision QA → one regeneration at most → Korean voice if needed → FFmpeg worker finish (`worker/ffmpeg`) → private Storage.
+
+Model choice is data (`src/server/ai/models.ts`: ids, prices, per-model request rules); `AnthropicProvider` builds each request from it (no sampling parameters for the 5.x models, `output_config.effort`, `max_tokens` that covers thinking) and reports tokens and cost.
+
+**Spend budget (`src/server/budget`, migration 0073).** Every paid call — a pipeline LLM call (`role` set, inside a `withBudgetScope`), a Wan generation, a voice — is `reserve (worst case) → call → settle (real cost)` in `budget_spend`, under an advisory lock per (period, kind) in SQL; the call is refused if it would pass the service-wide cap, the per-item cap, or the money the other unfinished items still need (`budget_items` gives each run one of the period's N item slots). The runner claims the slot **before** reserving the credit, and on failure books open reservations as spent and gives the slot back; the stale-run reaper does the same. Calls outside a scope, with an unpriceable provider, with `ALLOW_PAID_AI_CALLS` off, outside the operating period, or while `BUDGET_FREEZE` is on are refused before anything is sent. The mock providers never touch the ledger.
 
 ## Billing Flow
 

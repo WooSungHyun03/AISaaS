@@ -85,7 +85,7 @@ export function describeAutomationRunError(message: string | null | undefined): 
   // see runner.ts#recordRefusedRun) are already a complete, secret-free
   // Korean sentence meant for direct display; passing them through beats
   // flattening them into the generic fallback below.
-  if (/일시정지 상태|오류 상태|요금제에서는|요금제의 이번 달|요금제는 |이용권이 없거나|홍보 대상/.test(message)) {
+  if (/일시정지 상태|오류 상태|요금제에서는|요금제의 이번 달|요금제는 |이용권이 없거나|홍보 대상|제작 예산|제작 가능한 편수|제작이 일시 중지|운영 기간|AI 제작 서비스|예산이 아직 설정|영상을 만들지 못했어요|품질 점검|영상 마무리 작업|영상 제작 서비스|사진이나 참고 영상|한국어 음성 서비스|너무 오래 걸려/.test(message)) {
     return message;
   }
 
@@ -93,13 +93,9 @@ export function describeAutomationRunError(message: string | null | undefined): 
   if (error.includes("already has a run") || error.includes("one_active_run")) {
     return "이미 실행 중입니다. 완료된 뒤 다시 시도해주세요.";
   }
-  if (error.includes("json2video") || /렌더링|render/.test(error)) {
-    if (/시간이 초과|timeout|timed out/.test(error)) {
-      return "영상 만들기가 오래 걸려 중단됐어요. 잠시 후 다시 시도해주세요.";
-    }
-    if (/설정이 없습니다|not_configured|api_key|http 40[13]/.test(error)) {
-      return "영상 만들기 서비스 설정이 아직 끝나지 않았어요. 관리자에게 문의해주세요.";
-    }
+  if (/영상 (생성|후처리|점검)|후처리 서버|음성 서비스|파일 정보를 읽지/.test(message)) {
+    if (/시간 초과|늦어|timeout|timed out/.test(error)) return "영상 만들기가 오래 걸려 중단됐어요. 잠시 후 다시 시도해주세요.";
+    if (/설정이 없습니다|not_configured|http 40[13]/.test(error)) return "영상 제작 서비스 설정이 아직 끝나지 않았어요. 관리자에게 문의해주세요.";
     return "영상을 만들지 못했어요. 잠시 후 다시 시도해주세요.";
   }
   if (error.includes("youtube")) {

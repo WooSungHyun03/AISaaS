@@ -7,8 +7,6 @@ export interface PlanConfig {
   priceMonthlyKrw: number;
   /** Max number of ACTIVE + DRAFT + PAUSED automations. null = unlimited. */
   automationLimit: number | null;
-  /** Which image-to-video model the plan's animated videos use: `premium` is the stronger (pricier) one. */
-  animationQuality: "standard" | "premium";
   /** Automation templates this plan is allowed to use. null = all. */
   allowedTemplateSlugs: string[] | null;
   features: string[];
