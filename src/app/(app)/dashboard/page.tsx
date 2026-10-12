@@ -43,14 +43,12 @@ export default async function DashboardPage() {
   const growthPromise = businessId
     ? getGrowthSummary(businessId)
     : Promise.resolve(null);
-  const calendarPromise = businessId
-    ? getDashboardCalendar(businessId)
-    : Promise.resolve(null);
+  const calendarPromise = getDashboardCalendar(user.id);
   const contentPromise = businessId
     ? getDashboardRecentContent(businessId)
     : Promise.resolve(null);
   const progressPromise = businessId
-    ? getDashboardProgress(businessId)
+    ? getDashboardProgress(businessId, user.id)
     : Promise.resolve({ channelCount: 0, calendarCount: 0, contentCount: 0 });
   const creditsPromise = getDashboardCredits(user.id);
   const usagePromise = getDashboardRecentUsage();

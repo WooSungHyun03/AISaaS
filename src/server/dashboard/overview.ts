@@ -3,6 +3,8 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { getCreditBalances } from "@/server/billing/run-credits";
 import { getUsageHistory } from "@/server/billing/read-model";
+import { listEvents } from "@/server/calendar/events";
+import { EVENT_CATEGORY_LABEL, type EventCategory } from "@/types/calendar-events";
 
 export interface DashboardIdentity {
   displayName: string | null;
@@ -11,10 +13,13 @@ export interface DashboardIdentity {
 
 export interface DashboardCalendarItem {
   id: string;
-  plannedDate: string;
-  platform: "blog" | "instagram_reels" | "youtube_shorts";
-  topic: string;
-  status: "PLANNED" | "GENERATED" | "PUBLISHED" | "SKIPPED";
+  /** Seoul date (YYYY-MM-DD) of this occurrence. */
+  date: string;
+  /** "HH:mm" in Seoul time, or null for an all-day event. */
+  time: string | null;
+  title: string;
+  categoryLabel: string;
+  isRecurring: boolean;
 }
 
 export interface DashboardRecentContent {
@@ -57,7 +62,7 @@ export function buildDashboardNextAction(input: {
       stage: "BUSINESS",
       eyebrow: "시작 준비",
       title: "마케팅할 사업 정보를 먼저 알려주세요",
-      description: "업체명과 업종을 입력하면 진단부터 콘텐츠 계획까지 사업에 맞게 준비해드려요.",
+      description: "업체명과 업종을 입력하면 진단부터 블로그·숏폼 제작까지 사업에 맞게 준비해드려요.",
       cta: "사업 정보 입력하기",
       href: "/onboarding",
     };
@@ -86,9 +91,9 @@ export function buildDashboardNextAction(input: {
     return {
       stage: "CALENDAR",
       eyebrow: "다음 추천 행동",
-      title: "이번 달 콘텐츠 계획을 만들어보세요",
-      description: "진단 결과와 사업 정보를 바탕으로 날짜별 블로그·숏폼 주제를 계획해드려요.",
-      cta: "캘린더 만들기",
+      title: "캘린더에 첫 일정을 적어보세요",
+      description: "콘텐츠를 올릴 날이나 이벤트, 휴무일을 적어두면 한눈에 챙길 수 있어요.",
+      cta: "일정 추가하기",
       href: "/calendar",
     };
   }
@@ -96,10 +101,10 @@ export function buildDashboardNextAction(input: {
     return {
       stage: "CONTENT",
       eyebrow: "다음 추천 행동",
-      title: "계획한 첫 콘텐츠를 만들어보세요",
-      description: "캘린더에서 오늘의 주제를 골라 블로그 글이나 숏폼을 바로 만들 수 있어요.",
+      title: "첫 콘텐츠를 만들어보세요",
+      description: "블로그 글이나 숏폼 영상을 지금 바로 만들어볼 수 있어요.",
       cta: "첫 콘텐츠 만들기",
-      href: "/calendar",
+      href: "/blog",
     };
   }
   return {
@@ -146,26 +151,24 @@ export async function getDashboardIdentity(userId: string): Promise<DashboardIde
   };
 }
 
-export async function getDashboardCalendar(businessId: string, now = new Date()) {
+/** The owner's coming events this month (repeats expanded), earliest first. */
+export async function getDashboardCalendar(userId: string, now = new Date()) {
   const supabase = await createClient();
   const { start, end } = monthRange(now);
-  const { data, error, count } = await supabase
-    .from("calendar_items")
-    .select("id,planned_date,platform,topic,status", { count: "exact" })
-    .eq("business_id", businessId)
-    .gte("planned_date", start)
-    .lt("planned_date", end)
-    .order("planned_date")
-    .limit(6);
-  if (error) throw new Error("이번 달 캘린더를 불러오지 못했습니다.", { cause: error });
-  const items: DashboardCalendarItem[] = (data ?? []).map((item) => ({
-    id: item.id,
-    plannedDate: item.planned_date,
-    platform: item.platform,
-    topic: item.topic,
-    status: item.status,
+  const today = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(now);
+  const views = await listEvents(supabase, userId, start, end);
+  const upcoming = views
+    .filter((view) => (view.allDay ? view.end > today : view.end.slice(0, 10) >= today))
+    .sort((a, b) => a.start.localeCompare(b.start));
+  const items: DashboardCalendarItem[] = upcoming.slice(0, 6).map((view) => ({
+    id: view.occurrenceId,
+    date: view.start.slice(0, 10),
+    time: view.allDay ? null : view.start.slice(11, 16),
+    title: view.title,
+    categoryLabel: EVENT_CATEGORY_LABEL[view.category as EventCategory],
+    isRecurring: view.isRecurring,
   }));
-  return { items, total: count ?? 0, month: start.slice(0, 7) };
+  return { items, total: upcoming.length, month: start.slice(0, 7) };
 }
 
 export async function getDashboardCredits(userId: string) {
@@ -199,11 +202,11 @@ export async function getDashboardRecentUsage(limit = 4) {
   return result.items.slice(0, limit);
 }
 
-export async function getDashboardProgress(businessId: string): Promise<DashboardProgress> {
+export async function getDashboardProgress(businessId: string, userId: string): Promise<DashboardProgress> {
   const supabase = await createClient();
   const [channelsResult, calendarResult, contentResult] = await Promise.all([
     supabase.from("tracked_channels").select("id", { count: "exact", head: true }).eq("business_id", businessId),
-    supabase.from("calendar_items").select("id", { count: "exact", head: true }).eq("business_id", businessId),
+    supabase.from("calendar_events").select("id", { count: "exact", head: true }).eq("user_id", userId),
     supabase.from("content_history").select("id", { count: "exact", head: true }).eq("business_id", businessId),
   ]);
   const error = channelsResult.error || calendarResult.error || contentResult.error;

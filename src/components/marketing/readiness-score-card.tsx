@@ -26,7 +26,7 @@ export function ReadinessScoreCard({ businessName, result }: { businessName: str
             <p className="mt-3 max-w-md text-[15px] leading-7 text-muted-foreground">
               {result.nextTodo
                 ? `가장 먼저 해볼 일은 ${result.nextTodo.todo}이에요. 여기부터 하면 점수가 가장 빨리 올라요.`
-                : "핵심 항목이 모두 채워졌어요. 이제 캘린더의 계획대로 콘텐츠를 만들어보세요."}
+                : "핵심 항목이 모두 채워졌어요. 이제 블로그 글이나 숏폼 영상을 만들어보세요."}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2 md:justify-start">
               {result.nextTodo ? <Button asChild><Link href={result.nextTodo.href}>{result.nextTodo.cta} <ArrowRight aria-hidden="true" /></Link></Button> : null}

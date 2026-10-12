@@ -2,7 +2,7 @@ import { Check } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Mascot } from "@/components/brand/mascot";
 
-const POINTS = ["홈페이지·SNS 주소만 넣으면 무료 마케팅 진단", "진단 결과로 이번 달 콘텐츠 계획 만들기", "블로그 글과 숏폼 영상까지 한곳에서 제작"];
+const POINTS = ["홈페이지·SNS 주소만 넣으면 무료 마케팅 진단", "캘린더로 콘텐츠 올릴 날과 일정 관리", "블로그 글과 숏폼 영상까지 한곳에서 제작"];
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (

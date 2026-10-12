@@ -55,8 +55,17 @@ export async function requireAdmin(
   const { data: { user }, error: authError } = await sessionClient.auth.getUser();
   if (authError || !user) return deny(new AdminAccessError("UNAUTHENTICATED"), options);
 
-  const admin = dependencies.adminClient ?? createAdminClient();
-  const allowed = await isAdminUser(user.id, admin);
+  // A missing service-role key or an unapplied admin migration is an operator problem, not "not an admin":
+  // surface it as a server error (and say why in the log) instead of silently answering 404 to real admins.
+  let admin: AdminClient;
+  let allowed: boolean;
+  try {
+    admin = dependencies.adminClient ?? createAdminClient();
+    allowed = await isAdminUser(user.id, admin);
+  } catch (error) {
+    console.error("[admin] 관리자 권한을 확인하지 못했어요. SUPABASE_SERVICE_ROLE_KEY 설정과 admin_users 마이그레이션(0065)을 확인하세요.", error);
+    throw error;
+  }
   if (!allowed) {
     await recordAdminAudit(admin, user, {
       action: "ADMIN_ACCESS_DENIED",

@@ -43,7 +43,7 @@ export default async function RefundRequestsPage({ searchParams }: { searchParam
   return (
     <div className="mx-auto max-w-4xl space-y-9 pb-10">
       <div className="space-y-4">
-        <Button asChild variant="ghost" size="sm"><Link href="/billing"><ArrowLeft aria-hidden="true" />이용권·결제로 돌아가기</Link></Button>
+        <Button asChild variant="ghost" size="sm"><Link href="/billing"><ArrowLeft aria-hidden="true" />요금제로 돌아가기</Link></Button>
         <PageHeader title="환불 요청" description="결제가 완료된 주문을 선택하고 환불 사유와 처리 상태를 확인하세요." />
       </div>
 

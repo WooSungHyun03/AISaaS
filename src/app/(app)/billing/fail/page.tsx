@@ -7,7 +7,7 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
   PAY_PROCESS_ABORTED: "카드 인증을 끝내지 못했어요. 카드 정보를 확인하고 다시 시도해 주세요.",
   REJECT_CARD_COMPANY: "카드사에서 결제를 승인하지 않았어요. 다른 카드로 시도해 주세요.",
   CHECKOUT_EXPIRED: "결제 요청 시간이 지났어요. 이용권을 다시 골라주세요.",
-  CHECKOUT_IN_PROGRESS: "결제를 처리하고 있어요. 잠시 후 이용권·결제 화면에서 확인해 주세요.",
+  CHECKOUT_IN_PROGRESS: "결제를 처리하고 있어요. 잠시 후 요금제 화면에서 확인해 주세요.",
   CUSTOMER_KEY_MISMATCH: "결제 요청을 확인하지 못했어요. 이용권을 다시 골라주세요.",
   MISSING_API_KEY: "테스트 결제 설정이 아직 끝나지 않았어요. 관리자에게 문의해 주세요.",
   SUBSCRIPTION_NOT_ACTIVE: "결제는 처리됐지만 구독 상태를 확인하지 못했어요. 잠시 후 다시 확인해 주세요.",

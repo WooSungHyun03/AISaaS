@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
-import { CircleAlert, Loader2, ScanSearch } from "lucide-react";
+import { useActionState, useEffect, useRef, useState } from "react";
+import { ChevronDown, CircleAlert, Loader2, ScanSearch } from "lucide-react";
 import { toast } from "sonner";
 import { runDiagnosis, type DiagnosisActionState } from "@/app/(app)/diagnosis/actions";
 import { ScoreRing, scoreTone } from "@/components/marketing/score-ring";
@@ -22,6 +22,38 @@ export interface StoredWebsiteDiagnosis {
 
 const dateFormat = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
 const initialState: DiagnosisActionState = {};
+
+const SUMMARY_RECOMMENDATIONS = 3;
+
+/** One row per score group: points earned out of the points available. */
+export function summarizeGroups(items: ScoreItem[]) {
+  return Object.entries(GROUP_LABEL)
+    .map(([group, label]) => {
+      const inGroup = items.filter((item) => item.group === group);
+      return { group, label, points: inGroup.reduce((sum, item) => sum + item.points, 0), max: inGroup.reduce((sum, item) => sum + item.max, 0) };
+    })
+    .filter((entry) => entry.max > 0);
+}
+
+function GroupSummary({ items }: { items: ScoreItem[] }) {
+  const groups = summarizeGroups(items);
+  return (
+    <ul className="grid gap-x-8 gap-y-3 sm:grid-cols-2" aria-label="영역별 점수">
+      {groups.map((entry) => {
+        const percent = Math.round((entry.points / entry.max) * 100);
+        return (
+          <li key={entry.group}>
+            <div className="flex items-baseline justify-between gap-3 text-sm">
+              <span className="font-semibold">{entry.label}</span>
+              <span className="tabular font-bold">{entry.points}<span className="font-medium text-muted-foreground"> / {entry.max}</span></span>
+            </div>
+            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} /></div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 function Breakdown({ items }: { items: ScoreItem[] }) {
   const groups = Object.entries(GROUP_LABEL).map(([group, label]) => ({ group, label, items: items.filter((item) => item.group === group) })).filter((entry) => entry.items.length > 0);
@@ -54,6 +86,7 @@ function Breakdown({ items }: { items: ScoreItem[] }) {
 export function WebsiteDiagnosisCard({ businessId, website, stored }: { businessId: string; website: string | null; stored: StoredWebsiteDiagnosis | null }) {
   const [state, formAction, isPending] = useActionState(runDiagnosis, initialState);
   const lastResultId = useRef<string | undefined>(undefined);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!state.result || state.result.id === lastResultId.current) return;
@@ -92,13 +125,34 @@ export function WebsiteDiagnosisCard({ businessId, website, stored }: { business
               {view.contentStatus ? <p className="pt-1 text-[15px] leading-7">{view.contentStatus}</p> : null}
             </div>
           </div>
-          {view.scoreBreakdown.length > 0 ? <Breakdown items={view.scoreBreakdown} /> : null}
+          {view.scoreBreakdown.length > 0 ? <GroupSummary items={view.scoreBreakdown} /> : null}
           {view.recommendations.length > 0 ? (
             <div>
               <h4 className="text-sm font-semibold">먼저 해볼 일</h4>
               <ol className="mt-1.5 list-decimal space-y-1 pl-5 text-[14px] leading-6">
-                {view.recommendations.map((recommendation, index) => <li key={index}>{recommendation}</li>)}
+                {view.recommendations.slice(0, SUMMARY_RECOMMENDATIONS).map((recommendation, index) => <li key={index}>{recommendation}</li>)}
               </ol>
+            </div>
+          ) : null}
+          {view.scoreBreakdown.length > 0 || view.recommendations.length > SUMMARY_RECOMMENDATIONS ? (
+            <div>
+              <Button type="button" variant="outline" size="sm" aria-expanded={expanded} aria-controls="website-diagnosis-detail" onClick={() => setExpanded((value) => !value)}>
+                {expanded ? "접기" : "자세히 보기"}
+                <ChevronDown className={expanded ? "rotate-180" : undefined} aria-hidden="true" />
+              </Button>
+              {expanded ? (
+                <div id="website-diagnosis-detail" className="mt-5 space-y-5">
+                  {view.scoreBreakdown.length > 0 ? <Breakdown items={view.scoreBreakdown} /> : null}
+                  {view.recommendations.length > SUMMARY_RECOMMENDATIONS ? (
+                    <div>
+                      <h4 className="text-sm font-semibold">그 밖에 해볼 일</h4>
+                      <ol start={SUMMARY_RECOMMENDATIONS + 1} className="mt-1.5 list-decimal space-y-1 pl-5 text-[14px] leading-6">
+                        {view.recommendations.slice(SUMMARY_RECOMMENDATIONS).map((recommendation, index) => <li key={index}>{recommendation}</li>)}
+                      </ol>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
           <p className="flex items-start gap-2 text-[13px] leading-5 text-muted-foreground"><CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />점수는 홈페이지에서 실제로 확인한 항목만으로 계산해요. 방문자 수 같은 외부 수치는 확인할 수 없어 반영하지 않아요.</p>

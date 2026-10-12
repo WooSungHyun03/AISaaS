@@ -1,7 +1,7 @@
 /** Routes that need a signed-in user. Matched on a path-segment boundary. */
 export const PROTECTED_PREFIXES = [
   "/dashboard", "/diagnosis", "/calendar", "/marketing", "/blog", "/shorts", "/growth-report",
-  "/usage", "/support", "/admin", "/automations", "/business", "/onboarding", "/billing", "/settings", "/setup-request",
+  "/usage", "/guide", "/support", "/admin", "/automations", "/business", "/onboarding", "/billing", "/settings", "/setup-request",
   "/reset-password",
 ];
 

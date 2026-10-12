@@ -10,11 +10,11 @@ import { FormMessage } from "@/components/ui/form-message";
 import { PageHeader } from "@/components/layout/page-header";
 import { BillingSubmitButton } from "@/components/billing/billing-submit-button";
 import { cn } from "@/lib/utils";
-import { cancelSubscriptionAction, startProductOrder } from "./actions";
+import { startProductOrder } from "./actions";
 
 const KIND_COPY: Record<CreditKind, { title: string; description: string }> = {
   BLOG: { title: "블로그 포스팅", description: "네이버 블로그에 옮겨 쓸 수 있는 포스팅을 생성해요." },
-  SHORTS: { title: "숏폼 제작", description: "세로형 숏폼을 만들고 연결한 채널에 게시해요." },
+  SHORTS: { title: "숏폼 제작", description: "세로형 캐릭터 숏폼 영상을 만들어요." },
 };
 
 const ORDER_STATUS = {
@@ -59,14 +59,13 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { balances, orders, legacySubscription } = await getCreditBillingOverview(user.id);
+  const { balances, orders } = await getCreditBillingOverview(user.id);
   const isTestBilling = serverEnv.BILLING_PROVIDER === "mock" || serverEnv.TOSS_SECRET_KEY?.startsWith("test_");
   const providerLabel = serverEnv.BILLING_PROVIDER === "toss" ? "토스페이먼츠 테스트" : "모의 결제";
-  const hasLegacySubscription = legacySubscription?.status === "ACTIVE" || legacySubscription?.status === "TRIALING";
 
   return (
     <div className="mx-auto max-w-6xl space-y-10 pb-10">
-      <PageHeader title="이용권·결제" description="필요한 제작 횟수만 구매하고, 남은 이용권과 주문을 한곳에서 확인하세요." />
+      <PageHeader title="요금제" description="블로그와 숏폼 이용권을 필요한 만큼 구매하고, 남은 이용권과 구매내역을 확인하세요." />
 
       {isTestBilling ? (
         <FormMessage variant="info"><strong>테스트 결제 환경 · 실제 청구 없음</strong> · {providerLabel}로 주문부터 이용권 지급까지 확인할 수 있어요.</FormMessage>
@@ -131,13 +130,6 @@ export default async function BillingPage({ searchParams }: PageProps<"/billing"
           </div>
         )}
       </section>
-
-      {hasLegacySubscription ? (
-        <section aria-labelledby="legacy-heading" className="flex flex-col gap-4 rounded-2xl border px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div><h2 id="legacy-heading" className="font-bold">이전 월 구독</h2><p className="mt-1 text-sm text-muted-foreground">{legacySubscription.plan} 구독이 남아 있어요. 종료일 {formatDate(legacySubscription.current_period_end)}</p></div>
-          <form action={cancelSubscriptionAction}><BillingSubmitButton variant="outline" pendingLabel="해지하는 중…" confirmMessage="이전 월 구독을 해지할까요?">이전 구독 해지</BillingSubmitButton></form>
-        </section>
-      ) : null}
     </div>
   );
 }

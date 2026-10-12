@@ -22,7 +22,7 @@ export function LoginForm() {
   return (
     <div>
       <h1 className="text-[1.75rem] font-extrabold tracking-[-0.035em]">다시 오셨네요, 반가워요</h1>
-      <p className="mt-2 text-[15px] leading-7 text-muted-foreground">로그인하고 마케팅 계획을 이어서 확인하세요.</p>
+      <p className="mt-2 text-[15px] leading-7 text-muted-foreground">로그인하고 하던 일을 이어서 하세요.</p>
 
       {checkEmail ? (
         <FormMessage variant="info" className="mt-6">

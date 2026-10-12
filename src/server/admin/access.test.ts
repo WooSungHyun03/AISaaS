@@ -48,6 +48,14 @@ describe("database-backed admin access", () => {
     )).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
   });
 
+  it("reports a membership lookup failure as a server error instead of answering as a non-admin", async () => {
+    const failing = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: new Error("relation admin_users does not exist") }) }) }) }) } as never;
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await expect(requireAdmin({ action: "TEST_ACTION" }, { sessionClient: sessionClient(adminUser), adminClient: failing })).rejects.toThrow("admin_users");
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
+  });
+
   it("rejects a signed-in non-admin and records the denied action", async () => {
     const fakeAdmin = adminClient(false);
     await expect(requireAdmin(

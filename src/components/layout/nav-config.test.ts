@@ -15,6 +15,7 @@ describe("navigation information architecture", () => {
       "/usage",
       "/growth-report",
       "/billing",
+      "/guide",
       "/support",
       "/settings",
     ]);
@@ -26,7 +27,8 @@ describe("navigation information architecture", () => {
       "숏폼",
       "이용내역",
       "성장 리포트",
-      "이용권·결제",
+      "요금제",
+      "이용방법",
       "문의",
       "설정",
     ]);
@@ -45,7 +47,7 @@ describe("navigation information architecture", () => {
 
   it("keeps public navigation focused on diagnosis, usage guidance, and pricing", () => {
     expect(NAV_LINKS[0]).toEqual({ href: "/#features", label: "마케팅 진단" });
-    expect(NAV_LINKS.at(-1)).toEqual({ href: "/pricing", label: "이용권" });
+    expect(NAV_LINKS.at(-1)).toEqual({ href: "/pricing", label: "요금제" });
   });
 
   it("does not surface deprecated routes while their code remains available", () => {

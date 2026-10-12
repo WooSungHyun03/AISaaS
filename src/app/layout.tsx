@@ -3,7 +3,7 @@ import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-const DESCRIPTION = "홈페이지나 SNS 주소만 넣으면 마케팅 상태를 진단하고, 이번 달 콘텐츠 계획과 블로그 글·숏폼 영상까지 만들어드려요.";
+const DESCRIPTION = "홈페이지나 SNS 주소만 넣으면 마케팅 상태를 진단하고, 일정 관리와 블로그 글·숏폼 영상 제작까지 한곳에서 도와드려요.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

@@ -14,7 +14,6 @@ export async function getBillingOverview(userId: string) {
     supabase.from("automations").select("id", { count: "exact", head: true }).eq("user_id", userId),
   ]);
 
-  if (subscriptionResult.error) throw subscriptionResult.error;
   if (usageResult.error) throw usageResult.error;
   if (automationResult.error) throw automationResult.error;
 
@@ -40,7 +39,7 @@ export async function getCreditBillingOverview(userId: string) {
   await ensureTrialCredits(userId);
   const supabase = await createClient();
   const now = new Date().toISOString();
-  const [grantsResult, ordersResult, subscriptionResult] = await Promise.all([
+  const [grantsResult, ordersResult] = await Promise.all([
     supabase
       .from("credit_grants")
       .select("kind,remaining,expires_at")
@@ -54,16 +53,10 @@ export async function getCreditBillingOverview(userId: string) {
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(20),
-    supabase
-      .from("subscriptions")
-      .select("plan,status,current_period_end")
-      .eq("user_id", userId)
-      .maybeSingle(),
   ]);
 
   if (grantsResult.error) throw grantsResult.error;
   if (ordersResult.error) throw ordersResult.error;
-  if (subscriptionResult.error) throw subscriptionResult.error;
 
   const balances = grantsResult.data.reduce(
     (result, grant) => {
@@ -80,7 +73,6 @@ export async function getCreditBillingOverview(userId: string) {
   return {
     balances,
     orders: ordersResult.data,
-    legacySubscription: subscriptionResult.data,
   };
 }
 

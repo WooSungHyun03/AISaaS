@@ -37,19 +37,6 @@ const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
   timeZone: "Asia/Seoul",
 });
 
-const CALENDAR_PLATFORM = {
-  blog: { label: "블로그", className: "bg-brand-soft text-primary" },
-  instagram_reels: { label: "인스타 릴스", className: "bg-warning-soft text-warning" },
-  youtube_shorts: { label: "유튜브 쇼츠", className: "bg-success-soft text-success" },
-} as const;
-
-const CALENDAR_STATUS = {
-  PLANNED: "계획",
-  GENERATED: "생성됨",
-  PUBLISHED: "게시됨",
-  SKIPPED: "건너뜀",
-} as const;
-
 function SectionShell({
   id,
   title,
@@ -180,27 +167,31 @@ export async function CalendarSummarySection({ calendarPromise }: { calendarProm
   const calendar = await calendarPromise;
   if (!calendar || calendar.total === 0) {
     return (
-      <SectionShell id="calendar-title" title="이번 달 마케팅 캘린더" description="날짜별 콘텐츠 계획을 확인해요." href="/calendar">
-        <CompactEmpty title="이번 달 계획이 비어 있어요" description="사업 정보와 진단 결과를 바탕으로 2~4주 콘텐츠 계획을 한 번에 만들 수 있어요." href="/calendar" cta="캘린더 만들기" />
+      <SectionShell id="calendar-title" title="이번 달 일정" description="앞으로 남은 이번 달 일정을 확인해요." href="/calendar">
+        <CompactEmpty title="이번 달 남은 일정이 없어요" description="콘텐츠를 올릴 날이나 이벤트, 휴무일을 캘린더에 적어두세요." href="/calendar" cta="캘린더 열기" />
       </SectionShell>
     );
   }
   return (
-    <SectionShell id="calendar-title" title="이번 달 마케팅 캘린더" description={`${Number(calendar.month.slice(5))}월 계획 ${calendar.total}건`} href="/calendar">
+    <SectionShell id="calendar-title" title="이번 달 일정" description={`${Number(calendar.month.slice(5))}월 남은 일정 ${calendar.total}건`} href="/calendar">
       <ul className="divide-y divide-border">
-        {calendar.items.map((item) => {
-          const platform = CALENDAR_PLATFORM[item.platform];
-          return (
-            <li key={item.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
-              <time dateTime={item.plannedDate} className="flex size-11 shrink-0 flex-col items-center justify-center rounded-lg bg-muted text-center" aria-label={`${Number(item.plannedDate.slice(5, 7))}월 ${Number(item.plannedDate.slice(8, 10))}일`}>
-                <CalendarDays className="size-3.5 text-primary" aria-hidden="true" /><span className="tabular mt-0.5 text-[10px] font-bold">{Number(item.plannedDate.slice(5, 7))}/{Number(item.plannedDate.slice(8, 10))}</span>
-              </time>
-              <div className="min-w-0 flex-1"><p className="line-clamp-2 font-semibold leading-6">{item.topic}</p><div className="mt-1.5 flex flex-wrap gap-1.5"><Badge className={platform.className}>{platform.label}</Badge><Badge variant="outline">{CALENDAR_STATUS[item.status]}</Badge></div></div>
-            </li>
-          );
-        })}
+        {calendar.items.map((item) => (
+          <li key={item.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+            <time dateTime={item.date} className="flex size-11 shrink-0 flex-col items-center justify-center rounded-lg bg-muted text-center" aria-label={`${Number(item.date.slice(5, 7))}월 ${Number(item.date.slice(8, 10))}일`}>
+              <CalendarDays className="size-3.5 text-primary" aria-hidden="true" /><span className="tabular mt-0.5 text-[10px] font-bold">{Number(item.date.slice(5, 7))}/{Number(item.date.slice(8, 10))}</span>
+            </time>
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-2 font-semibold leading-6">{item.title}</p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <Badge variant="outline">{item.time ?? "종일"}</Badge>
+                <Badge variant="outline">{item.categoryLabel}</Badge>
+                {item.isRecurring ? <Badge variant="outline">반복</Badge> : null}
+              </div>
+            </div>
+          </li>
+        ))}
       </ul>
-      {calendar.total > calendar.items.length ? <p className="mt-4 text-center text-xs text-muted-foreground">외 {calendar.total - calendar.items.length}건의 계획이 더 있어요.</p> : null}
+      {calendar.total > calendar.items.length ? <p className="mt-4 text-center text-xs text-muted-foreground">외 {calendar.total - calendar.items.length}건의 일정이 더 있어요.</p> : null}
     </SectionShell>
   );
 }

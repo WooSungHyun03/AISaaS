@@ -29,7 +29,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // A missing credits table must not take the whole app shell down.
   const [credits, isAdmin] = await Promise.all([
     getCreditBalances(supabase, user.id).catch(() => null),
-    isAdminUser(user.id).catch(() => false),
+    isAdminUser(user.id).catch((error) => {
+      console.error("[admin] 관리자 여부를 확인하지 못했어요.", error);
+      return false;
+    }),
   ]);
 
   return (

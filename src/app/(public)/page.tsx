@@ -1,42 +1,47 @@
 import Link from "next/link";
-import { ArrowRight, Check, TrendingUp, Video } from "lucide-react";
+import { Activity, ArrowRight, BookOpen, CalendarDays, Video } from "lucide-react";
 import { Mascot } from "@/components/brand/mascot";
-import { BlogDraftPreview, CalendarPreview, DiagnosisPreview } from "@/components/landing/product-preview";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getProductConfig } from "@/server/billing/products";
 
-const FEATURED_PRODUCTS = [getProductConfig("BLOG_10"), getProductConfig("SHORTS_10")];
-
-const STEPS = [
-  { title: "주소를 넣어요", description: "홈페이지나 인스타그램 주소를 입력하세요. 주소가 없으면 가게 정보를 직접 적어도 돼요." },
-  { title: "무료로 진단받아요", description: "지금 마케팅이 몇 점인지, 어떤 채널이 비어 있는지 바로 알려드려요." },
-  { title: "한 달 계획을 세워요", description: "가게 정보에 맞춰 날짜별로 어떤 콘텐츠를 올릴지 캘린더로 짜드려요." },
-  { title: "콘텐츠를 만들어요", description: "정해진 날짜의 블로그 글과 숏폼 영상을 만들어 확인하실 수 있게 드려요." },
+const FEATURES = [
+  { title: "마케팅 진단", description: "홈페이지와 유튜브·블로그 채널을 살펴보고 마케팅 상태를 점수로 알려드려요. 먼저 고칠 것도 짚어드려요.", icon: Activity, href: "/diagnosis", cta: "진단받으러 가기", free: true },
+  { title: "마케팅 캘린더", description: "콘텐츠를 올릴 날, 이벤트, 휴무일을 한곳에 적어두세요. 반복 일정과 월·주·일 보기를 지원해요.", icon: CalendarDays, href: "/calendar", cta: "캘린더 열기", free: true },
+  { title: "AI 블로그 글 작성", description: "우리 가게·상품 이야기로 제목, 소제목, 검색 키워드까지 갖춘 블로그 글을 써드려요.", icon: BookOpen, href: "/blog", cta: "글 만들러 가기", free: false },
+  { title: "AI 숏폼 제작", description: "참고 이미지로 대본과 장면을 짜고 세로형 숏폼 영상을 만들어드려요. 올리기 전에 미리 볼 수 있어요.", icon: Video, href: "/shorts", cta: "영상 만들러 가기", free: false },
 ];
 
-const COMING_FEATURES = [
-  { title: "숏폼 영상 제작", description: "후킹 문장, 대본, 자막까지 갖춘 9:16 영상을 만들어요.", icon: Video },
-  { title: "성장 리포트", description: "한 달 동안 무엇을 만들고 얼마나 실행했는지 정리해요.", icon: TrendingUp },
+const STEPS = [
+  { title: "가입하고 가게를 알려주세요", description: "업체명과 업종, 홍보하려는 대상을 적어요. 홈페이지가 없어도 괜찮아요." },
+  { title: "무료 진단으로 현재 상태를 확인해요", description: "마케팅 점수와 먼저 해볼 일을 확인하고, 캘린더에 올릴 날을 정해요." },
+  { title: "블로그 글과 숏폼을 만들어요", description: "이용권으로 필요한 만큼 콘텐츠를 만들고, 확인한 뒤 활용하세요." },
 ];
 
 const FAQS = [
   {
-    q: "만든 콘텐츠가 저절로 SNS나 블로그에 올라가나요?",
-    a: "아니요. Easy Marketing은 콘텐츠를 만들어 드리는 데까지만 해요. 사장님이 확인하고, 필요하면 고친 뒤 원하는 곳에 직접 올려주세요. 마음대로 게시되는 일은 없어요.",
+    q: "Easy Marketing으로 어떤 일을 할 수 있나요?",
+    a: "마케팅 진단으로 현재 상태를 점수로 확인하고, 캘린더로 일정을 관리하고, AI로 블로그 글과 숏폼 영상을 만들 수 있어요. 진단과 캘린더는 무료예요.",
   },
   {
-    q: "AI가 우리 가게 정보를 마음대로 정하진 않나요?",
-    a: "주소에서 읽어온 내용은 ‘제안’일 뿐이에요. 사장님이 확인하고 고쳐서 저장해야 사업 정보로 반영돼요. 확인되지 않은 내용은 자동으로 확정하지 않아요.",
+    q: "마케팅 진단은 어떻게 이용하나요?",
+    a: "가입 후 가게 정보를 등록하고 ‘마케팅 진단’에서 홈페이지 주소를 넣으면 돼요. 유튜브·네이버 블로그·티스토리 채널도 추가해서 진단할 수 있어요. 홈페이지가 없어도 채널만으로 시작할 수 있어요.",
   },
   {
-    q: "홈페이지나 SNS가 없어도 쓸 수 있나요?",
-    a: "네. 업종, 지역, 주요 상품 같은 가게 정보를 직접 적으면 똑같이 진단과 캘린더를 만들 수 있어요.",
+    q: "마케팅 캘린더는 어떻게 활용하나요?",
+    a: "콘텐츠를 올릴 날, 이벤트, 휴무일 같은 일정을 자유롭게 적어두세요. 매주 반복되는 일정도 한 번에 등록하고, 월·주·일 보기로 확인할 수 있어요.",
   },
   {
-    q: "무료로 어디까지 쓸 수 있어요?",
-    a: "마케팅 진단과 마케팅 캘린더는 무료예요. 블로그 글과 숏폼 영상은 필요한 만큼만 이용권을 구매해서 쓰는 방식이에요.",
+    q: "AI 블로그는 어떤 글을 작성하나요?",
+    a: "등록한 가게·상품·플랫폼 정보에 맞춰 제목, 소제목, 검색 키워드가 있는 글을 써드려요. 네이버 블로그와 티스토리 중 올릴 곳을 고를 수 있어요. 만든 글은 확인하고 고친 뒤 직접 올려주세요.",
+  },
+  {
+    q: "숏폼은 어떤 방식으로 제작되나요?",
+    a: "캐릭터·상품·매장 사진 같은 참고 이미지를 올리면 AI가 대본과 장면을 짜서 9:16 세로 영상을 만들어요. 만든 영상은 미리 보고 확인할 수 있고, Instagram이나 YouTube 계정을 연결하면 게시도 할 수 있어요.",
+  },
+  {
+    q: "이용권은 어떻게 사용하나요?",
+    a: "블로그와 숏폼을 만들 때 해당 이용권이 1회씩 사용돼요. 구독 없이 필요한 만큼만 구매하고, 유효기간 안에 쓰면 돼요. 만들기에 실패하면 이용권은 돌려드려요. 자세한 내용은 요금제 페이지에서 확인하세요.",
   },
 ];
 
@@ -48,14 +53,14 @@ export default function LandingPage() {
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 pb-14 pt-12 sm:px-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-6 lg:pb-20 lg:pt-16">
           <div className="max-w-xl">
             <h1 id="hero-title" className="text-[2.25rem] font-extrabold leading-[1.22] tracking-[-0.045em] sm:text-5xl lg:text-[3.4rem]">
-              내 가게 마케팅,
+              마케팅을 AI로
               <br />
-              어디서부터 할지
+              진단하고, 계획하고,
               <br />
-              막막하셨죠?
+              만들어요
             </h1>
             <p className="mt-6 max-w-lg text-[17px] leading-8 text-muted-foreground">
-              홈페이지나 SNS 주소만 넣어보세요. 지금 마케팅이 얼마나 되고 있는지 점수로 알려드리고, 이번 달에 뭘 올리면 좋을지 계획까지 짜드려요.
+              사업자를 위한 AI 마케팅 도우미예요. 지금 마케팅 상태를 점수로 확인하고, 일정을 관리하고, 블로그 글과 숏폼 영상까지 한곳에서 만들어보세요.
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Button asChild size="lg">
@@ -64,10 +69,10 @@ export default function LandingPage() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline">
-                <Link href="/pricing">이용권 보기</Link>
+                <Link href="#features">기능 둘러보기</Link>
               </Button>
             </div>
-            <p className="mt-5 text-sm text-muted-foreground">카드 등록 없이 시작해요 · 진단과 캘린더는 계속 무료예요</p>
+            <p className="mt-5 text-sm text-muted-foreground">마케팅 진단과 캘린더는 무료로 쓸 수 있어요</p>
           </div>
 
           <div className="relative mx-auto w-full max-w-md lg:max-w-none">
@@ -90,21 +95,40 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* 이용 방법 */}
-      <section id="how" className="scroll-mt-20 border-b border-border bg-card" aria-labelledby="how-title">
+      {/* 핵심 기능 */}
+      <section id="features" className="scroll-mt-20 border-b border-border bg-card" aria-labelledby="features-title">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
-          <h2 id="how-title" className="max-w-xl text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">
-            주소 하나로 시작해서
+          <h2 id="features-title" className="max-w-xl text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">
+            마케팅에 필요한 네 가지,
             <br />
-            콘텐츠까지 이어져요
+            한곳에서 해결해요
           </h2>
-          <ol className="mt-12 grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-4">
+          <ul className="mt-10 grid gap-5 sm:grid-cols-2">
+            {FEATURES.map((feature) => (
+              <li key={feature.title}>
+                <Link href={feature.href} className="group flex h-full flex-col rounded-2xl border border-border bg-background p-6 transition-colors hover:border-primary/50 hover:bg-brand-soft/40 sm:p-7">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="flex size-12 items-center justify-center rounded-xl bg-brand-soft text-primary"><feature.icon className="size-6" aria-hidden="true" /></span>
+                    <Badge variant={feature.free ? "success" : "secondary"}>{feature.free ? "무료" : "이용권으로 제작"}</Badge>
+                  </div>
+                  <h3 className="mt-5 text-xl font-extrabold tracking-[-0.03em]">{feature.title}</h3>
+                  <p className="mt-2 flex-1 text-[15px] leading-7 text-muted-foreground">{feature.description}</p>
+                  <span className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-primary">{feature.cta} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" aria-hidden="true" /></span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* 이용 방법 */}
+      <section id="how" className="scroll-mt-20" aria-labelledby="how-title">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
+          <h2 id="how-title" className="max-w-xl text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">이렇게 시작해요</h2>
+          <ol className="mt-10 grid gap-x-8 gap-y-10 sm:grid-cols-3">
             {STEPS.map((step, index) => (
-              <li key={step.title} className="relative">
-                {index < STEPS.length - 1 ? (
-                  <span aria-hidden="true" className="absolute left-12 right-[-2rem] top-[18px] hidden h-px bg-border lg:block" />
-                ) : null}
-                <span className="relative z-10 flex size-9 items-center justify-center rounded-full bg-ink text-sm font-bold text-white">{index + 1}</span>
+              <li key={step.title}>
+                <span className="flex size-9 items-center justify-center rounded-full bg-ink text-sm font-bold text-white">{index + 1}</span>
                 <h3 className="mt-5 text-lg font-bold">{step.title}</h3>
                 <p className="mt-2 text-[15px] leading-7 text-muted-foreground">{step.description}</p>
               </li>
@@ -113,118 +137,19 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* 기능 */}
-      <section id="features" className="scroll-mt-20" aria-labelledby="features-title">
-        <div className="mx-auto max-w-6xl space-y-20 px-4 py-16 sm:px-6 lg:space-y-28 lg:py-24">
-          <h2 id="features-title" className="sr-only">Easy Marketing이 해주는 일</h2>
-
-          <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
-            <div>
-              <Badge variant="success">무료</Badge>
-              <h3 className="mt-4 text-3xl font-extrabold tracking-[-0.04em]">지금 내 마케팅 상태를 점수로 확인해요</h3>
-              <p className="mt-4 text-base leading-8 text-muted-foreground">
-                홈페이지와 SNS가 얼마나 채워져 있는지, 콘텐츠를 꾸준히 올리고 있는지 살펴보고 가장 먼저 고치면 좋은 것부터 알려드려요. 읽어온 내용으로 가게 정보 입력도 도와드리고요.
-              </p>
-              <ul className="mt-6 space-y-2.5 text-[15px]">
-                {["마케팅 점수와 부족한 채널", "콘텐츠 운영 상태와 SNS 활성도", "바로 해볼 수 있는 개선 방법"].map((item) => (
-                  <li key={item} className="flex items-center gap-2.5">
-                    <Check className="size-4 shrink-0 text-success" strokeWidth={3} aria-hidden="true" /> {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <DiagnosisPreview />
-          </div>
-
-          <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
-            <CalendarPreview className="order-2 lg:order-1" />
-            <div className="order-1 lg:order-2">
-              <Badge variant="success">무료</Badge>
-              <h3 className="mt-4 text-3xl font-extrabold tracking-[-0.04em]">이번 달 뭘 올릴지 날짜별로 정해드려요</h3>
-              <p className="mt-4 text-base leading-8 text-muted-foreground">
-                진단 결과와 가게 정보를 바탕으로 날짜, 채널, 주제, 목표까지 한 달 계획을 짭니다. 이 계획이 그대로 블로그 글과 숏폼 영상의 주제가 돼요.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-16">
-            <div>
-              <Badge variant="brand">유료 · 이용 가능</Badge>
-              <h3 className="mt-4 text-3xl font-extrabold tracking-[-0.04em]">우리 가게 이야기로 블로그 글을 써드려요</h3>
-              <p className="mt-4 text-base leading-8 text-muted-foreground">
-                업종, 지역, 단골 손님을 반영해서 광고 티가 덜 나는 자연스러운 글로 써요. 제목, 소제목, 검색 키워드, 사진 넣을 위치까지 챙기고, 마음에 안 들면 다시 만들 수 있어요.
-              </p>
-              <p className="mt-4 rounded-lg bg-muted px-4 py-3 text-sm leading-6 text-muted-foreground">
-                만든 글은 확인하고 직접 올려주세요. 자동으로 게시되지 않아요.
-              </p>
-            </div>
-            <BlogDraftPreview />
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card p-6 sm:p-8">
-            <h3 className="text-xl font-extrabold tracking-[-0.03em]">곧 만나요</h3>
-            <ul className="mt-5 grid gap-5 sm:grid-cols-2">
-              {COMING_FEATURES.map((feature) => (
-                <li key={feature.title} className="flex gap-4">
-                  <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                    <feature.icon className="size-5" aria-hidden="true" />
-                  </span>
-                  <div>
-                    <p className="flex flex-wrap items-center gap-2 font-bold">
-                      {feature.title} <Badge variant="secondary" className="bg-muted text-muted-foreground">준비 중</Badge>
-                    </p>
-                    <p className="mt-1 text-[15px] leading-7 text-muted-foreground">{feature.description}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      {/* 요금제 */}
-      <section className="border-y border-border bg-card" aria-labelledby="pricing-title">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
-          <div className="max-w-xl">
-            <h2 id="pricing-title" className="text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">무료로 진단하고, 필요한 제작 횟수만 구매하세요</h2>
-            <p className="mt-3 text-base leading-7 text-muted-foreground">월 구독 없이 블로그와 숏폼을 각각 필요한 만큼 추가할 수 있어요.</p>
-          </div>
-          <div className="mt-10 grid gap-5 lg:grid-cols-3">
-            <article className="flex flex-col rounded-2xl border border-border bg-card p-7">
-              <h3 className="text-lg font-bold">마케팅 진단·캘린더</h3>
-              <p className="tabular mt-4 text-4xl font-extrabold tracking-[-0.04em]">무료</p>
-              <ul className="mt-6 flex-1 space-y-3 border-t border-border pt-6 text-[15px]">
-                {["홈페이지·SNS 마케팅 진단", "날짜별 콘텐츠 계획", "가입 후 계속 무료"].map((feature) => <li key={feature} className="flex gap-2.5"><Check className="mt-1 size-4 shrink-0 text-primary" strokeWidth={3} aria-hidden="true" />{feature}</li>)}
-              </ul>
-              <Button asChild variant="outline" size="lg" className="mt-8"><Link href="/signup">무료로 시작하기</Link></Button>
-            </article>
-            {FEATURED_PRODUCTS.map((product, index) => (
-              <article key={product.id} className={`relative flex flex-col rounded-2xl border p-7 ${index === 0 ? "border-primary bg-brand-soft/50 shadow-[0_0_0_1px_var(--primary)]" : "border-border bg-card"}`}>
-                {index === 0 ? <Badge className="absolute right-6 top-6">추천</Badge> : null}
-                <h3 className="text-lg font-bold">{product.name}</h3>
-                <p className="tabular mt-4 text-4xl font-extrabold tracking-[-0.04em]">{product.priceKrw.toLocaleString()}원</p>
-                <ul className="mt-6 flex-1 space-y-3 border-t border-border pt-6 text-[15px]">
-                  {[`${product.credits}회 제작 이용권`, `결제일부터 ${product.validityDays}일`, "추가 구매 시 잔여 횟수 합산"].map((feature) => <li key={feature} className="flex gap-2.5"><Check className="mt-1 size-4 shrink-0 text-primary" strokeWidth={3} aria-hidden="true" />{feature}</li>)}
-                </ul>
-                <Button asChild variant={index === 0 ? "default" : "outline"} size="lg" className="mt-8"><Link href={`/signup?redirectTo=${encodeURIComponent(`/billing?product=${product.id}`)}`}>{product.name} 구매</Link></Button>
-              </article>
-            ))}
-          </div>
-          <div className="mt-6 text-right"><Link href="/pricing" className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline">전체 상품 보기 <ArrowRight className="size-4" aria-hidden="true" /></Link></div>
-        </div>
-      </section>
-
       {/* FAQ */}
-      <section className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:py-20" aria-labelledby="faq-title">
-        <h2 id="faq-title" className="text-3xl font-extrabold tracking-[-0.04em]">자주 묻는 질문</h2>
-        <Accordion type="single" collapsible className="mt-8 divide-y divide-border border-y border-border">
-          {FAQS.map((faq) => (
-            <AccordionItem key={faq.q} value={faq.q} className="border-0">
-              <AccordionTrigger className="py-5 text-left text-base font-bold hover:no-underline">{faq.q}</AccordionTrigger>
-              <AccordionContent className="pb-5 text-[15px] leading-7 text-muted-foreground">{faq.a}</AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+      <section className="border-y border-border bg-card" aria-labelledby="faq-title">
+        <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:py-20">
+          <h2 id="faq-title" className="text-3xl font-extrabold tracking-[-0.04em]">자주 묻는 질문</h2>
+          <Accordion type="single" collapsible className="mt-8 divide-y divide-border border-y border-border">
+            {FAQS.map((faq) => (
+              <AccordionItem key={faq.q} value={faq.q} className="border-0">
+                <AccordionTrigger className="py-5 text-left text-base font-bold hover:no-underline">{faq.q}</AccordionTrigger>
+                <AccordionContent className="pb-5 text-[15px] leading-7 text-muted-foreground">{faq.a}</AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        </div>
       </section>
 
       {/* 마무리 CTA */}
