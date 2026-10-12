@@ -39,7 +39,8 @@ export function detectAssetType(bytes: Uint8Array, kind: ShortsAssetKind): Asset
   const png = startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (kind === "logo") {
     if (png) return { kind, mime: "image/png", extension: "png" };
-    const text = new TextDecoder().decode(bytes.slice(0, 4_096));
+    // The whole file, not just its start: a tag that runs code or fetches a file can sit anywhere in it.
+    const text = new TextDecoder().decode(bytes);
     return text.includes("<svg") && isSafeSvg(text) ? { kind, mime: "image/svg+xml", extension: "svg" } : null;
   }
   if (kind === "image") {
@@ -112,16 +113,30 @@ export async function signAsset(admin: AdminClient, bucket: string, path: string
   return data.signedUrl;
 }
 
-/** The first bytes of a stored file (to recognise it) and its size, without downloading all of it. */
+/**
+ * The first bytes of a stored file (to recognise it) and its size, without downloading all of it. A file that starts
+ * like text (an SVG logo) and is small enough to be one is read whole, so `detectAssetType` checks all of it.
+ */
 export async function readAssetHead(admin: AdminClient, path: string, length = 4_096): Promise<{ head: Uint8Array; size: number } | null> {
   const url = await signAsset(admin, REFERENCE_BUCKET, path, 120).catch(() => null);
   if (!url) return null;
-  const response = await fetch(url, { headers: { Range: `bytes=0-${length - 1}` }, signal: AbortSignal.timeout(20_000), cache: "no-store" }).catch(() => null);
-  if (!response || (response.status !== 200 && response.status !== 206)) return null;
-  const range = response.headers.get("content-range")?.match(/\/(\d+)$/);
-  const size = range ? Number(range[1]) : Number(response.headers.get("content-length") ?? 0);
-  const body = new Uint8Array(await response.arrayBuffer());
-  return { head: body.slice(0, length), size };
+  const read = async (bytes: number) => {
+    const response = await fetch(url, { headers: { Range: `bytes=0-${bytes - 1}` }, signal: AbortSignal.timeout(20_000), cache: "no-store" }).catch(() => null);
+    if (!response || (response.status !== 200 && response.status !== 206)) return null;
+    const range = response.headers.get("content-range")?.match(/\/(\d+)$/);
+    const size = range ? Number(range[1]) : Number(response.headers.get("content-length") ?? 0);
+    return { head: new Uint8Array(await response.arrayBuffer()).slice(0, bytes), size };
+  };
+  const first = await read(length);
+  if (!first || first.size <= length || first.size > ASSET_LIMITS.logo.maxBytes || !looksLikeText(first.head)) return first;
+  const whole = await read(first.size);
+  return whole && whole.head.length >= first.size ? whole : null;
+}
+
+/** An SVG (or any markup) starts with `<`, possibly after a byte-order mark or white space. */
+function looksLikeText(bytes: Uint8Array): boolean {
+  const start = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+  return /^\s*</.test(new TextDecoder().decode(bytes.slice(start, start + 64)));
 }
 
 export async function removeAssets(admin: AdminClient, paths: string[], bucket: string = REFERENCE_BUCKET): Promise<void> {

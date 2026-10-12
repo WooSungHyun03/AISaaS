@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { assetStoragePath, checkAssetBasics, checkAssetLimits, detectAssetType, isOwnedAssetPath, isSafeSvg, videoStoragePath } from "./assets";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { assetStoragePath, checkAssetBasics, checkAssetLimits, detectAssetType, isOwnedAssetPath, isSafeSvg, readAssetHead, videoStoragePath } from "./assets";
 import type { ShortsAsset } from "@/types/shorts-reference";
 
 const bytes = (...values: number[]) => new Uint8Array(values);
@@ -53,6 +53,44 @@ describe("detectAssetType", () => {
       expect(detectAssetType(text(evil), "logo")).toBeNull();
     }
     expect(detectAssetType(text('<svg xmlns="http://www.w3.org/2000/svg"></svg>'), "image")).toBeNull(); // SVG is only for logos
+  });
+
+  it("checks the whole SVG, not only its first 4 KB", () => {
+    const padded = `<svg xmlns="http://www.w3.org/2000/svg"><desc>${"a".repeat(8_000)}</desc><image href="file:///etc/passwd"/></svg>`;
+    expect(detectAssetType(text(padded), "logo")).toBeNull();
+  });
+});
+
+describe("readAssetHead", () => {
+  const storage = (file: Uint8Array) => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const [, end] = /bytes=0-(\d+)/.exec(String((init?.headers as Record<string, string>).Range))!;
+      const body = file.slice(0, Number(end) + 1);
+      return new Response(body, { status: 206, headers: { "content-range": `bytes 0-${body.length - 1}/${file.length}` } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const admin = { storage: { from: () => ({ createSignedUrl: async () => ({ data: { signedUrl: "https://storage.test/x" }, error: null }) }) } };
+    return { fetchMock, admin: admin as never };
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("reads only the start of a binary file", async () => {
+    const file = new Uint8Array(100_000);
+    file.set(PNG);
+    const { fetchMock, admin } = storage(file);
+    const result = await readAssetHead(admin, "u/a/assets/x.png");
+    expect(result).toMatchObject({ size: 100_000 });
+    expect(result!.head.length).toBe(4_096);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads a text file small enough to be a logo whole, so a tag past 4 KB is seen", async () => {
+    const file = text(`<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"><desc>${"a".repeat(8_000)}</desc><script>alert(1)</script></svg>`);
+    const { fetchMock, admin } = storage(file);
+    const result = await readAssetHead(admin, "u/a/assets/x.svg");
+    expect(result!.head.length).toBe(file.length);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(detectAssetType(result!.head, "logo")).toBeNull();
   });
 });
 

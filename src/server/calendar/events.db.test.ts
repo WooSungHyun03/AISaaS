@@ -173,6 +173,16 @@ suite("calendar events against the real database", () => {
     const attach = await b.db.from("calendar_events").insert({ user_id: b.id, title: "x", starts_at: "2026-10-05T01:00:00Z", ends_at: "2026-10-05T02:00:00Z", series_id: secret.id!, original_date: "2026-10-05" });
     expect(attach.error).not.toBeNull();
 
+    // ...and so is re-pointing one of b's own replacement rows at a's series afterwards (0074), which would take
+    // a's (series, day) slot and block a from changing that day
+    const own = await createEvent(b.db, b.id, { ...base, title: "b 반복", recurrence: { freq: "DAILY", interval: 1, count: 3 } });
+    if (!own.ok) throw new Error(own.error);
+    expect((await updateEvent(b.db, b.id, { id: own.id!, scope: "THIS", occurrenceDate: "2026-10-06" }, { ...base, title: "b 하루", start: "2026-10-06T12:00", end: "2026-10-06T13:00" })).ok).toBe(true);
+    const { data: replacement } = await b.db.from("calendar_events").select("id").eq("series_id", own.id!).single();
+    const hijack = await b.db.from("calendar_events").update({ series_id: secret.id! }).eq("id", replacement!.id).select("id");
+    expect(hijack.error).not.toBeNull();
+    expect((await updateEvent(a.db, a.id, { id: secret.id!, scope: "THIS", occurrenceDate: "2026-10-06" }, { ...base, title: "비밀 일정(변경)", start: "2026-10-06T12:00", end: "2026-10-06T13:00" })).ok).toBe(true);
+
     // still intact for the owner
     expect((await listEvents(a.db, a.id, ...window)).some((view) => view.title === "비밀 일정")).toBe(true);
   });

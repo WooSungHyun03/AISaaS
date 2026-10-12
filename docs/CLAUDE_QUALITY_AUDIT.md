@@ -4,7 +4,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 `main`, fixes what it finds, verifies, and pushes. The next run starts its
 "new changes" review from the **last reviewed SHA** below.
 
-**Last reviewed SHA:** `99914a8` (2026-10-12 run — update the line on every run)
+**Last reviewed SHA:** `507f6e5` (2026-10-13 run — update the line on every run)
 
 ## Open findings (carry over until fixed)
 
@@ -21,8 +21,30 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 | F-009 | P2 | admin tests / 팀원 2 | `admin-security.db.test.ts` › "dashboard counts" compares live table counts and fails when the DB test files run in parallel (other files insert ledger rows in the same 60s window). Passes alone and with `--no-file-parallelism`. Run DB tests serially or assert deltas on fixture-only data. | open |
 | F-010 | P1 | billing refunds / 팀원 2 | Refund approval did not wait for a reservation opened before the request. If that run failed after approval, `release_credit` returned the credit to the grant and `admin_finalize_refund_request` raised **after Toss had cancelled the payment** — every retry hit the same mismatch (order stays PAID, payment cancelled). | **fixed 2026-10-12** (migration `0070`: approval refused while a reservation on the order is open) — **needs prod `db push`**. If 팀원 2 redefines `admin_review_refund_request` again, keep the open-reservation check. |
 | F-011 | P2 | billing refunds / 팀원 2 | `refund_requests` is unique per order and a REJECTED request blocks any new request for that order. When approval fails because the balance changed (user kept using credits after requesting), the only path is reject → the user can never request a refund for the remaining credits. Consider allowing a new request after REJECTED (partial unique index on non-rejected rows). | open (policy decision) |
+| F-012 | P2 | calendar / 0061 | `calendar_events` UPDATE policy checked only `user_id`; the INSERT policy's "series must be the caller's own" check was missing, so a customer could re-point their own replacement row at another user's series id through PostgREST and take that user's `(series_id, original_date)` unique slot (the owner could then no longer edit that day). Needs the victim's series UUID. | **fixed 2026-10-13** (migration `0074`) — **needs prod `db push`** |
+| F-013 | P2 | shorts assets | SVG logo safety check (`isSafeSvg`) only saw the first 4 KB (`readAssetHead`), so `<script>` / `<image href>` / `<use>` placed later passed and reached `rsvg-convert` in the FFmpeg worker. | **fixed 2026-10-13** (text files ≤ logo limit are read whole and checked whole) |
+| F-014 | P2 | AI disclosure | 인공지능기본법: the terms page discloses AI generation, but blog/Shorts result screens have no "AI가 만든 결과물" label next to the copy/download buttons. | open — those files (`blog-workspace.tsx`, `shorts-assets.tsx`) had uncommitted local edits on 2026-10-13; add when they land |
+| F-015 | — | repo hygiene | On 2026-10-13 01:00 the main checkout had **59 uncommitted modified files + new untracked files** (last edited 2026-10-12 21:17–21:38: guide screens, Toss key handling, Instagram refresh, mock guard, shorts reference photos …). The audit did not touch, stash or commit them; it worked in a separate worktree. Owner should commit or discard them. | open (owner) |
 
 ## Run log
+
+### 2026-10-13 (run 4)
+
+- **Start SHA:** `507f6e5` (6 commits since `3d4532e`: calendar DB-error logging, 0071 row caps + trigger-function grants, landing/FAQ/guide simplification, blog formatting guides + Shorts publishing metadata (0072), Wan 3.0 ad Shorts + Opus/Fable/Sonnet blog pipelines + spend ledger (0073) + FFmpeg worker).
+- **Working tree:** 59 uncommitted files from the evening of 2026-10-12 (see F-015). Left untouched; all audit work was done in a separate `git worktree` off `main`, so the checks below ran on committed code + this run's changes only.
+- **Reviewed:** migrations 0071–0073 (row-cap trigger, `enforce_row_cap` grants, `content_history.publishing`, budget ledger functions: advisory lock per period/kind, idempotency, item floor reserve, settle/release, grants service-role only), `src/server/budget/*` and runner/reaper integration (claim before credit, settle open reservations on success, release item on failure/reap), `updateShortsPublishing` (RLS read then scoped service-role write — OK), FFmpeg worker (`WORKER_TOKEN` ≥16 chars + timing-safe compare, host allowlist + DNS pinning, no redirects, size/time limits — OK), Shorts asset upload/register path, API routes (cron secret, billing webhook ignored/refused, OAuth callbacks), every UPDATE RLS policy in the local DB vs. its INSERT policy, account deletion vs. the new `shorts-videos` bucket (covered), internal links vs. routes (no dead links), guide/terms copy (no auto-posting or fake-metric claims).
+- **Findings & fixes**
+  - P2 (fixed, F-012) Migration `0074_calendar_events_update_checks_series.sql`: the update policy now applies the insert policy's series-ownership check. Reproduced first on 0073 (the hijack update succeeded), passes after 0074.
+  - P2 (fixed, F-013) `readAssetHead` reads a text-looking file whole when it is no larger than the logo limit; `detectAssetType` checks the whole SVG. Larger files keep the 4 KB head read and are refused by the size limit.
+  - Checked, no change: `calendar_items` UPDATE can set `automation_id`/`content_history_id` to foreign ids, but the app re-checks ownership (`resolveAutomationId` filters by `user_id`) and only reads them through RLS — no exposure. Middleware `profiles.account_status` lookup per request is still there (one extra round-trip; not measured, left to 팀원 2).
+  - Noted: F-014 (AI label on result screens), F-015 (uncommitted work in the main checkout).
+- **Tests added:** `events.db.test.ts` (re-pointing a replacement at another user's series is refused; the owner can still edit that day), `assets.test.ts` (SVG past 4 KB refused; `readAssetHead` reads binaries partially and small text files whole).
+- **Verification:** `npm run lint` ✅, `npm run typecheck` ✅, `npm test` ✅ (140 files / 1247 tests, DB files skipped by default), `npm run build` ✅ (with the local Supabase public env). Local Supabase at 0073 + 0074: `RUN_DB_TESTS=1 vitest --no-file-parallelism` on all 10 `*.db.test.ts` ✅ 45/45. Browser smoke test **not run**: dev servers cannot be started from an unattended scheduled run (preview_start refused).
+- **User-only actions**
+  1. Production DB: `npx supabase db push --linked --dry-run` then `npx supabase db push --linked` — applies 0071–0073 (if not yet) **and 0074** (one policy replaced).
+  2. Commit or discard the 59 uncommitted files in the main checkout (F-015).
+- **Next run priorities:** F-014 once the result-screen files are committed; review the uncommitted work after it lands (Toss key handling, Instagram token refresh, mock guard); browser smoke test when a dev server can be started; F-011 decision.
+- **Commit:** see the `fix(calendar,shorts)` commit of 2026-10-13
 
 ### 2026-10-12 (run 3)
 
