@@ -44,7 +44,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
   1. Production DB: `npx supabase db push --linked --dry-run` then `npx supabase db push --linked` — applies 0071–0073 (if not yet) **and 0074** (one policy replaced).
   2. Commit or discard the 59 uncommitted files in the main checkout (F-015).
 - **Next run priorities:** F-014 once the result-screen files are committed; review the uncommitted work after it lands (Toss key handling, Instagram token refresh, mock guard); browser smoke test when a dev server can be started; F-011 decision.
-- **Commit:** see the `fix(calendar,shorts)` commit of 2026-10-13
+- **Commit:** `a36ed5d` (fix(calendar,shorts): check series ownership on calendar_events update; validate whole SVG logos)
 
 ### 2026-10-12 (run 3)
 
