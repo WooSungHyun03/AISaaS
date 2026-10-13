@@ -13,16 +13,6 @@ import { getIntegrationConfigStatus } from "@/server/connectors/config-status";
 
 export const metadata = { title: "설정" };
 
-const INSTAGRAM_MESSAGE: Record<string, { variant: "success" | "info" | "error"; text: string }> = {
-  connected: { variant: "success", text: "인스타그램 계정을 연결했어요." },
-  denied: { variant: "info", text: "인스타그램 연결을 취소했어요. 권한을 확인하고 다시 시도할 수 있어요." },
-  professional_required: { variant: "info", text: "비즈니스 또는 크리에이터 계정만 연결할 수 있어요." },
-  state_error: { variant: "error", text: "연결 요청이 만료됐거나 확인할 수 없어요. 다시 시도해주세요." },
-  invalid_business: { variant: "error", text: "연결할 사업체를 확인할 수 없어요." },
-  not_configured: { variant: "info", text: "인스타그램 연동 설정이 아직 끝나지 않았어요. 지금은 연결할 수 없어요. 운영팀이 Meta 앱 설정을 마치면 이용할 수 있어요." },
-  error: { variant: "error", text: "인스타그램 계정을 연결하지 못했어요. 잠시 후 다시 시도해주세요." },
-};
-
 const YOUTUBE_MESSAGE: Record<string, { variant: "success" | "info" | "error"; text: string }> = {
   connected: { variant: "success", text: "YouTube 채널과 Analytics 권한을 연결했어요. 업로드는 비공개로만 해요." },
   connected_limited: { variant: "info", text: "YouTube 채널은 연결했지만 Analytics 권한을 허용하지 않아 조회수·시청 시간·구독자 증감은 볼 수 없어요. ‘다시 연결’에서 모든 권한을 허용해주세요." },
@@ -33,7 +23,7 @@ const YOUTUBE_MESSAGE: Record<string, { variant: "success" | "info" | "error"; t
   error: { variant: "error", text: "YouTube 채널을 연결하지 못했어요. 채널과 권한을 확인해주세요." },
 };
 
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ business?: string; instagram?: string; youtube?: string }> }) {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ business?: string; youtube?: string }> }) {
   const query = await searchParams;
   const supabase = await createClient();
   const {
@@ -55,18 +45,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   if (connectionError) throw new Error("외부 서비스 연결 정보를 불러오지 못했습니다.");
   const configStatus = getIntegrationConfigStatus();
   const showSetupDetails = await isAdminUser(user.id).catch(() => false);
-  const instagramMessage = query.instagram ? INSTAGRAM_MESSAGE[query.instagram] : undefined;
   const youtubeMessage = query.youtube ? YOUTUBE_MESSAGE[query.youtube] : undefined;
 
   return (
     <div className="mx-auto max-w-5xl space-y-10">
       <PageHeader title="설정" description="프로필, 비밀번호, 외부 서비스 연결과 계정을 관리해요." actions={<Button asChild variant="outline"><Link href="/business">사업 정보 관리</Link></Button>} />
 
-      {instagramMessage && <FormMessage variant={instagramMessage.variant}>{instagramMessage.text}</FormMessage>}
       {youtubeMessage && <FormMessage variant={youtubeMessage.variant}>{youtubeMessage.text}</FormMessage>}
 
       <section aria-labelledby="integration-heading" className="space-y-4">
-        <div><h2 id="integration-heading" className="text-lg font-extrabold tracking-[-0.03em]">외부 서비스 연결</h2><p className="mt-1 text-sm text-muted-foreground">숏폼 게시와 성장 리포트에 쓰는 YouTube·인스타그램만 연결해요. 사업체마다 따로 연결하고, 비밀번호와 토큰은 저장한 뒤 다시 보여주지 않아요.</p></div>
+        <div><h2 id="integration-heading" className="text-lg font-extrabold tracking-[-0.03em]">외부 서비스 연결</h2><p className="mt-1 text-sm text-muted-foreground">숏폼 게시와 성장 리포트에 쓰는 YouTube만 연결해요. 사업체마다 따로 연결하고, 비밀번호와 토큰은 저장한 뒤 다시 보여주지 않아요.</p></div>
         {(businesses ?? []).length === 0 ? <EmptyState mascot="welcome" title="연결할 사업체가 없어요" description="외부 서비스는 사업체마다 따로 연결해요. 먼저 사업 정보를 등록해주세요." action={<Button asChild><Link href="/onboarding">사업 정보 등록</Link></Button>} /> : <>
           {(businesses ?? []).length > 1 && <nav className="flex flex-wrap gap-2" aria-label="연결을 관리할 사업체">
             {(businesses ?? []).map((business) => <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness?.id ? "default" : "outline"} className="h-9 rounded-full px-4"><Link href={`/settings?business=${business.id}`} aria-current={business.id === selectedBusiness?.id ? "page" : undefined}>{business.name}</Link></Button>)}

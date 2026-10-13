@@ -91,11 +91,6 @@ bash scripts/dev-db.sh
 
    이 설정 없이는 cron 작업이 계속 401로 실패합니다(이전과 동일하게 안전하게 실패 — 자동으로 보안이 느슨해지지 않습니다). 실제 트리거 보호는 여전히 `CRON_SECRET`(2단계)이 담당합니다: 이 헤더는 Supabase 게이트웨이가 Edge Function 호출 자체를 허용하도록 하는 것일 뿐, `POST /api/cron/run-automations`는 별도로 `CRON_SECRET`을 확인합니다.
 
-### Instagram (게시물 자동 발행)
-
-1. 마이그레이션 적용만으로 충분합니다 — `0027_instagram_marketing_assets_bucket.sql`이 공개 Storage 버킷(`marketing-assets`)을 자동으로 생성하므로 별도 수동 설정이 없습니다.
-2. Meta 앱 자격 증명(`INSTAGRAM_APP_ID`/`INSTAGRAM_APP_SECRET`) 등록 및 콜백 URL 설정은 위 `.env.example`의 안내(`${NEXT_PUBLIC_SITE_URL}/api/integrations/instagram/callback`)를 따릅니다.
-
 ## Docker
 
 Vercel이 실제 배포 대상이지만, 이식 가능한 실행이 필요하면 Docker로도 빌드/실행할 수 있습니다.

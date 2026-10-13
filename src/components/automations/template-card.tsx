@@ -1,4 +1,4 @@
-import { Boxes, Camera, Clapperboard, FileText, Headset, type LucideIcon } from "lucide-react";
+import { Boxes, Clapperboard, FileText, Headset, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { AutomationAvailability } from "@/types/automation";
 import type { AutomationTemplate, AutomationTemplateSlug } from "@/types/domain";
@@ -23,12 +23,6 @@ const COPY: Record<AutomationTemplateSlug, TemplateCopy> = {
     icon: Clapperboard,
     title: "숏폼 영상 만들기",
     description: "첫 3초 후킹 문장, 대본, 자막을 갖춘 세로 영상을 만들어드려요.",
-  },
-  "instagram-marketing": {
-    icon: Camera,
-    title: "인스타그램 콘텐츠",
-    description: "브랜드 말투에 맞는 캡션과 마케팅 카드를 만들어 연결한 계정에 올려요.",
-    note: "Professional 계정 연결이 필요한 베타 기능이에요.",
   },
   "customer-support": { icon: Headset, title: "고객 문의 답변", description: "자주 오는 문의에 쓸 답변을 준비해드려요." },
 };

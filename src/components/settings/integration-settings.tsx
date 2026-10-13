@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Camera, CheckCircle2, CircleOff, RefreshCw, Unplug, Video } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleOff, RefreshCw, Unplug, Video } from "lucide-react";
 import { toast } from "sonner";
 import { disconnectIntegration } from "@/app/(app)/settings/actions";
 import { Badge } from "@/components/ui/badge";
@@ -98,8 +98,8 @@ function IntegrationRow({ icon, title, description, connection, setup, children 
 }
 
 /** Shown to admins only: which variables and console settings are still missing for this provider. */
-function SetupDetails({ provider, status }: { provider: OAuthProvider; status: IntegrationConfigStatus }) {
-  const where = provider === "youtube" ? "Google Cloud Console → 사용자 인증 정보 → OAuth 클라이언트(웹 애플리케이션)의 ‘승인된 리디렉션 URI’" : "Meta 개발자 앱 → Instagram API(Instagram 로그인) → 비즈니스 로그인 설정의 ‘OAuth 리디렉션 URL’";
+function SetupDetails({ status }: { status: IntegrationConfigStatus }) {
+  const where = "Google Cloud Console → 사용자 인증 정보 → OAuth 클라이언트(웹 애플리케이션)의 ‘승인된 리디렉션 URI’";
   return <div className="mt-3 rounded-lg border border-dashed bg-muted/40 px-3.5 py-3 text-[13px] leading-6 text-muted-foreground">
     <p className="font-semibold text-foreground">관리자용 설정 안내</p>
     <p>비어 있는 환경변수: <code>{status.missing.join(", ")}</code> (Vercel → Settings → Environment Variables에 넣고 다시 배포)</p>
@@ -110,19 +110,14 @@ function SetupDetails({ provider, status }: { provider: OAuthProvider; status: I
 
 export function IntegrationSettings({ businessId, connections, configStatus, showSetupDetails = false }: { businessId: string; connections: SafeConnection[]; configStatus: Record<OAuthProvider, IntegrationConfigStatus>; showSetupDetails?: boolean }) {
   const get = (provider: IntegrationProvider) => connections.find((connection) => connection.provider === provider && connection.status !== "DISCONNECTED");
-  const instagram = get("instagram");
   const youtube = get("youtube");
   const youtubeNeedsAnalyticsConsent = youtube?.status === "CONNECTED" && !String(metadata(youtube.metadata).scope ?? "").split(/\s+/).includes(YOUTUBE_ANALYTICS_SCOPE);
 
-  // Only what the product uses today: YouTube (Shorts posting, growth numbers) and Instagram (Reels).
+  // Only what the product uses today: YouTube (Shorts posting, growth numbers).
   return <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
-    <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description={youtubeNeedsAnalyticsConsent ? "숏폼을 내 채널에 비공개로 올려요. 조회수·시청 시간·구독자 증감을 성장 리포트에 보려면 ‘다시 연결’에서 Analytics 권한도 허용해주세요." : "숏폼을 내 채널에 비공개로 올리고, 성장 리포트에 조회수·시청 시간·구독자 증감을 보여줘요."} connection={youtube} setup={showSetupDetails && !configStatus.youtube.configured ? <SetupDetails provider="youtube" status={configStatus.youtube} /> : undefined}>
+    <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description={youtubeNeedsAnalyticsConsent ? "숏폼을 내 채널에 비공개로 올려요. 조회수·시청 시간·구독자 증감을 성장 리포트에 보려면 ‘다시 연결’에서 Analytics 권한도 허용해주세요." : "숏폼을 내 채널에 비공개로 올리고, 성장 리포트에 조회수·시청 시간·구독자 증감을 보여줘요."} connection={youtube} setup={showSetupDetails && !configStatus.youtube.configured ? <SetupDetails status={configStatus.youtube} /> : undefined}>
       <ConnectButton configured={configStatus.youtube.configured} href={`/api/integrations/youtube/connect?businessId=${encodeURIComponent(businessId)}`} connected={Boolean(youtube)} label="YouTube 연결" />
       {youtube && <DisconnectButton businessId={businessId} provider="youtube" />}
-    </IntegrationRow>
-    <IntegrationRow icon={<Camera className="size-5" aria-hidden="true" />} title="인스타그램" description="만든 숏폼을 인스타그램 릴스로 올릴 때 연결해요. 비즈니스·크리에이터 계정이 필요해요." connection={instagram} setup={showSetupDetails && !configStatus.instagram.configured ? <SetupDetails provider="instagram" status={configStatus.instagram} /> : undefined}>
-      <ConnectButton configured={configStatus.instagram.configured} href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`} connected={Boolean(instagram)} label="인스타그램 연결" />
-      {instagram && <DisconnectButton businessId={businessId} provider="instagram" />}
     </IntegrationRow>
   </ul>;
 }

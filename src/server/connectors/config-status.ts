@@ -3,7 +3,7 @@ import { clientEnv } from "@/lib/env/client";
 import { serverEnv } from "@/lib/env/server";
 import { YOUTUBE_OAUTH_SCOPES } from "@/lib/youtube-scopes";
 
-export type OAuthProvider = "youtube" | "instagram";
+export type OAuthProvider = "youtube";
 
 export interface IntegrationConfigStatus {
   /** All OAuth credentials are present, so the connect button can start a real sign-in. */
@@ -24,10 +24,9 @@ function status(provider: OAuthProvider, required: Record<string, string | undef
   };
 }
 
-/** Whether the YouTube (Google OAuth) and Instagram (Meta) apps are set up on this deployment — used to disable the connect buttons honestly. */
+/** Whether the YouTube (Google OAuth) app is set up on this deployment — used to disable the connect buttons honestly. */
 export function getIntegrationConfigStatus(): Record<OAuthProvider, IntegrationConfigStatus> {
   return {
     youtube: status("youtube", { YOUTUBE_CLIENT_ID: serverEnv.YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET: serverEnv.YOUTUBE_CLIENT_SECRET }, [...YOUTUBE_OAUTH_SCOPES]),
-    instagram: status("instagram", { INSTAGRAM_APP_ID: serverEnv.INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET: serverEnv.INSTAGRAM_APP_SECRET }, ["instagram_business_basic", "instagram_business_content_publish"]),
   };
 }

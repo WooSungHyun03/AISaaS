@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils";
 import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
 
 const PLATFORM = {
-  instagram: { label: "Instagram Reels", icon: Film },
   youtube: { label: "YouTube Shorts", icon: Play },
 } as const;
 

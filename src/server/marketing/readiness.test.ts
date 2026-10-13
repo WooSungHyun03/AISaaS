@@ -63,7 +63,7 @@ describe("getReadinessScore", () => {
   it("scores every row ready as 100 and returns nextTodo: null", async () => {
     createClientMock.mockResolvedValue(
       makeClient({
-        connections: { data: [{ provider: "instagram", status: "CONNECTED", account_identifier: "@shop" }], error: null },
+        connections: { data: [{ provider: "youtube", status: "CONNECTED", account_identifier: "@shop" }], error: null },
         automations: { data: [{ id: "a1", status: "ACTIVE" }], error: null },
         automationRuns: { count: 3, error: null },
       }),

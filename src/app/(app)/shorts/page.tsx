@@ -50,7 +50,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
 
   const [runsResult, connectionsResult, inFlightResult] = await Promise.all([
     supabase.from("automation_runs").select("id,status,output,created_at").eq("automation_id", automation.id).order("created_at", { ascending: false }).limit(30),
-    supabase.from("integration_connections").select("provider,status").eq("user_id", user.id).eq("business_id", selectedBusiness.id).in("provider", ["instagram", "youtube"]),
+    supabase.from("integration_connections").select("provider,status").eq("user_id", user.id).eq("business_id", selectedBusiness.id).eq("provider", "youtube"),
     supabase.from("automation_runs").select("id,output").eq("automation_id", automation.id).in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle(),
   ]);
   if (runsResult.error || connectionsResult.error || inFlightResult.error) throw new Error("숏폼 작업 상태를 불러오지 못했습니다.");
@@ -86,7 +86,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     .map(([platform, result]) => ({ runId: run.id, createdAt: run.created_at, platform, ...result })));
   const connectionMap = Object.fromEntries((connectionsResult.data ?? []).map((item) => [item.provider, item.status])) as Partial<Record<ShortsPublishPlatform, string>>;
   const config = automation.config && typeof automation.config === "object" && !Array.isArray(automation.config) ? automation.config as Record<string, unknown> : {};
-  const configuredPlatforms: ShortsPublishPlatform[] = Array.isArray(config.platforms) ? config.platforms.filter((item): item is ShortsPublishPlatform => item === "instagram" || item === "youtube") : [];
+  const configuredPlatforms: ShortsPublishPlatform[] = Array.isArray(config.platforms) ? config.platforms.filter((item): item is ShortsPublishPlatform => item === "youtube") : [];
   const schedule = automation.schedule as unknown as AutomationSchedule;
   const settings = parseShortsSettings(automation.config);
   const assetViews = await assetViewsFor(settings.assets, user.id, automation.id);
@@ -108,11 +108,11 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     />
   ) : null;
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio publishingSlot={publishingSlot} referencesSlot={<ShortsAssetsCard automationId={automation.id} assets={assetViews} brief={settings.brief} durationSec={settings.durationSec} voiceMode={settings.voiceMode} disabled={Boolean(inFlightResult.data)} />} hasImages={assetViews.some((asset) => asset.kind === "image" || asset.kind === "video")} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ instagram: connectionMap.instagram ?? null, youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={jobState?.progress ?? null} job={job} nextRunAt={automation.next_run_at} /></div>;
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio publishingSlot={publishingSlot} referencesSlot={<ShortsAssetsCard automationId={automation.id} assets={assetViews} brief={settings.brief} durationSec={settings.durationSec} voiceMode={settings.voiceMode} disabled={Boolean(inFlightResult.data)} />} hasImages={assetViews.some((asset) => asset.kind === "image" || asset.kind === "video")} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={jobState?.progress ?? null} job={job} nextRunAt={automation.next_run_at} /></div>;
 }
 
 function PageHeading() {
-  return <PageHeader title="숏폼 스튜디오" description="사진을 올려 20~30초 AI 광고 영상을 만들고, 미리보기와 Instagram·YouTube 게시, 예약 운영까지 한곳에서 관리해요." />;
+  return <PageHeader title="숏폼 스튜디오" description="사진을 올려 20~30초 AI 광고 영상을 만들고, 미리보기와 YouTube 게시, 예약 운영까지 한곳에서 관리해요." />;
 }
 
 

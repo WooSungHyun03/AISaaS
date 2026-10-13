@@ -2,7 +2,7 @@
 // draws numbered markers over the controls the guide talks about, and checks that every marked control was found.
 //   bash scripts/dev-db.sh
 //   psql … < scripts/seed-growth-demo.sql ; psql … < scripts/sql/seed-guide-screens.sql
-//   YOUTUBE_CLIENT_ID=x YOUTUBE_CLIENT_SECRET=x INSTAGRAM_APP_ID=x INSTAGRAM_APP_SECRET=x npx next dev -p 3100   # placeholders only so the connect buttons are enabled; nothing is sent
+//   YOUTUBE_CLIENT_ID=x YOUTUBE_CLIENT_SECRET=x npx next dev -p 3100   # placeholders only so the connect buttons are enabled; nothing is sent
 //   node scripts/e2e/capture-guide.mjs [--only blog/photos]
 // Only seeded sample data and generated sample "photos" appear: no personal, token or payment data.
 import { execFileSync } from "node:child_process";
@@ -60,8 +60,8 @@ function specs(ctx) {
     { slug: "home", id: "overview", path: "/dashboard", marks: [(p) => p.locator("section[aria-labelledby='next-action-title']"), (p) => p.locator("section[aria-labelledby='next-action-title'] a").first()] },
     { slug: "home", id: "credits", path: "/dashboard", prepare: scrollTo((p) => p.getByRole("heading", { name: "남은 콘텐츠 이용권" })), marks: [(p) => p.getByRole("heading", { name: "남은 콘텐츠 이용권" }), (p) => p.getByRole("link", { name: /구매·관리/ })] },
 
-    { slug: "channels", id: "overview", path: "/settings", marks: [(p) => p.getByRole("heading", { name: "외부 서비스 연결" }), (p) => p.getByRole("heading", { name: "YouTube" }), (p) => p.getByRole("heading", { name: "인스타그램" })] },
-    { slug: "channels", id: "connect", path: "/settings", marks: [(p) => p.locator("span", { hasText: /^연결 안 됨$/ }).first(), role({ role: "link", name: "YouTube 연결" }), role({ role: "link", name: "인스타그램 연결" })] },
+    { slug: "channels", id: "overview", path: "/settings", marks: [(p) => p.getByRole("heading", { name: "외부 서비스 연결" }), (p) => p.getByRole("heading", { name: "YouTube" })] },
+    { slug: "channels", id: "connect", path: "/settings", marks: [(p) => p.locator("span", { hasText: /^연결 안 됨$/ }).first(), role({ role: "link", name: /YouTube 연결|다시 연결/ })] },
 
     { slug: "billing", id: "overview", path: "/billing", marks: [(p) => p.getByRole("heading", { name: "남은 이용권" })] },
     { slug: "billing", id: "products", path: "/billing", prepare: scrollTo((p) => p.getByRole("heading", { name: /블로그 포스팅 상품/ })), marks: [(p) => p.getByRole("heading", { name: /블로그 포스팅 상품/ }), (p) => p.getByRole("button", { name: /구매/ }).first()] },

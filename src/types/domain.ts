@@ -80,6 +80,5 @@ export type {
 /** Slugs for the automation templates seeded in supabase/seed.sql. */
 export type AutomationTemplateSlug =
   | "blog-marketing"
-  | "instagram-marketing"
   | "customer-support"
   | "shorts";

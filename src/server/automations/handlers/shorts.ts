@@ -111,7 +111,8 @@ const jobStateSchema = z.object({
   durationSec: z.number().int().min(20).max(30),
   voiceMode: z.enum(["native", "tts"]),
   previewOnly: z.boolean(),
-  platforms: z.array(z.enum(["instagram", "youtube"])),
+  // Older in-flight jobs may still carry "instagram"; it is dropped when the job reads its platforms.
+  platforms: z.array(z.enum(["instagram", "youtube"])).transform((list) => list.filter((value): value is ShortsPublishPlatform => value === "youtube")),
   plan: adPlanSchema,
   assets: z.array(shortsAssetSchema),
   wanPrompt: z.string(),
@@ -176,7 +177,7 @@ const scoped = <T,>(ctx: AutomationRunContext, attempt: number, fn: () => Promis
 function scheduledPlatforms(config: AutomationRunContext["config"]): ShortsPublishPlatform[] {
   // Publishing is opt-in: an automation without an explicit platform list only renders a preview.
   if (!Array.isArray(config.platforms)) return [];
-  const platforms = config.platforms.filter((value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube");
+  const platforms = config.platforms.filter((value): value is ShortsPublishPlatform => value === "youtube");
   return [...new Set(platforms)];
 }
 

@@ -35,7 +35,7 @@ async function ownedBusiness(userId: string, businessId: string) {
   return !error && Boolean(data);
 }
 
-const PROVIDERS: IntegrationProvider[] = ["instagram", "youtube"];
+const PROVIDERS: IntegrationProvider[] = ["youtube"];
 
 export async function disconnectIntegration(businessId: string, provider: IntegrationProvider): Promise<SettingsActionState> {
   const supabase = await createClient();

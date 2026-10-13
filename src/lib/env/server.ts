@@ -49,10 +49,6 @@ const serverSchema = z.object({
   TOSS_CLIENT_KEY: z.string().optional(),
 
 
-  META_ACCESS_TOKEN: z.string().optional(),
-  META_IG_USER_ID: z.string().optional(),
-  INSTAGRAM_APP_ID: z.string().optional(),
-  INSTAGRAM_APP_SECRET: z.string().optional(),
 
 
   YOUTUBE_CLIENT_ID: z.string().optional(),

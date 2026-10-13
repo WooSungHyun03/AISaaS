@@ -55,7 +55,7 @@ function fromDraft(draft: Draft, source: ShortsPublishing["source"]) {
 
 /**
  * The text that goes with a finished Short: title, alternative titles, description, keywords, hashtags and a call to
- * action — each with a copy button, all editable. What is saved here is what "지금 게시" sends to YouTube and Instagram.
+ * action — each with a copy button, all editable. What is saved here is what "지금 게시" sends to YouTube (the Instagram caption is for copying by hand).
  */
 export function ShortsPublishingPanel({ contentId, original, saved, link }: { contentId: string | null; original: ShortsPublishing; saved: ShortsPublishing | null; link: string | null }) {
   const [current, setCurrent] = useState<ShortsPublishing>(saved ?? original);
@@ -177,7 +177,7 @@ export function ShortsPublishingPanel({ contentId, original, saved, link }: { co
           <p className="whitespace-pre-wrap text-[13px] leading-6 text-muted-foreground">{instagram}</p>
         </article>
       </div>
-      <p className="text-xs leading-5 text-muted-foreground">YouTube는 제목·설명·태그를, Instagram은 캡션 한 칸을 사용해요. 위 내용에서 각 플랫폼 형식으로 자동 구성돼요.</p>
+      <p className="text-xs leading-5 text-muted-foreground">YouTube는 제목·설명·태그를 “지금 게시”에 사용해요. Instagram 캡션은 연동 없이, 직접 올릴 때 복사해서 쓰세요.</p>
 
       {error ? <FormMessage>{error}</FormMessage> : null}
       {!parsed.ok && !error ? <FormMessage variant="info">{parsed.error}</FormMessage> : null}

@@ -1,11 +1,11 @@
 # 외부 서비스 연결 (2026-10-11)
 
-앱이 연결하는 외부 서비스는 **YouTube와 Instagram** 둘뿐입니다.
+앱이 연결하는 외부 서비스는 **YouTube** 하나뿐입니다. (Instagram은 API 사용이 불가능해서 2026-10-13에 연결·게시 기능을 모두 제거했어요.)
 
 | 서비스 | 판정 | 쓰임 |
 |---|---|---|
 | YouTube | 유지 | 숏폼 업로드, 성장 리포트 Analytics (`youtube.upload`, `youtube.readonly`, `yt-analytics.readonly`) |
-| Instagram | 유지 | 숏폼 → Reels 게시 |
+| Instagram | **삭제** (2026-10-13) | Meta API 사용 불가. 연결·OAuth·Reels 게시·인스타그램 자동화 핸들러를 제거했고, 숏폼 게시 문구의 Instagram 캡션은 직접 복사해 올리도록 남겨두었어요 |
 | WordPress | **삭제** | 블로그 글은 앱에서 확인하고 직접 올리는 방식 |
 | 이메일(Resend)·뉴스레터 | **삭제** | 제공하지 않는 기능 |
 

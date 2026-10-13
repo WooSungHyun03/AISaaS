@@ -191,7 +191,7 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
               <StatCard label="플랫폼 게시 확인" value={`${report.publications.current}건`} hint={<Delta comparison={report.publications} days={days} />} />
             </StatGroup>
             <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
-              <SourceBadge source="INTERNAL" /> 위 숫자는 이 서비스에 남은 제작·캘린더 기록으로 계산했어요. 게시 확인은 유튜브·인스타그램이 돌려준 응답이 있을 때만 세요.
+              <SourceBadge source="INTERNAL" /> 위 숫자는 이 서비스에 남은 제작·캘린더 기록으로 계산했어요. 게시 확인은 유튜브가 돌려준 응답이 있을 때만 세요.
               {truncated ? " 기록이 많아 최근 500건까지만 반영했어요." : ""}
             </p>
           </section>

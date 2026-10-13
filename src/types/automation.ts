@@ -16,7 +16,7 @@ export interface AutomationSchedule {
   timezone?: string;
 }
 
-export type ShortsPublishPlatform = "instagram" | "youtube";
+export type ShortsPublishPlatform = "youtube";
 
 export interface ShortsRunOptions {
   /** Preview runs generate and render the video without posting it. */
@@ -144,6 +144,5 @@ export type AutomationAvailability = "AVAILABLE" | "BETA" | "COMING_SOON";
 export const AUTOMATION_AVAILABILITY: Record<AutomationTemplateSlug, AutomationAvailability> = {
   "blog-marketing": "AVAILABLE",
   shorts: "AVAILABLE",
-  "instagram-marketing": "COMING_SOON",
   "customer-support": "COMING_SOON",
 };

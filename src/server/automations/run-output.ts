@@ -50,7 +50,7 @@ export interface SafeAutomationRunOutput {
   sampleVideo: boolean;
   /** The owner's photos / clips the run worked from (blog photos, Shorts references): shown in the history so it is clear what was used. */
   references: UsedReference[];
-  publicationResults: Partial<Record<"instagram" | "youtube", {
+  publicationResults: Partial<Record<"youtube", {
     externalId: string | null;
     externalUrl: string | null;
     privacy: "private" | null;
@@ -145,7 +145,8 @@ function safePublicationResults(value: Json | undefined): SafeAutomationRunOutpu
   const record = asRecord(value ?? null);
   if (!record) return {};
   const results: SafeAutomationRunOutput["publicationResults"] = {};
-  for (const platform of ["instagram", "youtube"] as const) {
+  // Instagram publishing was removed; older runs' Instagram results are not shown.
+  for (const platform of ["youtube"] as const) {
     const item = asRecord(record[platform] ?? null);
     if (!item) continue;
     results[platform] = {

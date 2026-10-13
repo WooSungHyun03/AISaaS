@@ -2,7 +2,6 @@ import type { SetupRequestContactMethod, SetupRequestStatus } from "./domain";
 
 export const SETUP_AUTOMATION_TYPES = [
   { value: "blog-marketing", label: "블로그 마케팅 자동화" },
-  { value: "instagram-marketing", label: "Instagram 마케팅 자동화" },
   { value: "newsletter", label: "뉴스레터·이메일 자동화" },
   { value: "customer-support", label: "고객 문의·CS 자동화" },
   { value: "job-postings", label: "채용공고 탐색 자동화" },

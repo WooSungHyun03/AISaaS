@@ -129,7 +129,7 @@ bash scripts/dev-db.sh
 docker exec -i supabase_db_autobiz-dev-db psql -U postgres -d postgres < scripts/seed-growth-demo.sql
 docker exec -i supabase_db_autobiz-dev-db psql -U postgres -d postgres < scripts/sql/seed-guide-screens.sql
 # 연결 버튼이 켜진 화면을 찍으려면 자리표시 값만 넣어 실행합니다(어디로도 전송되지 않아요).
-YOUTUBE_CLIENT_ID=x YOUTUBE_CLIENT_SECRET=x INSTAGRAM_APP_ID=x INSTAGRAM_APP_SECRET=x npx next dev -p 3100
+YOUTUBE_CLIENT_ID=x YOUTUBE_CLIENT_SECRET=x npx next dev -p 3100
 
 npm run e2e:photos     # 블로그·숏폼 참고 사진 (PC + 휴대폰, 18개)
 npm run e2e:admin      # /admin 접근 권한

@@ -22,7 +22,7 @@ export interface ReadinessScoreResult {
   nextTodo: ReadinessScoreRow | null;
 }
 
-function isInstagramConnected(status: string | undefined): boolean {
+function isChannelConnected(status: string | undefined): boolean {
   return status === "CONNECTED";
 }
 
@@ -67,8 +67,8 @@ export async function getReadinessScore(business: Business, userId: string): Pro
     : { count: 0, error: null };
   if (recentSuccessResult.error) throw new Error("최근 콘텐츠 운영 기록을 불러오지 못했습니다.", { cause: recentSuccessResult.error });
 
-  const instagram = connections?.find((connection) => connection.provider === "instagram");
-  const hasInstagram = isInstagramConnected(instagram?.status);
+  const youtube = connections?.find((connection) => connection.provider === "youtube");
+  const hasYouTube = isChannelConnected(youtube?.status);
   const activeAutomations = (automations ?? []).filter((automation) => automation.status === "ACTIVE");
   const recentSuccesses = recentSuccessResult.count ?? 0;
 
@@ -76,7 +76,7 @@ export async function getReadinessScore(business: Business, userId: string): Pro
   const completedProfileFields = profileFields.filter(Boolean).length;
   const profileScore = Math.round((completedProfileFields / profileFields.length) * 30);
 
-  const score = profileScore + (business.website ? 20 : 0) + (hasInstagram ? 20 : 0) + (activeAutomations.length ? 15 : 0) + (recentSuccesses ? 15 : 0);
+  const score = profileScore + (business.website ? 20 : 0) + (hasYouTube ? 20 : 0) + (activeAutomations.length ? 15 : 0) + (recentSuccesses ? 15 : 0);
 
   const rows: ReadinessScoreRow[] = [
     {
@@ -102,14 +102,14 @@ export async function getReadinessScore(business: Business, userId: string): Pro
       max: 20,
     },
     {
-      key: "instagram",
-      label: "Instagram",
-      ready: hasInstagram,
-      detail: hasInstagram ? (instagram?.account_identifier ?? "계정이 연결돼 있어요") : "연결된 계정이 없어요",
+      key: "youtube",
+      label: "YouTube",
+      ready: hasYouTube,
+      detail: hasYouTube ? (youtube?.account_identifier ?? "계정이 연결돼 있어요") : "연결된 계정이 없어요",
       href: `/settings?business=${business.id}`,
       cta: "계정 연결",
-      todo: "Instagram 계정을 연결하는 것",
-      points: hasInstagram ? 20 : 0,
+      todo: "YouTube 계정을 연결하는 것",
+      points: hasYouTube ? 20 : 0,
       max: 20,
     },
     {

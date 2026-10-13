@@ -1,13 +1,11 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { InstagramConnector } from "@/server/connectors/instagram";
-import { loadInstagramConnector } from "@/server/connectors/instagram/connect";
 import { getConnection, updateConnectionStatus } from "@/server/connectors/integrations";
 import { YouTubeConnector } from "@/server/connectors/youtube";
 import { loadYouTubeConnector } from "@/server/connectors/youtube/connect";
 import { isConnectorError } from "@/server/shared/errors";
-import { instagramCaption, youtubeMetadata, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
+import { youtubeMetadata, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
 import type { ShortsPublishPlatform } from "@/types/automation";
 
 export interface ShortsPublicationResult {
@@ -39,45 +37,22 @@ export async function publishShortsToPlatforms(input: PublishShortsInput) {
   const platforms = [...new Set(input.platforms)];
   if (platforms.length === 0) throw new Error("게시할 플랫폼을 한 개 이상 선택해주세요.");
 
-  const instagramConnection = platforms.includes("instagram")
-    ? await getConnection(admin, input.userId, input.businessId, "instagram")
-    : null;
   const youtubeConnection = platforms.includes("youtube")
     ? await getConnection(admin, input.userId, input.businessId, "youtube")
     : null;
 
-  const instagram = platforms.includes("instagram")
-    ? (instagramConnection
-      ? await loadInstagramConnector(admin, input.userId, input.businessId)
-      : new InstagramConnector())
-    : null;
   const youtube = platforms.includes("youtube")
     ? (youtubeConnection
       ? await loadYouTubeConnector(admin, input.userId, input.businessId)
       : new YouTubeConnector())
     : null;
 
-  if (platforms.includes("instagram") && (!instagram || !instagram.isConfigured())) {
-    throw new Error("Instagram 연결이 없거나 만료됐습니다. 설정에서 다시 연결해주세요.");
-  }
   if (platforms.includes("youtube") && (!youtube || !youtube.isConfigured())) {
     throw new Error("YouTube 연결이 없거나 만료됐습니다. 설정에서 다시 연결해주세요.");
   }
 
   const results: Partial<Record<ShortsPublishPlatform, ShortsPublicationResult>> = {};
   try {
-    if (instagram) {
-      const published = await instagram.publish({
-        content: input.publishing ? instagramCaption(input.publishing) : input.caption,
-        mediaType: "REELS",
-        videoUrl: input.videoUrl,
-      });
-      results.instagram = {
-        externalId: published.externalId ?? null,
-        externalUrl: published.externalUrl ?? null,
-        privacy: null,
-      };
-    }
     if (youtube) {
       const yt = input.publishing ? youtubeMetadata(input.publishing, input.link ?? null) : null;
       const published = await youtube.publish({
@@ -98,7 +73,6 @@ export async function publishShortsToPlatforms(input: PublishShortsInput) {
       ? "EXPIRED"
       : "ERROR";
     const provider = isConnectorError(error) ? error.domain : null;
-    if (provider === "instagram" && instagramConnection) await updateConnectionStatus(admin, instagramConnection.id, status);
     if (provider === "youtube" && youtubeConnection) await updateConnectionStatus(admin, youtubeConnection.id, status);
     throw error;
   }

@@ -55,7 +55,7 @@ function hasVisualAssets(config: unknown): boolean {
 }
 
 function parsePlatforms(values: string[]): ShortsPublishPlatform[] {
-  return [...new Set(values.filter((value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube"))];
+  return [...new Set(values.filter((value): value is ShortsPublishPlatform => value === "youtube"))];
 }
 
 /** Template slugs that can hold uploaded reference files. Blog posts only take photos. */
@@ -201,7 +201,7 @@ export async function saveShortsSchedule(automationId: string, formData: FormDat
       .eq("user_id", owned.user.id).eq("business_id", owned.automation.business_id).in("provider", platforms);
     const connected = new Set((connections ?? []).filter((item) => item.status === "CONNECTED").map((item) => item.provider));
     const missing = platforms.filter((platform) => !connected.has(platform));
-    if (missing.length > 0) return { error: `${missing.map((item) => item === "youtube" ? "YouTube" : "Instagram").join(", ")} 연결을 먼저 완료해주세요.` };
+    if (missing.length > 0) return { error: `${missing.map(() => "YouTube").join(", ")} 연결을 먼저 완료해주세요.` };
   }
 
   const currentConfig = owned.automation.config && typeof owned.automation.config === "object" && !Array.isArray(owned.automation.config)

@@ -19,7 +19,7 @@ export interface UpdateShortsPublishingResult {
  *
  * Like the blog edit, content_history has no UPDATE policy for customers, so the write uses the service role after
  * confirming under RLS that the caller can see the row, and touches only the `publishing` and `edited_at` columns.
- * What is saved here is what "지금 게시" and a scheduled post send to YouTube / Instagram.
+ * What is saved here is what "지금 게시" and a scheduled post send to YouTube.
  */
 export async function updateShortsPublishing(contentId: string, input: unknown): Promise<UpdateShortsPublishingResult> {
   const supabase = await createClient();
