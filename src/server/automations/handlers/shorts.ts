@@ -34,7 +34,6 @@ import {
 } from "@/server/shorts/ad-plan";
 import {
   ensureShortsBuckets,
-  REFERENCE_BUCKET,
   resolveAssetUrls,
   signAsset,
   VIDEO_BUCKET,
@@ -564,11 +563,12 @@ async function finish(ctx: AutomationRunContext, state: JobState): Promise<Autom
     await ensureShortsBuckets(admin);
     const images = assetsOfKind(state.assets, "image");
     const logoAsset = assetsOfKind(state.assets, "logo")[0];
-    const logo = logoAsset && logoAsset.origin === "upload" ? await signAsset(admin, REFERENCE_BUCKET, logoAsset.source) : undefined;
+    // resolveAssetUrls refuses a path outside this automation's own folder: config is owner-writable through RLS.
+    const logo = logoAsset && logoAsset.origin === "upload" ? (await resolveAssetUrls(admin, [logoAsset], owner(ctx)))[0] : undefined;
     const inserts = new Map<number, string>();
     for (const insert of state.plan.inserts) {
       const asset = images[insert.imageIndex - 1];
-      if (asset?.origin === "upload" && asset.role === "exact") inserts.set(insert.imageIndex, await signAsset(admin, REFERENCE_BUCKET, asset.source));
+      if (asset?.origin === "upload" && asset.role === "exact") inserts.set(insert.imageIndex, (await resolveAssetUrls(admin, [asset], owner(ctx)))[0]);
     }
     const { data: upload, error: uploadError } = await admin.storage.from(VIDEO_BUCKET).createSignedUploadUrl(finalPath, { upsert: true });
     if (uploadError || !upload) throw new Error("영상을 저장할 주소를 만들지 못했어요.", { cause: uploadError });

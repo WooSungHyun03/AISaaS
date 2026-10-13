@@ -11,7 +11,11 @@ export const NAVER_SEARCH_LIMITATION_NOTICE = "검색에 노출된 글 기준이
 /** The RSS lists the blog's own latest posts, so the caveat is about how far back it reaches, not about search exposure. */
 export const NAVER_RSS_LIMITATION_NOTICE = "블로그 RSS에 공개된 최근 글(최대 50개) 기준이에요, 방문자 수와 조회수는 확인할 수 없어요.";
 
+/** Shown instead of the RSS caveat when the RSS was never read (robots.txt) and search found nothing either. */
+export const NAVER_NOT_MEASURABLE_NOTICE = "네이버 블로그 RSS는 자동 수집이 허용되지 않고, 네이버 검색에서도 이 블로그의 글을 찾지 못해 측정하지 못했어요. 글이 없다는 뜻은 아니에요.";
+
 function limitationNotice(metrics: NaverBlogMetrics): string {
+  if (metrics.blockedByRobots && metrics.matchedPostCount === 0) return NAVER_NOT_MEASURABLE_NOTICE;
   return metrics.basis === "rss" ? NAVER_RSS_LIMITATION_NOTICE : NAVER_SEARCH_LIMITATION_NOTICE;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NAVER_RSS_LIMITATION_NOTICE, NAVER_SEARCH_LIMITATION_NOTICE, scoreNaverBlogChannel } from "./naver-blog-scoring";
+import { NAVER_NOT_MEASURABLE_NOTICE, NAVER_RSS_LIMITATION_NOTICE, NAVER_SEARCH_LIMITATION_NOTICE, scoreNaverBlogChannel } from "./naver-blog-scoring";
 import type { NaverBlogMetrics } from "./providers/naver-types";
 
 const ACTIVE_METRICS: NaverBlogMetrics = {
@@ -33,6 +33,13 @@ describe("scoreNaverBlogChannel", () => {
     expect(result.completeness).toBe("INSUFFICIENT_DATA");
     expect(result.findings).toEqual([NAVER_SEARCH_LIMITATION_NOTICE]);
     expect(result.overallScore).toBe(0);
+  });
+
+  it("says 'not measured' rather than 'no posts' when robots.txt kept the RSS unread and search found nothing", () => {
+    const metrics: NaverBlogMetrics = { matchedPostCount: 0, postsLast30Days: 0, averageGapDays: null, lastPostDate: null, firstPostDate: null, basis: "rss", blockedByRobots: true };
+    const result = scoreNaverBlogChannel(metrics);
+    expect(result.completeness).toBe("INSUFFICIENT_DATA");
+    expect(result.findings).toEqual([NAVER_NOT_MEASURABLE_NOTICE]);
   });
 
   it("marks PARTIAL when only 1 post matched (gap not computable)", () => {

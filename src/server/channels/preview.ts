@@ -23,6 +23,10 @@ export interface ChannelPreview {
 
 export type ChannelPreviewResult = { ok: true; preview: ChannelPreview } | { ok: false; message: string };
 
+/** Naver blocks every crawler from its blog RSS (robots.txt), so a blog is only measurable through Naver search when the search keys exist and its posts show up there. */
+export const NAVER_ROBOTS_BLOCKED_NOTE =
+  "네이버 블로그는 RSS 자동 수집을 허용하지 않아 글 목록을 직접 읽지 않아요. 네이버 검색에서도 이 블로그의 글을 찾지 못해 지금은 측정할 수 있는 지표가 없어요. 등록은 할 수 있고, 검색에 글이 노출되면 그때부터 기록돼요.";
+
 const NOT_FOUND_MESSAGE = "채널을 찾을 수 없어요. 주소를 확인하거나, 비공개·삭제된 채널은 등록할 수 없어요.";
 
 /**
@@ -91,7 +95,11 @@ export async function resolveParsedChannel(parsed: Extract<ParsedChannelUrl, { o
           thumbnailUrl: null,
           summary: verified ? `공개 글 ${metrics.matchedPostCount}개 확인${metrics.lastPostDate ? ` · 마지막 글 ${metrics.lastPostDate}` : ""}` : null,
           verified,
-          note: verified ? null : "공개된 글이 보이지 않아요. RSS 공개가 꺼져 있거나 아직 글이 없다면 수집할 수 있는 지표가 없어요.",
+          note: verified
+            ? null
+            : metrics.blockedByRobots
+              ? NAVER_ROBOTS_BLOCKED_NOTE
+              : "공개된 글이 보이지 않아요. RSS 공개가 꺼져 있거나 아직 글이 없다면 수집할 수 있는 지표가 없어요.",
         },
       };
     }

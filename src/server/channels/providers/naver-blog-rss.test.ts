@@ -63,7 +63,7 @@ describe("collectNaverBlogRssMetrics", () => {
 
   it("does not read a feed that robots.txt disallows: the blog is 'nothing measured', and the feed is never requested", async () => {
     robotsAllowedMock.mockResolvedValue(false);
-    expect(await collectNaverBlogRssMetrics("myblog", NOW)).toMatchObject({ matchedPostCount: 0, lastPostDate: null });
+    expect(await collectNaverBlogRssMetrics("myblog", NOW)).toMatchObject({ matchedPostCount: 0, lastPostDate: null, blockedByRobots: true });
     expect(fetchPublicXmlMock).not.toHaveBeenCalled();
   });
 });

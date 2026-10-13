@@ -242,7 +242,20 @@ describe("processDueChannels: the 06:00 KST tick", () => {
     tistoryCollectMock.mockResolvedValue({ posts: [], observedCapped: false, unavailableReason: "비공개" });
     const result = await processDueChannels(NOW, 30_000);
     expect(result).toMatchObject({ processed: 0, failed: 1 });
-    expect(db.tables.tracked_channels[0]).toMatchObject({ consecutive_failure_count: 1, last_collection_status: "UNAVAILABLE", next_snapshot_at: NEXT_6AM });
+    expect(db.tables.tracked_channels[0]).toMatchObject({ consecutive_failure_count: 0, last_collection_status: "UNAVAILABLE", next_snapshot_at: NEXT_6AM });
+  });
+
+  it("days without public data do not build the error streak, so one later timeout cannot pause the channel", async () => {
+    const db = setup([channelRow("blog", { platform: "tistory", external_id: "blog", url: "https://blog.tistory.com/", consecutive_failure_count: 11 })]);
+    tistoryCollectMock.mockResolvedValue({ posts: [], observedCapped: false, unavailableReason: "비공개" });
+    await processDueChannels(NOW, 30_000);
+    expect(db.tables.tracked_channels[0]).toMatchObject({ status: "ACTIVE", consecutive_failure_count: 0 });
+
+    db.tables.tracked_channels[0].next_snapshot_at = null;
+    tistoryCollectMock.mockRejectedValue(new Error("timeout"));
+    const result = await processDueChannels(NOW, 30_000);
+    expect(result.paused).toBe(0);
+    expect(db.tables.tracked_channels[0]).toMatchObject({ status: "ACTIVE", consecutive_failure_count: 1 });
   });
 
   it("admin 'collect now' (all: true) collects channels that are not due yet and logs it as MANUAL_ADMIN", async () => {

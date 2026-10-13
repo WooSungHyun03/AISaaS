@@ -131,13 +131,15 @@ export async function processDueChannels(now: Date = new Date(), budgetMs = 30_0
       const typed = { id: channel.id, external_id: channel.external_id, url: channel.url, platform: platform.data };
       const saved = await collectAndPersistChannel(typed, business?.name, now);
       const update: TrackedChannelUpdate = { next_snapshot_at: nextDailyCollectionAt(now).toISOString() };
-      // An unreadable (but not erroring) blog counts as a failed day so it is eventually paused instead of looking fine.
+      // The source answered, so the error streak (which pauses a channel and sets the retry cadence) ends either way.
+      if (channel.consecutive_failure_count > 0) update.consecutive_failure_count = 0;
+      // An unreadable blog (no public posts, or robots.txt keeps it unread) is a failed day in the run log and shows as
+      // UNAVAILABLE on the channel, but it is not an error: it keeps being checked daily (cheap) and starts recording as
+      // soon as posts become readable. Counting it toward the pause streak would let one later timeout pause it for good.
       if (saved.status === "UNAVAILABLE") {
-        update.consecutive_failure_count = channel.consecutive_failure_count + 1;
         result.failed++;
         failureNotes.push(`${channel.platform}:${channel.external_id} 공개 데이터를 확인하지 못했어요`);
       } else {
-        if (channel.consecutive_failure_count > 0) update.consecutive_failure_count = 0;
         result.processed++;
       }
       await supabase.from("tracked_channels").update(update).eq("id", channel.id);

@@ -105,7 +105,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
 }
 
 function PageHeading() {
-  return <PageHeader title="숏폼 스튜디오" description="사진을 올려 20~30초 AI 광고 영상을 만들고, 미리보기와 YouTube 게시, 예약 운영까지 한곳에서 관리해요." />;
+  return <PageHeader title="숏폼 스튜디오" description="사진을 올려 20~30초 AI 광고 영상을 만들고, 미리보기·게시 문구·예약까지 한곳에서 관리해요. 게시는 영상을 내려받아 직접 해요." />;
 }
 
 

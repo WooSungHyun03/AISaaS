@@ -201,7 +201,7 @@ export function ShortsStudio({
 
           {latestPreview ? <div className="space-y-4 rounded-2xl border bg-card p-5 sm:p-6">
             <div className="flex flex-wrap items-center gap-2">
-              {latestPreview.format === "ad" ? <Badge variant="brand">AI 광고 영상{latestPreview.durationSec ? ` · ${latestPreview.durationSec}초` : ""}</Badge> : null}
+              <Badge variant="brand">{latestPreview.sample ? "테스트 샘플(AI 대본)" : latestPreview.format === "ad" ? "AI 광고 영상" : "AI 생성 영상"}{latestPreview.durationSec ? ` · ${latestPreview.durationSec}초` : ""}</Badge>
               {latestPreview.voiceFallback ? <Badge variant="secondary">한국어 음성을 따로 입혔어요</Badge> : null}
             </div>
             <div><p className="text-xs font-semibold text-muted-foreground">후킹 문구</p><p className="mt-1 text-lg font-bold leading-7">{latestPreview.hook ?? "제목 없음"}</p>{latestPreview.topic ? <p className="mt-1 text-sm text-muted-foreground">주제 · {latestPreview.topic}</p> : null}</div>
@@ -229,7 +229,7 @@ export function ShortsStudio({
       {referencesSlot}
 
       <section aria-labelledby="schedule-heading" className="rounded-2xl border bg-card p-5 sm:p-7">
-        <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-start gap-3"><span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-primary"><CalendarClock className="size-5" aria-hidden="true" /></span><div><h2 id="schedule-heading" className="text-lg font-extrabold tracking-[-0.03em]">예약 만들기</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">저장하면 예약 시각마다 새 영상을 만들어요. 위에서 게시할 플랫폼을 골라두면 만든 영상을 그곳에 바로 올리고, 고르지 않으면 영상만 만들어 둬요.</p></div></div>{nextRunAt && automationStatus === "ACTIVE" ? <Badge variant="brand">다음 만들기 {new Date(nextRunAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</Badge> : <Badge variant="secondary">예약 꺼짐</Badge>}</div>
+        <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-start gap-3"><span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-primary"><CalendarClock className="size-5" aria-hidden="true" /></span><div><h2 id="schedule-heading" className="text-lg font-extrabold tracking-[-0.03em]">예약 만들기</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">저장하면 예약 시각마다 새 영상을 만들어 둬요. 자동으로 게시하지는 않으니, 만든 영상을 확인한 뒤 내려받아 직접 올려주세요.</p></div></div>{nextRunAt && automationStatus === "ACTIVE" ? <Badge variant="brand">다음 만들기 {new Date(nextRunAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</Badge> : <Badge variant="secondary">예약 꺼짐</Badge>}</div>
         <form className="mt-6 space-y-5" action={(formData) => run("schedule", () => saveShortsSchedule(automationId, formData), "예약 설정을 저장하고 켰어요.")}>
           <ScheduleFields idPrefix="shorts" label="예약" value={scheduleValue} onChange={setScheduleValue} disabled={busy} />
           <ScheduleHiddenInputs value={scheduleValue} />

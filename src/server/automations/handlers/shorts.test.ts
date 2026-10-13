@@ -436,6 +436,22 @@ describe("ad Shorts pipeline", () => {
       expect(spec.overlays.find((overlay: { kind: string; text?: string }) => overlay.kind === "text")?.text).toBeTruthy();
     });
 
+    it("never signs a logo outside this automation's own folder (config is owner-writable)", async () => {
+      const assets = await import("@/server/shorts/assets");
+      const real = await vi.importActual<typeof import("@/server/shorts/assets")>("@/server/shorts/assets");
+      const spy = vi.spyOn(assets, "resolveAssetUrls").mockImplementation(async (_admin, list, owner) => {
+        for (const asset of list) if (asset.origin === "upload" && !real.isOwnedAssetPath(asset.source, owner.userId, owner.automationId)) throw new Error("foreign asset");
+        return list.map((asset) => `https://project.supabase.co/sign/${asset.source}?t=1`);
+      });
+      const foreignLogo = { id: "logo", kind: "logo", origin: "upload", source: "user-2/auto-9/assets/logo.png", label: "" };
+      try {
+        await expect(drive(context({ assets: [image("a"), foreignLogo] }))).rejects.toThrow("foreign asset");
+      } finally {
+        spy.mockRestore();
+      }
+      expect(m.startCompose).not.toHaveBeenCalled();
+    });
+
     it("writes the business name when there is no logo", async () => {
       await drive(context());
       expect(m.startCompose.mock.calls[0][0].overlays).toContainEqual(expect.objectContaining({ kind: "text", text: "우리동네 빵집", position: "top-left" }));

@@ -30,6 +30,8 @@ export interface NaverBlogMetrics {
    * that mention the blog id). Missing on rows/mocks from before RSS support, which were search-based.
    */
   basis?: "rss" | "search";
+  /** True when the blog's RSS was not read because robots.txt does not allow it (rss.blog.naver.com disallows every crawler), so "0 posts" means "not measured", not "no posts". */
+  blockedByRobots?: boolean;
   /** The posts the feed showed (newest first, title + link + time). Only the RSS path fills it; search results never put bodies here. */
   /** The blog's own name from its feed. */
   blogTitle?: string | null;

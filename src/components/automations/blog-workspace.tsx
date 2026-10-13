@@ -177,6 +177,7 @@ export function BlogWorkspace({
           <p className="text-[13px] font-semibold text-muted-foreground">제목</p>
           <p className="mt-1 text-xl font-extrabold leading-8 tracking-[-0.03em]">{saved.title}</p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
+            <Badge variant="secondary">AI 생성 글</Badge>
             <Badge variant="brand">공백 제외 {chars.toLocaleString()}자</Badge>
             <Badge variant="secondary">소제목 {Math.max(0, post.sections.filter((section) => section.heading).length)}개</Badge>
             <Badge variant="secondary">사진 자리 {photos.length}곳</Badge>

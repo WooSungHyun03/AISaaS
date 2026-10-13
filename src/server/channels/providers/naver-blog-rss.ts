@@ -31,7 +31,7 @@ export async function collectNaverBlogRssMetrics(externalId: string, now: Date =
   try {
     const feedUrl = `https://rss.blog.naver.com/${externalId}.xml`;
     // robots.txt first: if the feed does not allow automated reads the blog is "cannot be measured", not zero.
-    if (!(await isFetchAllowedByRobots(feedUrl))) return emptyMetrics();
+    if (!(await isFetchAllowedByRobots(feedUrl))) return { ...emptyMetrics(), blockedByRobots: true };
     xml = (await fetchPublicXml(feedUrl)).html;
   } catch (cause) {
     if (cause instanceof DiagnosisError && (cause.code === "BLOCKED_TARGET" || cause.code === "INVALID_URL")) throw cause;
