@@ -1,66 +1,32 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
-import { FormMessage } from "@/components/ui/form-message";
 import { PageHeader } from "@/components/layout/page-header";
-import { IntegrationSettings, type SafeConnection } from "@/components/settings/integration-settings";
 import { ProfileForm } from "@/components/settings/profile-form";
 import { PasswordForm } from "@/components/settings/password-form";
 import { DeleteAccountForm } from "@/components/settings/delete-account-form";
-import { EmptyState } from "@/components/ui/page-state";
-import { isAdminUser } from "@/server/admin/access";
-import { getIntegrationConfigStatus } from "@/server/connectors/config-status";
 
 export const metadata = { title: "설정" };
 
-const YOUTUBE_MESSAGE: Record<string, { variant: "success" | "info" | "error"; text: string }> = {
-  connected: { variant: "success", text: "YouTube 채널과 Analytics 권한을 연결했어요. 업로드는 비공개로만 해요." },
-  connected_limited: { variant: "info", text: "YouTube 채널은 연결했지만 Analytics 권한을 허용하지 않아 조회수·시청 시간·구독자 증감은 볼 수 없어요. ‘다시 연결’에서 모든 권한을 허용해주세요." },
-  denied: { variant: "info", text: "YouTube 연결을 취소했어요. 권한을 확인하고 다시 시도할 수 있어요." },
-  state_error: { variant: "error", text: "YouTube 연결 요청이 만료됐거나 확인할 수 없어요. 다시 시도해주세요." },
-  invalid_business: { variant: "error", text: "연결할 사업체를 확인할 수 없어요." },
-  not_configured: { variant: "info", text: "YouTube 연동 설정이 아직 끝나지 않았어요. 지금은 연결할 수 없어요. 운영팀이 Google OAuth 설정을 마치면 이용할 수 있어요." },
-  error: { variant: "error", text: "YouTube 채널을 연결하지 못했어요. 채널과 권한을 확인해주세요." },
-};
-
-export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ business?: string; youtube?: string }> }) {
-  const query = await searchParams;
+export default async function SettingsPage() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const [{ data: profile }, { data: businesses, error: businessError }] = await Promise.all([
-    supabase.from("profiles").select("*").eq("id", user.id).single(),
-    supabase.from("businesses").select("id, name").eq("owner_id", user.id).order("created_at"),
-  ]);
-  if (businessError) throw new Error("사업 정보를 불러오지 못했습니다.");
-  const selectedBusiness = (businesses ?? []).find((business) => business.id === query.business) ?? businesses?.[0];
-  const { data: connections, error: connectionError } = selectedBusiness
-    ? await supabase.from("integration_connections")
-      .select("id, provider, account_identifier, status, metadata, connected_at, updated_at")
-      .eq("user_id", user.id).eq("business_id", selectedBusiness.id)
-    : { data: [], error: null };
-  if (connectionError) throw new Error("외부 서비스 연결 정보를 불러오지 못했습니다.");
-  const configStatus = getIntegrationConfigStatus();
-  const showSetupDetails = await isAdminUser(user.id).catch(() => false);
-  const youtubeMessage = query.youtube ? YOUTUBE_MESSAGE[query.youtube] : undefined;
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).single();
 
   return (
     <div className="mx-auto max-w-5xl space-y-10">
-      <PageHeader title="설정" description="프로필, 비밀번호, 외부 서비스 연결과 계정을 관리해요." actions={<Button asChild variant="outline"><Link href="/business">사업 정보 관리</Link></Button>} />
+      <PageHeader title="설정" description="프로필, 비밀번호, 채널 등록 안내와 계정을 관리해요." actions={<Button asChild variant="outline"><Link href="/business">사업 정보 관리</Link></Button>} />
 
-      {youtubeMessage && <FormMessage variant={youtubeMessage.variant}>{youtubeMessage.text}</FormMessage>}
-
-      <section aria-labelledby="integration-heading" className="space-y-4">
-        <div><h2 id="integration-heading" className="text-lg font-extrabold tracking-[-0.03em]">외부 서비스 연결</h2><p className="mt-1 text-sm text-muted-foreground">숏폼 게시와 성장 리포트에 쓰는 YouTube만 연결해요. 사업체마다 따로 연결하고, 비밀번호와 토큰은 저장한 뒤 다시 보여주지 않아요.</p></div>
-        {(businesses ?? []).length === 0 ? <EmptyState mascot="welcome" title="연결할 사업체가 없어요" description="외부 서비스는 사업체마다 따로 연결해요. 먼저 사업 정보를 등록해주세요." action={<Button asChild><Link href="/onboarding">사업 정보 등록</Link></Button>} /> : <>
-          {(businesses ?? []).length > 1 && <nav className="flex flex-wrap gap-2" aria-label="연결을 관리할 사업체">
-            {(businesses ?? []).map((business) => <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness?.id ? "default" : "outline"} className="h-9 rounded-full px-4"><Link href={`/settings?business=${business.id}`} aria-current={business.id === selectedBusiness?.id ? "page" : undefined}>{business.name}</Link></Button>)}
-          </nav>}
-          <IntegrationSettings key={selectedBusiness!.id} businessId={selectedBusiness!.id} connections={(connections ?? []) as SafeConnection[]} configStatus={configStatus} showSetupDetails={showSetupDetails} />
-        </>}
+      <section aria-labelledby="channels-heading" className="space-y-3">
+        <h2 id="channels-heading" className="text-lg font-extrabold tracking-[-0.03em]">채널 등록</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border bg-card px-5 py-5 sm:px-6">
+          <p className="min-w-0 max-w-xl text-sm leading-6 text-muted-foreground">YouTube·네이버 블로그·티스토리는 계정을 연결하지 않아도 돼요. 채널 주소만 등록하면 공개된 통계를 매일 오전 6시(한국 시간)에 모아 성장 리포트에 보여드려요.</p>
+          <Button asChild variant="outline"><Link href="/diagnosis">채널 등록하러 가기</Link></Button>
+        </div>
       </section>
 
       <section aria-labelledby="profile-heading" className="space-y-4">

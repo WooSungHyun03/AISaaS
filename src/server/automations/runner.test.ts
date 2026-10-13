@@ -371,31 +371,6 @@ describe("runDueAutomation / runAutomationNow — refusal to run", () => {
     expect(admin.updates.automations).toBeUndefined();
   });
 
-  it("does not reserve a second credit for publishing an existing Shorts preview", async () => {
-    const shortsTemplate = { ...TEMPLATE, slug: "shorts" };
-    const admin = makeAdmin({
-      automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }],
-      businesses: [{ data: BUSINESS, error: null }],
-      automation_templates: [{ data: shortsTemplate, error: null }],
-      automation_runs: [noInFlight(), { data: { id: "run-publish" }, error: null }, { data: null, error: null }],
-      content_history: [{ data: [], error: null }],
-    });
-    createAdminClientMock.mockReturnValue(admin);
-    okHandler({ output: { operation: "PUBLISH" }, aiGenerationCount: 0 });
-
-    const result = await runAutomationNow("auto-1", {
-      shorts: { publish: { sourceRunId: "preview-1", platforms: ["youtube"] } },
-    });
-
-    expect(result.status).toBe("SUCCESS");
-    expect(ensureTrialCreditsMock).not.toHaveBeenCalled();
-    expect(canExecuteAutomationMock).not.toHaveBeenCalled();
-    expect(reserveCreditMock).not.toHaveBeenCalled();
-    expect(admin.rpc).toHaveBeenCalledWith("complete_automation_run_credit_v2", expect.objectContaining({
-      p_run_id: "run-publish",
-      p_requires_credit: false,
-    }));
-  });
 });
 
 describe("runDueAutomation / runAutomationNow — duplicate-run guard", () => {

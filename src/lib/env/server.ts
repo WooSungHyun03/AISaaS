@@ -51,9 +51,6 @@ const serverSchema = z.object({
 
 
 
-  YOUTUBE_CLIENT_ID: z.string().optional(),
-  YOUTUBE_CLIENT_SECRET: z.string().optional(),
-  YOUTUBE_REFRESH_TOKEN: z.string().optional(),
 
   // Ad Shorts (src/server/connectors/wan): Wan 3.0 Standard reference-to-video through fal.ai. "mock" never calls the
   // network; "fal" needs FAL_KEY. Every paid call also needs ALLOW_PAID_AI_CALLS=true and a budget period (below).
@@ -106,9 +103,7 @@ const serverSchema = z.object({
   // numbers) instead of failing every request at boot; only an explicit
   // CHANNEL_DATA_PROVIDER=mock in production is refused.
   CHANNEL_DATA_PROVIDER: z.enum(["live", "mock"]).default(process.env.NODE_ENV === "production" ? "live" : "mock"),
-  // YouTube Data API v3 key (API key only — this is public-data collection,
-  // no OAuth/user connection involved, unlike YOUTUBE_CLIENT_ID/SECRET above
-  // which belong to the Shorts-publishing connector).
+  // YouTube Data API v3 key (API key only — public channel/video statistics; no OAuth, no user account connection).
   YOUTUBE_API_KEY: z.string().optional(),
   // Naver Search API (blog.json) — sent as X-Naver-Client-Id/Secret headers.
   // Public-data search, not the blog owner's own credentials.

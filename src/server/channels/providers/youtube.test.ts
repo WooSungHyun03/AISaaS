@@ -53,16 +53,17 @@ describe("YouTubeChannelDataProvider.collect", () => {
 
     const result = await new YouTubeChannelDataProvider().collect("@mychannel");
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       subscriberCount: 1200,
       hiddenSubscriberCount: false,
       viewCount: 50000,
       videoCount: 3,
-      recentVideos: [
-        { publishedAt: "2026-10-09T00:00:00.000Z", viewCount: 600 },
-        { publishedAt: "2026-09-20T00:00:00.000Z", viewCount: 400 },
-      ],
     });
+    // like/comment counts the API leaves out are unknown (null), never 0.
+    expect(result.recentVideos).toEqual([
+      { videoId: "vid1", publishedAt: "2026-10-09T00:00:00.000Z", viewCount: 600, likeCount: null, commentCount: null },
+      { videoId: "vid2", publishedAt: "2026-09-20T00:00:00.000Z", viewCount: 400, likeCount: null, commentCount: null },
+    ]);
 
     const firstCallUrl = new URL(fetchMock.mock.calls[0][0] as string);
     expect(firstCallUrl.pathname).toBe("/youtube/v3/channels");
@@ -145,5 +146,31 @@ describe("YouTubeChannelDataProvider.collect", () => {
   it("is an instance of YouTubeCollectorError", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({ items: [] })));
     await expect(new YouTubeChannelDataProvider().collect("@missing")).rejects.toBeInstanceOf(YouTubeCollectorError);
+  });
+});
+
+describe("YouTubeChannelDataProvider.lookup (registration preview)", () => {
+  it("resolves a handle to the canonical channel id with name, image and public counts (1 API call)", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({
+      items: [{ id: "UCabcdefghijklmnopqrstuv", snippet: { title: "우리 채널", customUrl: "@mychannel", thumbnails: { default: { url: "https://yt3.ggpht.com/a" }, medium: { url: "https://yt3.ggpht.com/m" } } }, statistics: { subscriberCount: "1200", videoCount: "3", viewCount: "9" } }],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const preview = await new YouTubeChannelDataProvider().lookup({ handle: "mychannel" });
+
+    expect(preview).toEqual({ channelId: "UCabcdefghijklmnopqrstuv", title: "우리 채널", handle: "@mychannel", thumbnailUrl: "https://yt3.ggpht.com/m", subscriberCount: 1200, videoCount: 3 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = new URL(fetchMock.mock.calls[0][0] as string);
+    expect(url.searchParams.get("forHandle")).toBe("@mychannel");
+    expect(url.searchParams.get("part")).toBe("snippet,statistics");
+  });
+
+  it("does not show a hidden subscriber count as 0, and rejects a channel the API does not know", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ items: [{ id: "UCabcdefghijklmnopqrstuv", snippet: { title: "숨김" }, statistics: { hiddenSubscriberCount: true, videoCount: "1" } }] }))
+      .mockResolvedValueOnce(jsonResponse({ items: [] })));
+    const provider = new YouTubeChannelDataProvider();
+    await expect(provider.lookup({ channelId: "UCabcdefghijklmnopqrstuv" })).resolves.toMatchObject({ subscriberCount: null });
+    await expect(provider.lookup({ handle: "@nobody" })).rejects.toMatchObject({ code: "CHANNEL_NOT_FOUND" });
   });
 });

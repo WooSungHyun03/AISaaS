@@ -2,7 +2,7 @@
 // draws numbered markers over the controls the guide talks about, and checks that every marked control was found.
 //   bash scripts/dev-db.sh
 //   psql … < scripts/seed-growth-demo.sql ; psql … < scripts/sql/seed-guide-screens.sql
-//   YOUTUBE_CLIENT_ID=x YOUTUBE_CLIENT_SECRET=x npx next dev -p 3100   # placeholders only so the connect buttons are enabled; nothing is sent
+//   CRON_SECRET=local-cron-secret CHANNEL_DATA_PROVIDER=mock AI_PROVIDER=mock BILLING_PROVIDER=mock npx next dev -p 3100   # mock providers: no network, sample data
 //   node scripts/e2e/capture-guide.mjs [--only blog/photos]
 // Only seeded sample data and generated sample "photos" appear: no personal, token or payment data.
 import { execFileSync } from "node:child_process";
@@ -37,7 +37,7 @@ function specs(ctx) {
   return [
     { slug: "diagnosis", id: "overview", path: "/diagnosis", marks: [text("마케팅 준비 점수"), text("점수는 이렇게 계산했어요")] },
     { slug: "diagnosis", id: "website", path: "/diagnosis", prepare: scrollTo((p) => p.getByRole("heading", { name: "홈페이지 진단" })), marks: [label("홈페이지 주소"), role({ role: "button", name: /다시 진단하기|홈페이지 진단하기/ }), text("홈페이지 기본", { exact: true })] },
-    { slug: "diagnosis", id: "channel", path: "/diagnosis", prepare: scrollTo((p) => p.getByRole("heading", { name: "채널 진단" })), marks: [label("채널 주소"), label("플랫폼"), role({ role: "button", name: "채널 추가" })] },
+    { slug: "diagnosis", id: "channel", path: "/diagnosis", prepare: scrollTo((p) => p.getByRole("heading", { name: "채널 진단" })), marks: [label("채널 주소"), label("플랫폼"), role({ role: "button", name: "채널 확인" })] },
 
     { slug: "calendar", id: "month", path: "/calendar", marks: [role({ role: "button", name: "월", exact: true }), role({ role: "button", name: "일정 추가" }), (p) => p.locator(".fc-event").first()] },
     { slug: "calendar", id: "add", path: "/calendar", prepare: async (page) => { await page.getByRole("button", { name: "일정 추가" }).click(); await page.getByRole("dialog").waitFor(); }, marks: [(p) => p.getByRole("dialog").getByLabel("제목"), (p) => p.getByRole("dialog").getByText("시작", { exact: false }).first(), (p) => p.getByRole("dialog").getByText("반복", { exact: false }).first()] },
@@ -53,15 +53,25 @@ function specs(ctx) {
     { slug: "shorts", id: "settings", path: "/shorts", prepare: scrollTo((p) => p.getByText("영상 길이").first()), marks: [label("영상 길이"), (p) => p.getByText("목소리", { exact: true }), label("어떤 광고를 원하세요?")] },
     { slug: "shorts", id: "result", path: () => ctx.shortsRunPath, prepare: scrollTo(text("사용한 참고 자료")), marks: [text("사용한 참고 자료")] },
 
-    { slug: "growth-report", id: "overview", path: "/growth-report", marks: [(p) => p.getByRole("navigation", { name: "기간 선택" }), (p) => p.getByRole("heading", { name: /채널 성장/ })] },
+    { slug: "growth-report", id: "overview", path: "/growth-report", marks: [(p) => p.getByRole("navigation", { name: "기간 선택" }), (p) => p.getByRole("navigation", { name: "보기 단위" }), (p) => p.getByRole("heading", { name: /채널 성장/ })] },
     { slug: "growth-report", id: "chart", path: "/growth-report", prepare: scrollTo((p) => p.getByRole("heading", { name: /채널 성장/ })), marks: [text("구독자 수", { exact: true }), (p) => p.getByText(/이전 30일 대비/).first(), (p) => p.locator("svg[role='img']").first()] },
     { slug: "growth-report", id: "internal", path: "/growth-report", prepare: scrollTo((p) => p.getByRole("heading", { name: /서비스 내부 기록/ })), marks: [text("만든 콘텐츠", { exact: true }), text("제작 성공률", { exact: true }), text("캘린더 수행률", { exact: true })] },
 
     { slug: "home", id: "overview", path: "/dashboard", marks: [(p) => p.locator("section[aria-labelledby='next-action-title']"), (p) => p.locator("section[aria-labelledby='next-action-title'] a").first()] },
     { slug: "home", id: "credits", path: "/dashboard", prepare: scrollTo((p) => p.getByRole("heading", { name: "남은 콘텐츠 이용권" })), marks: [(p) => p.getByRole("heading", { name: "남은 콘텐츠 이용권" }), (p) => p.getByRole("link", { name: /구매·관리/ })] },
 
-    { slug: "channels", id: "overview", path: "/settings", marks: [(p) => p.getByRole("heading", { name: "외부 서비스 연결" }), (p) => p.getByRole("heading", { name: "YouTube" })] },
-    { slug: "channels", id: "connect", path: "/settings", marks: [(p) => p.locator("span", { hasText: /^연결 안 됨$/ }).first(), role({ role: "link", name: /YouTube 연결|다시 연결/ })] },
+    { slug: "channels", id: "form", path: "/diagnosis", prepare: scrollTo((p) => p.getByRole("heading", { name: "채널 진단" })), marks: [label("채널 주소"), role({ role: "button", name: "채널 확인" })] },
+    {
+      slug: "channels", id: "confirm", path: "/diagnosis",
+      prepare: async (page) => {
+        await scrollTo((p) => p.getByRole("heading", { name: "채널 진단" }))(page);
+        await page.getByLabel("채널 주소").first().fill("https://www.youtube.com/@mybakery");
+        await page.getByRole("button", { name: "채널 확인" }).click();
+        await page.getByRole("status", { name: "확인된 채널" }).waitFor({ timeout: 15_000 });
+      },
+      marks: [(p) => p.getByRole("status", { name: "확인된 채널" }), role({ role: "button", name: "이 채널로 등록" }), role({ role: "button", name: "다시 입력" })],
+    },
+    { slug: "channels", id: "status", path: "/growth-report", prepare: scrollTo((p) => p.getByRole("heading", { name: /채널 성장/ })), marks: [(p) => p.getByText(/마지막 갱신/).first(), (p) => p.getByText(/다음 수집/).first()] },
 
     { slug: "billing", id: "overview", path: "/billing", marks: [(p) => p.getByRole("heading", { name: "남은 이용권" })] },
     { slug: "billing", id: "products", path: "/billing", prepare: scrollTo((p) => p.getByRole("heading", { name: /블로그 포스팅 상품/ })), marks: [(p) => p.getByRole("heading", { name: /블로그 포스팅 상품/ }), (p) => p.getByRole("button", { name: /구매/ }).first()] },

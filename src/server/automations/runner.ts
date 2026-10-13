@@ -355,12 +355,10 @@ async function executeAutomation(
   const creditKind = getAutomationCreditKind(template.slug);
   // Blog posts and Shorts are written for a store, a product or a platform — each is planned differently, so the
   // owner has to say which before anything is generated (and before a credit is touched).
-  if (creditKind && !business.promotion_type && !(template.slug === "shorts" && options.shorts?.publish)) {
+  if (creditKind && !business.promotion_type) {
     return recordRefusedRun(admin, automation, source, PROMOTION_TYPE_REQUIRED_MESSAGE, { advanceSchedule });
   }
-  // Re-publishing an already rendered Shorts preview performs no AI/render
-  // work and follows the existing aiGenerationCount: 0 precedent.
-  const consumesCredit = Boolean(creditKind) && !(template.slug === "shorts" && options.shorts?.publish);
+  const consumesCredit = Boolean(creditKind);
   if (consumesCredit) {
     await ensureTrialCredits(automation.user_id);
     const entitlement = await canExecuteAutomation(admin, automation.user_id, template.slug);
@@ -621,7 +619,7 @@ export async function advanceDeferredRun(runId: string): Promise<AdvanceDeferred
   const { data: template } = await admin.from("automation_templates").select("*").eq("id", automation.template_id).single();
   const input = run.input && typeof run.input === "object" && !Array.isArray(run.input) ? (run.input as Record<string, Json>) : {};
   const shortsInput = input.shorts as AutomationRunContext["shorts"];
-  const consumesCredit = Boolean(getAutomationCreditKind(template?.slug ?? "")) && !shortsInput?.publish;
+  const consumesCredit = Boolean(getAutomationCreditKind(template?.slug ?? ""));
   const resumeContext: AutomationRunContext | null = business
     ? {
       automation,

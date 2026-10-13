@@ -279,7 +279,7 @@ describe("diagnoseWebsite", () => {
     expect(result.mainOffering).toBeNull();
   });
 
-  it("counts channels saved on the profile and connected accounts toward channel presence", async () => {
+  it("counts channels saved on the profile and registered (tracked) channels toward channel presence", async () => {
     mockOneRequest(makeMockResponse(200, HTML_HEADERS), "<html><body>hi</body></html>");
     generateStructuredMock.mockRejectedValue(new Error("down"));
 
@@ -288,12 +288,12 @@ describe("diagnoseWebsite", () => {
     const withChannels = await diagnoseWebsite(BUSINESS, "https://example.com/", {
       now: NOW,
       profileSnsLinks: { naver_blog: "https://blog.naver.com/x" },
-      connectedProviders: ["instagram"],
+      connectedProviders: ["youtube"],
     });
 
     expect(withChannels.score).toBeGreaterThan(bare.score);
-    expect(withChannels.missingChannels).not.toContain("인스타그램");
-    expect(withChannels.snsActivity).toContain("공식 계정 연결 없이는 확인할 수 없");
+    expect(withChannels.missingChannels).not.toContain("유튜브");
+    expect(withChannels.snsActivity).toContain("채널로 등록돼 있어요");
   });
 
   it("deterministically finds social/blog/place/channel links in <a href> attributes, independent of what the AI returns", async () => {

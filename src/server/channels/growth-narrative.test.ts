@@ -18,9 +18,12 @@ const CHANNEL: Parameters<typeof buildGrowthNarrative>[0] = {
   platform: "youtube",
   externalId: "@mychannel",
   url: "https://youtube.com/@mychannel",
+  displayName: null,
+  thumbnailUrl: null,
+  collection: { state: "SUCCESS", lastCollectedAt: null, nextCollectionAt: null, measuredDays: 2, paused: false },
   metrics: [
-    { metric: "subscriberCount", label: "구독자 수", status: "OK", current: 1050, previous: 1000, absoluteDelta: 50, deltaPercent: 5, points: [], hasDemoSeedData: false },
-    { metric: "viewCount", label: "조회수", status: "COLLECTING", current: null, previous: null, absoluteDelta: null, deltaPercent: null, points: [], hasDemoSeedData: false },
+    { metric: "subscriberCount", label: "구독자 수", status: "OK", current: 1050, previous: 1000, absoluteDelta: 50, deltaPercent: 5, points: [], hasDemoSeedData: false, hasSampleData: false, kind: "TOTAL" },
+    { metric: "viewCount", label: "조회수", status: "COLLECTING", current: null, previous: null, absoluteDelta: null, deltaPercent: null, points: [], hasDemoSeedData: false, hasSampleData: false, kind: "TOTAL" },
   ],
 };
 
@@ -201,8 +204,8 @@ describe("rule-based narrative wording", () => {
   });
 
   it("uses each metric's own unit and never invents a number that is not in the data", async () => {
-    const text = await narrate([metric({ metric: "yt_analytics.estimatedMinutesWatched", label: "시청 시간 (기간 합계, 분)", current: 1200, previous: 900, absoluteDelta: 300, deltaPercent: 33 })]);
-    expect(text).toBe("시청 시간은 이전 30일보다 300분 늘었어요. 지금은 1,200분이에요.");
+    const text = await narrate([metric({ metric: "viewCountDaily", label: "일별 조회수 증가량", current: 1200, previous: 900, absoluteDelta: 300, deltaPercent: 33 })]);
+    expect(text).toBe("일별 조회수 증가량은 이전 30일보다 300회 늘었어요. 지금은 1,200회예요.");
     expect(text).not.toMatch(/33/);
   });
 });

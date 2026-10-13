@@ -6,7 +6,7 @@ import { GUIDES, GUIDE_SLUGS, getGuide, guideShotSrc } from "./guide-content";
 describe("guide content", () => {
   it("covers the eight features in the agreed order", () => {
     expect(GUIDES.map((guide) => guide.slug)).toEqual([...GUIDE_SLUGS]);
-    expect(GUIDES.map((guide) => guide.title)).toEqual(["마케팅 진단", "마케팅 캘린더", "블로그 제작", "광고 숏폼 제작", "성장 리포트", "내 마케팅 홈", "채널 연결", "결제 · 이용권 · 설정"]);
+    expect(GUIDES.map((guide) => guide.title)).toEqual(["마케팅 진단", "마케팅 캘린더", "블로그 제작", "광고 숏폼 제작", "성장 리포트", "내 마케팅 홈", "채널 등록", "결제 · 이용권 · 설정"]);
   });
 
   it("fills every section of every guide", () => {

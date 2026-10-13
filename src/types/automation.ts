@@ -16,16 +16,9 @@ export interface AutomationSchedule {
   timezone?: string;
 }
 
-export type ShortsPublishPlatform = "youtube";
-
 export interface ShortsRunOptions {
   /** Preview runs generate and render the video without posting it. */
   previewOnly?: boolean;
-  /** Publish a previously rendered, server-verified preview. */
-  publish?: {
-    sourceRunId: string;
-    platforms: ShortsPublishPlatform[];
-  };
 }
 
 /** Everything a handler needs to do its work for a single run. */

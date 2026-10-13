@@ -9,9 +9,6 @@ import type { TistoryCollector } from "./tistory";
 import { collectNaverBlogLive } from "./naver-blog-live";
 import { collectMockNaverBlogMetrics } from "./naver-blog-mock";
 import type { NaverBlogCollector } from "./naver-types";
-import { collectMockYouTubeAnalytics } from "./youtube-analytics-mock";
-import type { YouTubeAnalyticsCollector } from "./youtube-analytics-types";
-import { collectYouTubeAnalyticsLive } from "@/server/connectors/youtube/analytics";
 
 let cachedProvider: YouTubeDataProvider | undefined;
 
@@ -32,18 +29,6 @@ export function getNaverBlogCollector(): NaverBlogCollector {
   return serverEnv.CHANNEL_DATA_PROVIDER === "live" ? collectNaverBlogLive : collectMockNaverBlogMetrics;
 }
 
-/**
- * Ticket 1-10: owner-only YouTube Analytics. `mock` returns deterministic
- * sample days; `live` calls the real YouTube Analytics API with the
- * channel owner's OAuth token (src/server/connectors/youtube/analytics.ts).
- * The pipeline only calls it for a CONNECTED connection whose consent
- * included yt-analytics.readonly.
- */
-export function getYouTubeAnalyticsCollector(): YouTubeAnalyticsCollector {
-  return serverEnv.CHANNEL_DATA_PROVIDER === "live" ? collectYouTubeAnalyticsLive : collectMockYouTubeAnalytics;
-}
-
 export * from "./youtube-types";
 export * from "./tistory";
 export * from "./naver-types";
-export * from "./youtube-analytics-types";

@@ -2,7 +2,14 @@ import type { ChannelPlatform } from "./platform";
 import { channelPlatformSchema } from "./platform";
 
 export type ParsedChannelUrl =
-  | { ok: true; platform: ChannelPlatform; externalId: string; normalizedUrl: string }
+  | {
+      ok: true;
+      platform: ChannelPlatform;
+      externalId: string;
+      normalizedUrl: string;
+      /** YouTube only: how to look the channel up when it is not a bare channel id (resolved to the canonical "UC…" id when registering). */
+      youtubeLookup?: { handle: string } | { username: string };
+    }
   | { ok: false; message: string };
 
 const UNSUPPORTED_MESSAGE =
@@ -36,7 +43,12 @@ function parseYouTube(url: URL): ParsedChannelUrl {
   const first = segments[0] ?? "";
 
   if (first.startsWith("@") && first.length > 1) {
-    return { ok: true, platform: "youtube", externalId: first, normalizedUrl: `https://youtube.com/${first}` };
+    return { ok: true, platform: "youtube", externalId: first, normalizedUrl: `https://youtube.com/${first}`, youtubeLookup: { handle: first } };
+  }
+
+  // Older channel URLs: youtube.com/user/<name> (resolved through the API's forUsername).
+  if (first.toLowerCase() === "user" && segments[1]) {
+    return { ok: true, platform: "youtube", externalId: segments[1], normalizedUrl: `https://youtube.com/user/${segments[1]}`, youtubeLookup: { username: segments[1] } };
   }
 
   if (first.toLowerCase() === "channel" && segments[1] && YOUTUBE_CHANNEL_ID.test(segments[1])) {
@@ -46,7 +58,7 @@ function parseYouTube(url: URL): ParsedChannelUrl {
 
   return {
     ok: false,
-    message: "지원하지 않는 유튜브 URL 형식이에요. @핸들 또는 /channel/UC... 형식을 사용해주세요.",
+    message: "지원하지 않는 유튜브 URL 형식이에요. 채널 페이지 주소(@핸들 또는 /channel/UC... 형식)를 입력해주세요. /c/이름 형식은 @핸들 주소로 바꿔주세요.",
   };
 }
 

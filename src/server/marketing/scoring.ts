@@ -99,7 +99,8 @@ export function collectPresentChannels(siteLinks: BusinessSnsLinks, profileLinks
     if (links.blog) present.add("naver_blog");
   }
   for (const provider of connected) {
-    if (provider === "instagram" || provider === "youtube") present.add(provider);
+    // Registered (tracked) channels count as present: "youtube" / "naver_blog" are the platform names of tracked_channels.
+    if (provider === "youtube" || provider === "naver_blog") present.add(provider);
   }
   return (Object.keys(CHANNEL_LABEL) as ChannelKey[]).filter((key) => present.has(key));
 }
@@ -201,7 +202,7 @@ export function describeSnsActivity(presentChannels: ChannelKey[], connectedProv
     return "홈페이지와 사업 정보에서 SNS 채널을 찾지 못했어요.";
   }
   const names = presentChannels.map((channel) => CHANNEL_LABEL[channel]).join(", ");
-  const connected = connectedProviders.filter((provider) => provider === "instagram" || provider === "youtube");
-  const connectedNote = connected.length ? ` ${connected.map((provider) => (provider === "instagram" ? "인스타그램" : "유튜브")).join(", ")}은 계정이 연결돼 있어요.` : "";
-  return `${names} 채널을 확인했어요.${connectedNote} 게시물 수와 활동 빈도는 공식 계정 연결 없이는 확인할 수 없어서 점수에 넣지 않았어요.`;
+  const tracked = connectedProviders.filter((provider) => provider === "youtube" || provider === "naver_blog");
+  const trackedNote = tracked.length ? ` ${tracked.map((provider) => CHANNEL_LABEL[provider as ChannelKey]).join(", ")}은 채널로 등록돼 있어요.` : "";
+  return `${names} 채널을 확인했어요.${trackedNote} 게시물 수와 활동 빈도는 홈페이지만으로는 확인할 수 없어서 점수에 넣지 않았어요. 채널을 등록하면 성장 리포트에서 공개 통계로 볼 수 있어요.`;
 }

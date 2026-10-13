@@ -1,3 +1,5 @@
+> **폐기됨 (2026-10-13).** YouTube 계정 연결(OAuth)과 Analytics 수집은 제거되었습니다. 이 문서는 이력으로만 남겨 둡니다. 현재 방식은 `docs/EXTERNAL_SETUP.md` 2번을 보세요.
+
 # Dev1에게: 티켓 1-10 — YouTube Analytics용 OAuth 스코프 추가 요청
 
 티켓 1-10(YouTube OAuth 연결 고급 Analytics)의 사람1 쪽(`src/server/channels/`)은

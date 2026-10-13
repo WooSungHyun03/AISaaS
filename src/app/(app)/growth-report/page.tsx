@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { buildGrowthReport, SOURCE_LABEL, type Comparison, type MetricSource, type Rate, type RunRow } from "@/server/marketing/growth-report";
-import { getChannelGrowthSeries, getOrCreateGrowthNarrative } from "@/server/channels";
+import { getChannelContentReports, getChannelGrowthSeries, getOrCreateGrowthNarrative, type GrowthGranularity } from "@/server/channels";
 import { ChannelGrowthCard } from "@/components/channels/channel-growth-card";
 import { cn } from "@/lib/utils";
 import { FormMessage } from "@/components/ui/form-message";
@@ -18,12 +18,11 @@ const PERIODS = [7, 30, 90] as const;
 const DAY_MS = 86_400_000;
 const ROW_LIMIT = 500;
 
-function publishedCount(output: unknown): number {
-  if (!output || typeof output !== "object" || Array.isArray(output)) return 0;
-  const results = (output as Record<string, unknown>).publicationResults;
-  if (!results || typeof results !== "object" || Array.isArray(results)) return 0;
-  return Object.values(results).filter((value) => value && typeof value === "object" && typeof (value as Record<string, unknown>).externalId === "string").length;
-}
+const GRANULARITIES: Array<{ value: GrowthGranularity; label: string }> = [
+  { value: "day", label: "일별" },
+  { value: "week", label: "주별" },
+  { value: "month", label: "월별" },
+];
 
 function SourceBadge({ source }: { source: MetricSource }) {
   return <Badge variant={source === "ESTIMATED" ? "warning" : "outline"}>{SOURCE_LABEL[source]}</Badge>;
@@ -52,10 +51,12 @@ function rateHint(rate: Rate | null, days: number) {
   );
 }
 
-export default async function GrowthReportPage({ searchParams }: { searchParams: Promise<{ business?: string; days?: string }> }) {
+export default async function GrowthReportPage({ searchParams }: { searchParams: Promise<{ business?: string; days?: string; view?: string }> }) {
   const query = await searchParams;
   const requestedDays = Number(query.days);
   const days = (PERIODS as readonly number[]).includes(requestedDays) ? requestedDays : 30;
+  // A 7-day chart is daily; a longer one reads better by week unless the owner picks otherwise.
+  const granularity: GrowthGranularity = GRANULARITIES.some((item) => item.value === query.view) ? (query.view as GrowthGranularity) : days >= 90 ? "week" : "day";
 
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -68,7 +69,7 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
   const heading = (
     <PageHeader
       title="성장 리포트"
-      description="연결한 채널의 구독자·게시 활동이 어떻게 변하고 있는지 먼저 보여드리고, 아래에 서비스 안의 제작·캘린더 기록도 함께 보여드려요."
+      description="등록한 채널의 공개 통계(구독자·조회수·게시 활동)를 매일 오전 6시에 모아 변화를 보여드리고, 아래에 서비스 안의 제작·캘린더 기록도 함께 보여드려요."
     />
   );
   if (!business) {
@@ -84,7 +85,7 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
   const since = new Date(now.getTime() - days * 2 * DAY_MS);
   const sinceDate = new Date(since.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
 
-  const seriesResult = await getChannelGrowthSeries(business.id, { days, now }).then(
+  const seriesResult = await getChannelGrowthSeries(business.id, { days, now, granularity }).then(
     (series) => ({ series, unavailable: false }),
     (error: unknown) => {
       if (!isMissingSchemaError(error)) throw error;
@@ -92,6 +93,12 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
     },
   );
   const growthSeries = seriesResult.series;
+  const contentReports = seriesResult.unavailable
+    ? new Map()
+    : await getChannelContentReports(business.id, growthSeries.channels, { days, now }).catch((error: unknown) => {
+      if (!isMissingSchemaError(error)) throw error;
+      return new Map();
+    });
   const channelsUnavailable = seriesResult.unavailable;
   const channelNarratives = await Promise.all(
     growthSeries.channels.map((channel) =>
@@ -113,7 +120,7 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
   const readError = contentResult.error || runsResult.error || calendarResult.error;
   if (readError) throw new Error("성장 리포트 데이터를 불러오지 못했습니다.", { cause: readError });
 
-  const runs: RunRow[] = (runsResult.data ?? []).map((run) => ({ status: run.status, created_at: run.created_at, publishedCount: publishedCount(run.output) }));
+  const runs: RunRow[] = (runsResult.data ?? []).map((run) => ({ status: run.status, created_at: run.created_at, publishedCount: 0 }));
   const report = buildGrowthReport({ now, days, content: contentResult.data ?? [], runs, calendar: calendarResult.data ?? [] });
   const maxWeekly = Math.max(1, ...report.weekly.map((week) => week.count));
   const truncated = (contentResult.data?.length ?? 0) >= ROW_LIMIT || runs.length >= ROW_LIMIT;
@@ -134,11 +141,23 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
           {PERIODS.map((period) => (
             <Link
               key={period}
-              href={`/growth-report?business=${business.id}&days=${period}`}
+              href={`/growth-report?business=${business.id}&days=${period}${query.view ? `&view=${granularity}` : ""}`}
               aria-current={period === days ? "page" : undefined}
               className={cn("rounded-md px-3 py-1.5 text-sm font-semibold transition-colors", period === days ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground")}
             >
               최근 {period}일
+            </Link>
+          ))}
+        </nav>
+        <nav className="flex gap-1 rounded-lg bg-muted p-1" aria-label="보기 단위">
+          {GRANULARITIES.map((item) => (
+            <Link
+              key={item.value}
+              href={`/growth-report?business=${business.id}&days=${days}&view=${item.value}`}
+              aria-current={item.value === granularity ? "page" : undefined}
+              className={cn("rounded-md px-3 py-1.5 text-sm font-semibold transition-colors", item.value === granularity ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground")}
+            >
+              {item.label}
             </Link>
           ))}
         </nav>
@@ -158,13 +177,13 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
           <EmptyState
             mascot="guide"
             title="아직 추적 중인 채널이 없어요"
-            description="유튜브·네이버 블로그·티스토리 채널을 추가하면 구독자·게시 활동 변화를 여기서 볼 수 있어요."
+            description="유튜브·네이버 블로그·티스토리 채널 주소를 추가하면 매일 오전 6시에 공개 통계를 모아 변화를 여기서 보여드려요."
             action={<Button asChild><Link href="/diagnosis">채널 진단으로 가기 <ArrowRight aria-hidden="true" /></Link></Button>}
           />
         ) : (
           <div className="space-y-4">
             {growthSeries.channels.map((channel, index) => (
-              <ChannelGrowthCard key={channel.channelId} channel={channel} narrative={channelNarratives[index].narrative} days={days} />
+              <ChannelGrowthCard key={channel.channelId} channel={channel} narrative={channelNarratives[index].narrative} days={days} granularity={granularity} content={contentReports.get(channel.channelId)} />
             ))}
           </div>
         )}
@@ -188,10 +207,9 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
               <StatCard label="만든 콘텐츠" value={`${report.contentCount.current}건`} hint={<Delta comparison={report.contentCount} days={days} />} />
               <StatCard label="제작 성공률" value={report.successRate ? `${report.successRate.current}%` : "-"} hint={rateHint(report.successRate, days)} />
               <StatCard label="캘린더 수행률" value={report.calendarCompletion ? `${report.calendarCompletion.current}%` : "-"} hint={rateHint(report.calendarCompletion, days)} />
-              <StatCard label="플랫폼 게시 확인" value={`${report.publications.current}건`} hint={<Delta comparison={report.publications} days={days} />} />
             </StatGroup>
             <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
-              <SourceBadge source="INTERNAL" /> 위 숫자는 이 서비스에 남은 제작·캘린더 기록으로 계산했어요. 게시 확인은 유튜브가 돌려준 응답이 있을 때만 세요.
+              <SourceBadge source="INTERNAL" /> 위 숫자는 이 서비스에 남은 제작·캘린더 기록으로 계산했어요.
               {truncated ? " 기록이 많아 최근 500건까지만 반영했어요." : ""}
             </p>
           </section>

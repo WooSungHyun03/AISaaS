@@ -96,3 +96,8 @@ begin
 
   raise notice '데모 스냅샷 생성 완료 — business_id=%, youtube=%, naver_blog=%, tistory=%', v_business_id, v_youtube_channel_id, v_naver_channel_id, v_tistory_channel_id;
 end $$;
+
+-- 수집 상태: 실제 채널처럼 "마지막 갱신/다음 수집"이 보이게 한다(값은 DEMO_SEED 스냅샷이라 화면에 '데모 데이터'로 표시됨).
+update public.tracked_channels
+   set last_collected_at = now(), last_collection_status = 'SUCCESS'
+ where id in (select id from public.tracked_channels where external_id in ('@demo-growth-channel', 'demo-growth-blog'));

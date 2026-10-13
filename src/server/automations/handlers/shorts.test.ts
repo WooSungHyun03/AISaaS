@@ -21,7 +21,6 @@ const m = vi.hoisted(() => ({
   startCompose: vi.fn(),
   getCompose: vi.fn(),
   tts: vi.fn(),
-  publishToPlatforms: vi.fn(),
   uploads: [] as Array<{ bucket: string; path: string }>,
   aiRequests: [] as Array<{ purpose?: string; role?: string; prompt: string }>,
   aiFail: { purpose: "" },
@@ -64,7 +63,6 @@ vi.mock("@/server/connectors/tts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/connectors/tts")>()),
   getTtsProvider: () => ({ name: "elevenlabs", synthesize: m.tts }),
 }));
-vi.mock("@/server/automations/shorts-publishing", () => ({ publishShortsToPlatforms: m.publishToPlatforms }));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     storage: {
@@ -171,7 +169,6 @@ beforeEach(() => {
   m.startCompose.mockResolvedValue({ jobId: "co-1" });
   m.getCompose.mockResolvedValue({ state: "done", result: { probe } });
   m.tts.mockResolvedValue({ audio: new Uint8Array(5_000), characters: 90 });
-  m.publishToPlatforms.mockResolvedValue({});
 });
 
 const generateReservations = () => m.reserve.mock.calls.map((call) => call[0]).filter((input) => input.step === "video.generate");
@@ -495,17 +492,10 @@ describe("ad Shorts pipeline", () => {
     });
   });
 
-  describe("publishing", () => {
-    it("posts to the platforms the automation opted into, from a freshly signed address of the private video", async () => {
-      m.publishToPlatforms.mockResolvedValue({ youtube: { externalId: "yt1", externalUrl: "https://youtu.be/yt1", privacy: "private" } });
-      const result = await drive(context({ platforms: ["youtube"] }, { shorts: undefined }));
-      expect(m.publishToPlatforms).toHaveBeenCalledWith(expect.objectContaining({ platforms: ["youtube"], videoUrl: expect.stringContaining("/sign/shorts-videos/") }));
-      expect(result.output).toMatchObject({ publicationResults: { youtube: { externalId: "yt1" } } });
-    });
-
-    it("never posts a preview run", async () => {
-      await drive(context({ platforms: ["youtube", "instagram"] }));
-      expect(m.publishToPlatforms).not.toHaveBeenCalled();
+  describe("no account publishing", () => {
+    it("only renders the video: nothing is posted to any platform, the owner uploads it by hand", async () => {
+      const result = await drive(context({ platforms: ["youtube"] }));
+      expect(result.output).not.toHaveProperty("publicationResults");
     });
   });
 
@@ -525,11 +515,10 @@ describe("ad Shorts pipeline", () => {
   });
 
   describe("budget gating", () => {
-    it("draws on the video budget when videos (or any AI) are really paid for, and not for a re-publish", () => {
+    it("draws on the video budget when videos (or any AI) are really paid for", () => {
       const ctx = context();
       m.real.value = true;
       expect(handler.metered!(ctx)).toBe("VIDEO");
-      expect(handler.metered!(context({}, { shorts: { publish: { sourceRunId: "r", platforms: ["youtube"] } } }))).toBeNull();
       m.real.value = false;
       expect(handler.metered!(ctx)).toBeNull();
     });

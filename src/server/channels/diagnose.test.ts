@@ -63,7 +63,10 @@ function makeClient(args: { selectResult: { data: unknown; error: unknown }; ins
   const table = tableBuilder(args);
   const upsertSpy = vi.fn((_payload: Record<string, unknown>, _opts?: unknown) => Promise.resolve({ data: null, error: null }));
   const snapshotsTable = { upsert: upsertSpy };
-  const from = vi.fn((name: string) => (name === "marketing_metric_snapshots" ? snapshotsTable : table));
+  // Persisting a collection also refreshes the channel's display info/status and its per-video rows (service role).
+  const channelsTable = { update: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) })) };
+  const contentTable = { upsert: vi.fn().mockResolvedValue({ error: null }) };
+  const from = vi.fn((name: string) => (name === "marketing_metric_snapshots" ? snapshotsTable : name === "tracked_channels" ? channelsTable : name === "channel_content_snapshots" ? contentTable : table));
   return { from, table, upsertSpy };
 }
 

@@ -28,10 +28,9 @@ const UNIT: Record<string, string> = {
   matchedPostCount: "개",
   postsLast30Days: "개",
   postCount: "개",
-  "yt_analytics.views": "회",
-  "yt_analytics.estimatedMinutesWatched": "분",
-  "yt_analytics.netSubscribers": "명",
-  "yt_analytics.averageViewDuration": "초",
+  viewCountDaily: "회",
+  videoCount: "개",
+  postsLast7Days: "개",
 };
 
 /** 1,234 with its unit ("1,050명"): the numbers are the real ones, only formatted for reading. */

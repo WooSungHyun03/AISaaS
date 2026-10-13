@@ -1,7 +1,8 @@
 import "server-only";
 import { DiagnosisError, fetchPublicXml } from "@/server/marketing/diagnosis";
+import { ROBOTS_DISALLOWED_REASON, isFetchAllowedByRobots } from "./robots";
 import type { DiagnosisErrorCode } from "@/server/marketing/diagnosis";
-import { parseRssPublishDates } from "./rss";
+import { parseRssChannelTitle, parseRssItems, parseRssPublishDates } from "./rss";
 
 /**
  * ⚠️ 비공식 경로: 티스토리는 `/rss`를 공식 API로 문서화하지 않습니다 — URL 구조나
@@ -16,9 +17,11 @@ export type TistoryCollector = (blogUrl: string, now?: Date) => Promise<TistoryR
 
 export interface TistoryRssMetrics {
   /** 최신순, 최대 30개. */
-  posts: Array<{ publishedAt: string }>;
+  posts: Array<{ publishedAt: string; title?: string | null; url?: string | null }>;
   /** 피드가 정확히 MAX_ITEMS개로 꽉 찼다 — "관측된 글 기준"으로 표시해야 함. */
   observedCapped: boolean;
+  /** The blog's own name from its feed, when the feed has one. */
+  blogTitle?: string | null;
   /** null이 아니면 posts는 비어 있고, 이 문자열이 사유(비공개/404/형식오류 등). */
   unavailableReason: string | null;
 }
@@ -47,6 +50,8 @@ export async function collectTistoryRssMetrics(blogUrl: string): Promise<Tistory
 
   let xml: string;
   try {
+    // robots.txt first: a blog that does not allow automated reads is shown as "cannot be measured", never read anyway.
+    if (!(await isFetchAllowedByRobots(rssUrl))) return { posts: [], observedCapped: false, unavailableReason: ROBOTS_DISALLOWED_REASON };
     xml = (await fetchPublicXml(rssUrl)).html;
   } catch (cause) {
     if (cause instanceof DiagnosisError) {
@@ -57,5 +62,12 @@ export async function collectTistoryRssMetrics(blogUrl: string): Promise<Tistory
   }
 
   const { dates, itemCount } = parseRssPublishDates(xml, MAX_ITEMS);
-  return { posts: dates.map((publishedAt) => ({ publishedAt })), observedCapped: itemCount >= MAX_ITEMS, unavailableReason: null };
+  const items = parseRssItems(xml, MAX_ITEMS);
+  const byDate = new Map(items.map((item) => [item.publishedAt, item]));
+  return {
+    posts: dates.map((publishedAt) => ({ publishedAt, title: byDate.get(publishedAt)?.title ?? null, url: byDate.get(publishedAt)?.link ?? null })),
+    observedCapped: itemCount >= MAX_ITEMS,
+    blogTitle: parseRssChannelTitle(xml),
+    unavailableReason: null,
+  };
 }

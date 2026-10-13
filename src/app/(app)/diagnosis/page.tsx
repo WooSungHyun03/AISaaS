@@ -14,6 +14,7 @@ import { WebsiteDiagnosisCard, type StoredWebsiteDiagnosis } from "@/components/
 import { scoreItemsSchema } from "@/server/marketing/scoring";
 import { isMissingSchemaError } from "@/server/shared/db-errors";
 import { FormMessage } from "@/components/ui/form-message";
+import type { BusinessSnsLinks } from "@/types/domain";
 
 /** Readiness score, channel summary, and per-channel AI narratives are all fetched/generated here — give it room beyond the 10s default. */
 export const maxDuration = 60;
@@ -86,6 +87,14 @@ export default async function DiagnosisPage({
       }
     : null;
 
+  // Addresses the owner already put in the business info become one-click suggestions (unless that platform is already tracked).
+  const snsLinks = (selectedBusiness.sns_links ?? {}) as BusinessSnsLinks;
+  const trackedPlatforms = new Set<string>(channelSummary.channels.map((item) => item.channel));
+  const channelSuggestions = [
+    { platform: "youtube", label: "유튜브", url: snsLinks.youtube },
+    { platform: "naver_blog", label: "네이버 블로그", url: snsLinks.naver_blog },
+  ].flatMap((entry) => (entry.url?.trim() && !trackedPlatforms.has(entry.platform) ? [{ label: entry.label, url: entry.url.trim() }] : []));
+
   const narratives = await Promise.all(channelSummary.channels.map((item) => getChannelNarrative(item, selectedBusiness)));
 
   return (
@@ -121,13 +130,13 @@ export default async function DiagnosisPage({
         {channelsUnavailable ? (
           <FormMessage variant="info">채널 진단 기능을 준비하는 중이에요. 서비스 관리자가 데이터베이스 업데이트를 마치면 바로 쓸 수 있어요. 홈페이지 진단은 지금도 쓸 수 있어요.</FormMessage>
         ) : (
-          <AddChannelForm businessId={selectedBusiness.id} />
+          <AddChannelForm businessId={selectedBusiness.id} suggestions={channelSuggestions} />
         )}
 
         {channelsUnavailable ? null : channelSummary.hasAnyData ? (
           <div className="space-y-4">
             {channelSummary.channels.map((item, index) => (
-              <ChannelDiagnosisCard key={item.channelId} item={item} narrative={narratives[index].narrative} />
+              <ChannelDiagnosisCard key={item.channelId} item={item} narrative={narratives[index].narrative} businessId={selectedBusiness.id} />
             ))}
           </div>
         ) : (

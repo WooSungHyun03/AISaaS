@@ -1,11 +1,11 @@
-# 외부 서비스 설정 안내 (결제 · YouTube)
+# 외부 서비스 설정 안내 (결제 · YouTube 공개 데이터)
 
 코드로 고칠 수 있는 부분은 모두 코드에 반영되어 있습니다. 아래는 **콘솔에서 사람이 직접** 해야 하는 설정입니다.
 키 값은 절대 저장소·채팅·스크린샷에 남기지 말고 Vercel 환경변수에만 넣으세요. 환경변수를 바꾼 뒤에는 **다시 배포**해야 적용됩니다
 (`NEXT_PUBLIC_*` 값은 빌드 때 번들에 들어갑니다).
 
 배포 환경이 설정됐는지는 `npm run check:providers`(또는 `node scripts/check-providers.mjs`)로 확인할 수 있고, 관리자 계정으로 설정 화면을 열면
-비어 있는 변수 이름과 등록할 Redirect URI가 그대로 표시됩니다.
+비어 있는 변수 이름이 그대로 표시됩니다.
 
 ## 1. 결제 (Toss Payments, 테스트 모드)
 
@@ -34,37 +34,25 @@ Vercel에서는 각 변수의 **적용 환경(Environment)** 도 확인하세요
 
 관리자 계정에게만 위 원인이 화면에 보이고, 일반 사용자에게는 "결제를 시작하지 못했어요. 잠시 후 다시 시도해주세요" 수준만 보입니다.
 
-## 2. YouTube (Google OAuth)
+## 2. YouTube (공개 데이터 수집 — API 키만)
 
-환경변수: `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` (Vercel)
+환경변수: `YOUTUBE_API_KEY` (Vercel, **Production에 체크**). 서버 전용 값이라 `NEXT_PUBLIC_` 을 붙이지 마세요.
+
+2026-10-13부터 앱은 YouTube **계정 연결(OAuth)을 하지 않습니다.** 사용자는 채널 주소(`youtube.com/@핸들`)만 등록하고, 서버가 YouTube Data API v3로
+**누구에게나 공개된 값**(채널명·구독자·누적 조회수·영상 수·최근 영상의 조회/좋아요/댓글)만 읽어요. 그래서 로그인·동의 화면·테스트 사용자 등록이 필요 없습니다.
 
 Google Cloud Console에서:
 
-1. 프로젝트 선택 → API 및 서비스 → 라이브러리에서 **YouTube Data API v3**와 **YouTube Analytics API**를 사용 설정.
-2. OAuth 동의 화면: 앱 이름·지원 이메일 입력, 범위에 아래 3개 추가.
-   - `https://www.googleapis.com/auth/youtube.upload`
-   - `https://www.googleapis.com/auth/youtube.readonly`
-   - `https://www.googleapis.com/auth/yt-analytics.readonly`
-3. 게시 상태가 "테스트"이면 **테스트 사용자**에 연결할 Google 계정을 등록(미등록 계정은 동의 화면에서 막힘). 운영 공개는 Google 검증(민감 범위) 필요.
-4. 사용자 인증 정보 → OAuth 클라이언트 ID(유형: 웹 애플리케이션) 생성.
-   - 승인된 리디렉션 URI: `<NEXT_PUBLIC_SITE_URL>/api/integrations/youtube/callback` (로컬은 `http://localhost:3000/api/integrations/youtube/callback`)
-5. 클라이언트 ID/보안 비밀번호를 Vercel에 넣고 재배포.
+1. 프로젝트 선택 → API 및 서비스 → 라이브러리에서 **YouTube Data API v3** 사용 설정. (YouTube Analytics API는 더 이상 쓰지 않아요.)
+2. 사용자 인증 정보 → **API 키** 생성 → 키 제한: API 제한을 *YouTube Data API v3* 만 허용(서버에서만 쓰므로 애플리케이션 제한은 선택).
+3. 키를 Vercel `YOUTUBE_API_KEY`(Production)에 넣고 재배포.
+4. `CHANNEL_DATA_PROVIDER` 는 비워 두거나 `live`. `mock` 은 운영에서 거부되고, 로컬에서는 샘플 데이터(화면에 "샘플 데이터" 표시)를 만듭니다.
 
-앱은 `access_type=offline`, `prompt=consent`로 요청해 refresh token을 받고, 액세스 토큰은 만료 전에 자동 갱신합니다. 일부 범위를 해제하고 연결하면
-"연결됨(Analytics 제외)"으로 표시되며 설정 화면의 **다시 연결**로 재동의할 수 있습니다. 자세한 내용: `docs/person1/GOOGLE_CLOUD_SETUP_youtube_analytics.md`.
+할당량: 기본 하루 10,000 유닛. 채널 1개를 하루 한 번 수집하는 데 약 3유닛(channels.list, playlistItems.list, videos.list 각 1)이 들고, 등록 확인(미리보기)이 1유닛입니다.
+소진되면 그날은 YouTube 수집을 멈추고 1시간 뒤 다시 시도하며(채널 탓으로 세지 않아요), 관리자 `/admin/collection` 에 "YouTube 할당량 소진"으로 남습니다.
 
-### 현재 상태 (2026-10-13, Google Cloud 프로젝트 `be-celeb`)
+### 이전 OAuth 설정 정리 (사람이 해야 함)
 
-- YouTube Data API v3, YouTube Analytics API: 사용 설정됨.
-- Google 인증 플랫폼: 사용자 유형을 **내부 → 외부**(게시 상태 **테스트 중**)로 바꿨어요. 내부(조직 전용)이면 조직 밖 Google 계정은 연결할 수 없습니다.
-- 데이터 액세스(범위) 3개 등록·저장: `youtube.upload`, `youtube.readonly`, `yt-analytics.readonly`.
-- 테스트 사용자: `2242798@donga.ac.kr` 1명. YouTube를 연결할 다른 Google 계정은 **대상 → 테스트 사용자**에 직접 추가해야 해요(최대 100명).
-- OAuth 클라이언트 `Easy Marketing Web`(웹 애플리케이션) 생성: 승인된 리디렉션 URI `https://be-celeb.org/api/integrations/youtube/callback`, 승인된 JavaScript 원본 `https://be-celeb.org`.
-- **남은 일(사람이 해야 함)**: 클라이언트 ID와 보안 비밀번호를 Vercel 환경변수 `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`(Production)에 넣고 재배포. 보안 비밀번호는 생성 직후 한 번만 보이므로 놓쳤다면 클라이언트 상세 화면에서 새 비밀번호를 추가하세요.
-- 테스트 중 상태에서는 리프레시 토큰이 7일 뒤 만료돼요. 장기 운영하려면 게시 상태를 프로덕션으로 올리고 Google 검증(민감한 범위)을 받아야 합니다.
-
-## 연결 상태가 안 풀릴 때 확인 순서
-
-1. 설정 화면 버튼이 "연동 준비 중"이면 환경변수 미설정입니다(관리자 계정에서 변수 이름이 표시됨).
-2. 클릭 후 Google 오류 화면이면 Redirect URI·테스트 사용자를 확인하세요.
-3. 돌아왔을 때 "취소했어요"는 사용자가 거부한 경우, "만료됐거나 확인할 수 없어요"는 10분 안에 끝내지 못했거나 쿠키가 막힌 경우입니다.
+- Vercel 환경변수 `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN` 이 있다면 **삭제**하세요(코드는 더 이상 읽지 않아요).
+- Google Cloud의 OAuth 클라이언트 `Easy Marketing Web` 과 동의 화면은 쓰이지 않습니다. 필요 없으면 삭제해도 됩니다(2026-10-13에 만들어 둔 것).
+- 기존에 연결돼 있던 사용자의 토큰은 마이그레이션 `0075` 가 Vault에서 지우고 연결 행을 `DISCONNECTED` 로 바꿉니다. 이미 모은 기록은 그대로입니다.

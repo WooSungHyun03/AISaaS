@@ -10,6 +10,6 @@ const DAY_MS = 86_400_000;
  */
 export async function collectMockTistoryRssMetrics(_blogUrl: string, now: Date = new Date()): Promise<TistoryRssMetrics> {
   const nowMs = now.getTime();
-  const posts = Array.from({ length: 8 }, (_, i) => ({ publishedAt: new Date(nowMs - (i * 4 + 1) * DAY_MS).toISOString() }));
+  const posts = Array.from({ length: 8 }, (_, i) => ({ publishedAt: new Date(nowMs - (i * 4 + 1) * DAY_MS).toISOString(), title: `샘플 글 ${8 - i}`, url: `https://sample.tistory.com/${8 - i}` }));
   return { posts, observedCapped: false, unavailableReason: null };
 }

@@ -99,10 +99,8 @@ export function describeAutomationRunError(message: string | null | undefined): 
     return "영상을 만들지 못했어요. 잠시 후 다시 시도해주세요.";
   }
   if (error.includes("youtube")) {
-    if (/http 40[13]|authentication|access token|권한|연결|만료/.test(error)) {
-      return "유튜브 연결이나 업로드 권한을 확인해주세요. 설정에서 다시 연결할 수 있어요.";
-    }
-    return "유튜브에 영상을 올리지 못했어요. 연결 상태를 확인하고 다시 시도해주세요.";
+    if (/quota|할당량/.test(error)) return "유튜브 하루 사용량이 모두 찼어요. 잠시 뒤에 다시 시도해주세요.";
+    return "유튜브 채널 정보를 불러오지 못했어요. 채널 주소를 확인하고 다시 시도해주세요.";
   }
   if (error.includes("instagram")) {
     if (/http 40[13]|authentication|access token|권한|연결/.test(error)) {

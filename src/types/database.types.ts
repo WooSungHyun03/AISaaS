@@ -960,6 +960,11 @@ export interface Database {
           status: string;
           next_snapshot_at: string | null;
           consecutive_failure_count: number;
+          display_name: string | null;
+          thumbnail_url: string | null;
+          last_collected_at: string | null;
+          last_collection_status: string | null;
+          last_error_code: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -972,10 +977,75 @@ export interface Database {
           status?: string;
           next_snapshot_at?: string | null;
           consecutive_failure_count?: number;
+          display_name?: string | null;
+          thumbnail_url?: string | null;
+          last_collected_at?: string | null;
+          last_collection_status?: string | null;
+          last_error_code?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["tracked_channels"]["Insert"]>;
+        Relationships: [];
+      };
+      channel_content_snapshots: {
+        Row: {
+          id: string;
+          channel_id: string;
+          external_content_id: string;
+          title: string | null;
+          url: string | null;
+          published_at: string | null;
+          snapshot_date: string;
+          metrics: Json;
+          collected_at: string;
+        };
+        Insert: {
+          id?: string;
+          channel_id: string;
+          external_content_id: string;
+          title?: string | null;
+          url?: string | null;
+          published_at?: string | null;
+          snapshot_date: string;
+          metrics?: Json;
+          collected_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["channel_content_snapshots"]["Insert"]>;
+        Relationships: [];
+      };
+      channel_collection_runs: {
+        Row: {
+          id: string;
+          trigger: string;
+          scheduled_for: string;
+          started_at: string;
+          completed_at: string | null;
+          status: string;
+          channels_total: number;
+          channels_succeeded: number;
+          channels_failed: number;
+          channels_skipped: number;
+          quota_exceeded: boolean;
+          error_summary: string | null;
+          triggered_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          trigger: string;
+          scheduled_for: string;
+          started_at?: string;
+          completed_at?: string | null;
+          status?: string;
+          channels_total?: number;
+          channels_succeeded?: number;
+          channels_failed?: number;
+          channels_skipped?: number;
+          quota_exceeded?: boolean;
+          error_summary?: string | null;
+          triggered_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["channel_collection_runs"]["Insert"]>;
         Relationships: [];
       };
       channel_diagnoses: {

@@ -1,18 +1,15 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import { logger } from "@/lib/logger";
 import { ChannelsError } from "./summary";
-import { snapshotChannelMetrics } from "./collect-pipeline";
-import { collectYouTubeAnalyticsIfConnected } from "./youtube-analytics-pipeline";
+import { collectAndPersistChannel } from "./collect-pipeline";
 import { channelPlatformSchema } from "./platform";
+import { classifyCollectionError, recordCollectionFailure } from "./persist";
+import { finishCollectionRun, startCollectionRun } from "./collection-runs";
+import { kstDateString } from "./schedule";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
 
-export type CollectNowResult = { status: "collected" } | { status: "already_collected_today" };
-
-function kstDateString(now: Date): string {
-  return new Date(now.getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
-}
+export type CollectNowResult = { status: "collected" } | { status: "already_collected_today" } | { status: "unavailable" };
 
 /** Checked server-side regardless of what the button's disabled state shows the user — a second click (or a second browser tab, or a replayed request) on the same KST day cannot trigger a second collection. */
 async function hasSnapshotToday(supabase: SupabaseClient<Database>, channelId: string, now: Date): Promise<boolean> {
@@ -45,14 +42,16 @@ export async function collectChannelNow(channelId: string, now: Date = new Date(
 
   if (await hasSnapshotToday(supabase, channel.id, now)) return { status: "already_collected_today" };
 
-  const { data: business } = await supabase.from("businesses").select("name, owner_id").eq("id", channel.business_id).maybeSingle();
+  const { data: business } = await supabase.from("businesses").select("name").eq("id", channel.business_id).maybeSingle();
   const typedChannel = { ...channel, platform: channelPlatformSchema.parse(channel.platform) };
-  await snapshotChannelMetrics(typedChannel, business?.name, now);
-  // Ticket 1-10: best-effort, additive — must never block "collected" or
-  // undo the public-metrics snapshot just saved above, even if this
-  // function's own never-throw contract were ever broken by a future change.
-  await collectYouTubeAnalyticsIfConnected(typedChannel, business?.owner_id, now).catch((cause) =>
-    logger.warn("youtube_analytics_collection_failed_unexpectedly", { channelId: channel.id, message: cause instanceof Error ? cause.message : String(cause) }),
-  );
-  return { status: "collected" };
+  const runId = await startCollectionRun({ trigger: "MANUAL_USER", scheduledFor: now, now });
+  try {
+    const saved = await collectAndPersistChannel(typedChannel, business?.name, now);
+    await finishCollectionRun(runId, { total: 1, succeeded: saved.status === "SUCCESS" ? 1 : 0, failed: saved.status === "SUCCESS" ? 0 : 1, skipped: 0, quotaExceeded: false });
+    return saved.status === "SUCCESS" ? { status: "collected" } : { status: "unavailable" };
+  } catch (cause) {
+    await recordCollectionFailure(channel.id, cause, now).catch(() => undefined);
+    await finishCollectionRun(runId, { total: 1, succeeded: 0, failed: 1, skipped: 0, quotaExceeded: classifyCollectionError(cause).status === "QUOTA_EXCEEDED", errorSummary: cause instanceof Error ? cause.message : String(cause) });
+    throw cause;
+  }
 }

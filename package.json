@@ -12,6 +12,7 @@
     "test:credits-db": "node scripts/test-credit-ledger.mjs",
     "check:providers": "node scripts/check-providers.mjs",
     "e2e:photos": "node scripts/e2e/reference-photos.e2e.mjs",
+    "e2e:collection": "node scripts/e2e/channel-collection.e2e.mjs",
     "e2e:admin": "node scripts/e2e/admin-access.e2e.mjs",
     "e2e:guide": "node scripts/e2e/guide-pages.e2e.mjs",
     "guide:capture": "node scripts/e2e/capture-guide.mjs"

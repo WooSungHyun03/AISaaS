@@ -1,7 +1,7 @@
 import "server-only";
 import { serverEnv } from "@/lib/env/server";
 import { YouTubeCollectorError } from "./youtube-types";
-import type { YouTubeDataProvider, YouTubeRawMetrics, YouTubeRecentVideo } from "./youtube-types";
+import type { YouTubeChannelLookup, YouTubeChannelPreview, YouTubeDataProvider, YouTubeRawMetrics, YouTubeRecentVideo } from "./youtube-types";
 
 /**
  * Public YouTube Data API v3 collector (API key only, no OAuth — a
@@ -23,6 +23,8 @@ interface YouTubeApiErrorBody {
 }
 
 interface ChannelsListItem {
+  id?: string;
+  snippet?: { title?: string; customUrl?: string; thumbnails?: Record<string, { url?: string }> };
   statistics?: { subscriberCount?: string; hiddenSubscriberCount?: boolean; viewCount?: string; videoCount?: string };
   contentDetails?: { relatedPlaylists?: { uploads?: string } };
 }
@@ -33,12 +35,31 @@ interface PlaylistItemsItem {
 
 interface VideosListItem {
   id?: string;
-  statistics?: { viewCount?: string };
+  snippet?: { title?: string };
+  statistics?: { viewCount?: string; likeCount?: string; commentCount?: string };
 }
 
 function toNumber(value: string | undefined): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** A count the API leaves out (hidden likes, disabled comments) is unknown, never 0. */
+function toOptionalNumber(value: string | undefined): number | null {
+  if (value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function pickThumbnail(thumbnails: Record<string, { url?: string }> | undefined): string | null {
+  const url = thumbnails?.medium?.url ?? thumbnails?.default?.url ?? thumbnails?.high?.url ?? null;
+  return url && /^https:\/\//i.test(url) ? url : null;
+}
+
+function lookupParams(input: YouTubeChannelLookup): Record<string, string> {
+  if ("handle" in input) return { forHandle: input.handle.startsWith("@") ? input.handle : `@${input.handle}` };
+  if ("username" in input) return { forUsername: input.username };
+  return { id: input.channelId };
 }
 
 const NOT_FOUND_REASONS = new Set(["channelNotFound", "channelClosed", "channelSuspended"]);
@@ -63,7 +84,31 @@ export class YouTubeChannelDataProvider implements YouTubeDataProvider {
 
     const recentVideos = uploadsPlaylistId ? await this.collectRecentVideos(uploadsPlaylistId) : [];
 
-    return { subscriberCount, hiddenSubscriberCount, viewCount, videoCount, recentVideos };
+    return {
+      channelId: channel.id,
+      title: channel.snippet?.title ?? null,
+      thumbnailUrl: pickThumbnail(channel.snippet?.thumbnails),
+      subscriberCount,
+      hiddenSubscriberCount,
+      viewCount,
+      videoCount,
+      recentVideos,
+    };
+  }
+
+  async lookup(input: YouTubeChannelLookup): Promise<YouTubeChannelPreview> {
+    const channels = await this.request<{ items?: ChannelsListItem[] }>("channels", { part: "snippet,statistics", ...lookupParams(input) });
+    const channel = channels.items?.[0];
+    if (!channel?.id) throw new YouTubeCollectorError("CHANNEL_NOT_FOUND", "채널을 찾을 수 없습니다.");
+    const stats = channel.statistics ?? {};
+    return {
+      channelId: channel.id,
+      title: channel.snippet?.title ?? channel.id,
+      handle: channel.snippet?.customUrl?.startsWith("@") ? channel.snippet.customUrl : null,
+      thumbnailUrl: pickThumbnail(channel.snippet?.thumbnails),
+      subscriberCount: stats.hiddenSubscriberCount === true ? null : toOptionalNumber(stats.subscriberCount),
+      videoCount: toNumber(stats.videoCount),
+    };
   }
 
   /** playlistItems.list (max 50) for video ids + publish dates, then videos.list batched by 50 for view counts. */
@@ -80,20 +125,37 @@ export class YouTubeChannelDataProvider implements YouTubeDataProvider {
 
     if (videoRefs.length === 0) return [];
 
-    const viewCountByVideoId = new Map<string, number>();
+    const statsByVideoId = new Map<string, { title: string | undefined; viewCount: number; likeCount: number | null; commentCount: number | null }>();
     for (let i = 0; i < videoRefs.length; i += VIDEOS_BATCH_SIZE) {
       const batch = videoRefs.slice(i, i + VIDEOS_BATCH_SIZE);
       const videos = await this.request<{ items?: VideosListItem[] }>("videos", {
-        part: "statistics",
+        part: "snippet,statistics",
         id: batch.map((ref) => ref.videoId).join(","),
       });
       for (const item of videos.items ?? []) {
-        if (item.id) viewCountByVideoId.set(item.id, toNumber(item.statistics?.viewCount));
+        if (item.id) {
+          statsByVideoId.set(item.id, {
+            title: item.snippet?.title,
+            viewCount: toNumber(item.statistics?.viewCount),
+            likeCount: toOptionalNumber(item.statistics?.likeCount),
+            commentCount: toOptionalNumber(item.statistics?.commentCount),
+          });
+        }
       }
     }
 
     return videoRefs
-      .map((ref) => ({ publishedAt: ref.publishedAt, viewCount: viewCountByVideoId.get(ref.videoId) ?? 0 }))
+      .map((ref) => {
+        const stats = statsByVideoId.get(ref.videoId);
+        return {
+          videoId: ref.videoId,
+          ...(stats?.title ? { title: stats.title } : {}),
+          publishedAt: ref.publishedAt,
+          viewCount: stats?.viewCount ?? 0,
+          likeCount: stats?.likeCount ?? null,
+          commentCount: stats?.commentCount ?? null,
+        };
+      })
       .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   }
 

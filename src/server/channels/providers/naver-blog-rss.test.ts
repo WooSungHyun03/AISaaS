@@ -1,10 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { fetchPublicXmlMock } = vi.hoisted(() => ({ fetchPublicXmlMock: vi.fn() }));
 vi.mock("@/server/marketing/diagnosis", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/marketing/diagnosis")>()),
   fetchPublicXml: fetchPublicXmlMock,
 }));
+
+const { robotsAllowedMock } = vi.hoisted(() => ({ robotsAllowedMock: vi.fn() }));
+vi.mock("./robots", () => ({ isFetchAllowedByRobots: robotsAllowedMock }));
 
 const { collectNaverBlogRssMetrics } = await import("./naver-blog-rss");
 const { DiagnosisError } = await import("@/server/marketing/diagnosis");
@@ -17,6 +20,7 @@ function feed(pubDates: string[]) {
   return `<rss version="2.0"><channel><title>t</title><pubDate>Sun, 11 Oct 2026 21:17:52 +0900</pubDate>${items}</channel></rss>`;
 }
 
+beforeEach(() => robotsAllowedMock.mockResolvedValue(true));
 afterEach(() => vi.clearAllMocks());
 
 describe("collectNaverBlogRssMetrics", () => {
@@ -55,5 +59,11 @@ describe("collectNaverBlogRssMetrics", () => {
     for (const bad of ["../etc/passwd", "a b", "x/../../y", "evil.com#", ""]) {
       await expect(collectNaverBlogRssMetrics(bad, NOW)).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
     }
+  });
+
+  it("does not read a feed that robots.txt disallows: the blog is 'nothing measured', and the feed is never requested", async () => {
+    robotsAllowedMock.mockResolvedValue(false);
+    expect(await collectNaverBlogRssMetrics("myblog", NOW)).toMatchObject({ matchedPostCount: 0, lastPostDate: null });
+    expect(fetchPublicXmlMock).not.toHaveBeenCalled();
   });
 });

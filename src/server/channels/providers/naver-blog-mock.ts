@@ -17,5 +17,6 @@ export async function collectMockNaverBlogMetrics(
     averageGapDays: 5,
     lastPostDate: dates[0],
     firstPostDate: dates[dates.length - 1],
+    posts: dates.map((date, i) => ({ title: `샘플 글 ${dates.length - i}`, url: `https://blog.naver.com/sample/${dates.length - i}`, publishedAt: `${date}T03:00:00.000Z` })),
   };
 }

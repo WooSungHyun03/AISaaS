@@ -39,16 +39,16 @@ function makeThenable(result: { data?: unknown; count?: number; error: unknown }
 }
 
 function makeClient({
-  connections = { data: [], error: null },
+  channels = { data: [], error: null },
   automations = { data: [], error: null },
   automationRuns = { count: 0, error: null },
 }: {
-  connections?: { data: unknown; error: unknown };
+  channels?: { data: unknown; error: unknown };
   automations?: { data: unknown; error: unknown };
   automationRuns?: { count: number; error: unknown };
 } = {}) {
   const table: Record<string, unknown> = {
-    integration_connections: makeThenable(connections),
+    tracked_channels: makeThenable(channels),
     automations: makeThenable(automations),
     automation_runs: makeThenable(automationRuns),
   };
@@ -63,7 +63,7 @@ describe("getReadinessScore", () => {
   it("scores every row ready as 100 and returns nextTodo: null", async () => {
     createClientMock.mockResolvedValue(
       makeClient({
-        connections: { data: [{ provider: "youtube", status: "CONNECTED", account_identifier: "@shop" }], error: null },
+        channels: { data: [{ platform: "youtube", display_name: "우리 채널", url: "https://youtube.com/@shop" }], error: null },
         automations: { data: [{ id: "a1", status: "ACTIVE" }], error: null },
         automationRuns: { count: 3, error: null },
       }),
@@ -94,8 +94,8 @@ describe("getReadinessScore", () => {
     expect(client.from).not.toHaveBeenCalledWith("automation_runs");
   });
 
-  it("throws when the integration_connections query fails", async () => {
-    createClientMock.mockResolvedValue(makeClient({ connections: { data: null, error: new Error("boom") } }));
+  it("throws when the tracked_channels query fails", async () => {
+    createClientMock.mockResolvedValue(makeClient({ channels: { data: null, error: new Error("boom") } }));
     await expect(getReadinessScore(FULL_BUSINESS as never, "user-1")).rejects.toThrow();
   });
 
@@ -104,5 +104,15 @@ describe("getReadinessScore", () => {
       makeClient({ automations: { data: [{ id: "a1", status: "ACTIVE" }], error: null }, automationRuns: { count: 0, error: new Error("boom") } }),
     );
     await expect(getReadinessScore(FULL_BUSINESS as never, "user-1")).rejects.toThrow();
+  });
+
+  it("counts a registered YouTube channel (no account connection needed) and points to channel registration otherwise", async () => {
+    createClientMock.mockResolvedValue(makeClient({ channels: { data: [{ platform: "youtube", display_name: "우리 채널", url: "https://youtube.com/@shop" }], error: null } }));
+    const withChannel = await getReadinessScore(EMPTY_BUSINESS as never, "user-1");
+    expect(withChannel.rows.find((row) => row.key === "youtube")).toMatchObject({ ready: true, points: 20, detail: "우리 채널" });
+
+    createClientMock.mockResolvedValue(makeClient());
+    const without = await getReadinessScore(EMPTY_BUSINESS as never, "user-1");
+    expect(without.rows.find((row) => row.key === "youtube")).toMatchObject({ ready: false, points: 0, cta: "채널 등록", href: expect.stringContaining("/diagnosis") });
   });
 });

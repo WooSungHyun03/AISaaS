@@ -128,11 +128,12 @@ npx vitest run src/server/admin/admin-security.db.test.ts
 bash scripts/dev-db.sh
 docker exec -i supabase_db_autobiz-dev-db psql -U postgres -d postgres < scripts/seed-growth-demo.sql
 docker exec -i supabase_db_autobiz-dev-db psql -U postgres -d postgres < scripts/sql/seed-guide-screens.sql
-# 연결 버튼이 켜진 화면을 찍으려면 자리표시 값만 넣어 실행합니다(어디로도 전송되지 않아요).
-YOUTUBE_CLIENT_ID=x YOUTUBE_CLIENT_SECRET=x npx next dev -p 3100
+# 로컬은 mock 수집기를 씁니다(네트워크 호출 없음, 화면에 "샘플 데이터" 표시).
+CRON_SECRET=local-cron-secret CHANNEL_DATA_PROVIDER=mock AI_PROVIDER=mock BILLING_PROVIDER=mock npx next dev -p 3100
 
 npm run e2e:photos     # 블로그·숏폼 참고 사진 (PC + 휴대폰, 18개)
 npm run e2e:admin      # /admin 접근 권한
+npm run e2e:collection # 채널 등록(확인→등록) · 06:00 자동 수집 · 중복 방지 · 성장 리포트 · 관리자 수집 기록
 npm run e2e:guide      # 이용방법 페이지(이미지 로딩·확대·가로 스크롤)
 npm run guide:capture  # public/guide 의 스크린샷 다시 찍기 (--reuse, --only 슬러그/id)
 ```

@@ -21,7 +21,7 @@ import {
   signAsset,
   REFERENCE_BUCKET,
 } from "@/server/shorts/assets";
-import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
+import type { AutomationSchedule } from "@/types/automation";
 import {
   ASSET_LABEL_MAX_LENGTH,
   ASSET_LIMITS,
@@ -52,10 +52,6 @@ const NEEDS_ASSETS = "사진이나 참고 영상을 먼저 추가해주세요. �
 
 function hasVisualAssets(config: unknown): boolean {
   return parseShortsSettings(config).assets.some((asset) => asset.kind === "image" || asset.kind === "video");
-}
-
-function parsePlatforms(values: string[]): ShortsPublishPlatform[] {
-  return [...new Set(values.filter((value): value is ShortsPublishPlatform => value === "youtube"))];
 }
 
 /** Template slugs that can hold uploaded reference files. Blog posts only take photos. */
@@ -102,9 +98,7 @@ export async function createShortsAutomation(businessId: string): Promise<Shorts
     name: `${business.name} 숏폼`,
     status: "DRAFT",
     schedule: schedule as unknown as Json,
-    // Posting is always an explicit opt-in (saveShortsSchedule): a fresh
-    // automation only ever produces previews.
-    config: { platforms: [] },
+    config: {},
   }).select("id").single();
   if (error || !automation) return { error: "숏폼 만들기 설정을 만들지 못했습니다." };
   revalidatePath("/shorts");
@@ -157,59 +151,23 @@ export async function advanceShortsJob(automationId: string): Promise<ShortsActi
   }
 }
 
-export async function publishShortsNow(
-  automationId: string,
-  sourceRunId: string,
-  selectedPlatforms: string[],
-): Promise<ShortsActionResult> {
-  const owned = await ownedShortsAutomation(automationId);
-  if ("error" in owned) return { error: owned.error };
-  const platforms = parsePlatforms(selectedPlatforms);
-  if (platforms.length === 0) return { error: "게시할 플랫폼을 한 개 이상 선택해주세요." };
-  const { data: sourceRun } = await owned.supabase.from("automation_runs").select("id,status")
-    .eq("id", sourceRunId).eq("automation_id", automationId).maybeSingle();
-  if (!sourceRun || sourceRun.status !== "SUCCESS") return { error: "게시할 미리보기 영상을 찾을 수 없습니다." };
-
-  try {
-    const result = await runAutomationNow(automationId, { shorts: { publish: { sourceRunId, platforms } } });
-    if (result.status === "FAILED") return { error: describeAutomationRunError(result.errorMessage), runId: result.runId };
-    revalidatePath("/shorts");
-    revalidatePath("/automations/history");
-    revalidatePath("/usage");
-    return { success: true, runId: result.runId };
-  } catch (error) {
-    const message = error instanceof Error && error.message.includes("already has a run")
-      ? "이미 게시 작업이 진행 중입니다. 완료 후 다시 시도해주세요."
-      : "영상을 게시하지 못했습니다. 연결 상태를 확인해주세요.";
-    return { error: message };
-  }
-}
-
 export async function saveShortsSchedule(automationId: string, formData: FormData): Promise<ShortsActionResult> {
   const owned = await ownedShortsAutomation(automationId);
   if ("error" in owned) return { error: owned.error };
   if (!hasVisualAssets(owned.automation.config)) return { error: NEEDS_ASSETS };
   const schedule = parseScheduleFromForm(formData, "Asia/Seoul");
   if (!schedule) return { error: "주기, 요일(날짜), 시간을 확인해주세요." };
-  const platforms = parsePlatforms(formData.getAll("platforms").map(String));
 
   const { data: inFlight } = await owned.supabase.from("automation_runs").select("id")
     .eq("automation_id", automationId).in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle();
   if (inFlight) return { error: "실행 중에는 예약 설정을 바꿀 수 없습니다." };
-  if (platforms.length > 0) {
-    const { data: connections } = await owned.supabase.from("integration_connections").select("provider,status")
-      .eq("user_id", owned.user.id).eq("business_id", owned.automation.business_id).in("provider", platforms);
-    const connected = new Set((connections ?? []).filter((item) => item.status === "CONNECTED").map((item) => item.provider));
-    const missing = platforms.filter((platform) => !connected.has(platform));
-    if (missing.length > 0) return { error: `${missing.map(() => "YouTube").join(", ")} 연결을 먼저 완료해주세요.` };
-  }
 
   const currentConfig = owned.automation.config && typeof owned.automation.config === "object" && !Array.isArray(owned.automation.config)
     ? owned.automation.config as Record<string, Json | undefined>
     : {};
   const { error } = await owned.supabase.from("automations").update({
     schedule: schedule as unknown as Json,
-    config: { ...currentConfig, platforms },
+    config: { ...currentConfig },
     status: "ACTIVE",
     next_run_at: computeNextRunAt(schedule).toISOString(),
   }).eq("id", automationId).eq("user_id", owned.user.id);

@@ -1,9 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import { getConnection } from "@/server/connectors/integrations";
-import type { MetricSource } from "@/server/marketing/growth-report";
 import { ChannelsError, deltaPercent, latestBefore } from "./summary";
-import { hasYouTubeAnalyticsScope } from "./youtube-analytics-scope";
+import { nextDailyCollectionAt } from "./schedule";
 import type { ChannelPlatform } from "./platform";
 
 const DAY_MS = 86_400_000;
@@ -19,53 +17,30 @@ const DAY_MS = 86_400_000;
  * only ever reads metrics that appear here, nothing else.
  */
 export const ALLOWED_GROWTH_METRICS: Record<ChannelPlatform, readonly string[]> = {
-  youtube: ["subscriberCount", "viewCount"],
-  naver_blog: ["matchedPostCount", "postsLast30Days"],
-  tistory: ["postCount"],
+  youtube: ["subscriberCount", "viewCount", "viewCountDaily", "videoCount"],
+  naver_blog: ["matchedPostCount", "postsLast7Days", "postsLast30Days"],
+  tistory: ["postCount", "postsLast7Days", "postsLast30Days"],
 };
 
 /**
- * Ticket 1-10: NOT part of ALLOWED_GROWTH_METRICS above — that list is
- * static and platform-wide, but these two must only appear for a YouTube
- * channel whose business owner currently has a CONNECTED,
- * yt-analytics.readonly-scoped integration (see the
- * youtubeAnalyticsConnected check in getChannelGrowthSeries). Appending
- * them to ALLOWED_GROWTH_METRICS would show an empty/"측정 불가" row for
- * every unconnected YouTube channel instead of omitting the metric
- * entirely.
+ * Metrics that are computed from the stored snapshots at read time instead of being stored themselves:
+ * `viewCountDaily` is the day-over-day increase of the channel's public running view total. It is NOT YouTube
+ * Analytics' daily views (those are owner-only and are not collected), and it only exists for days that have a
+ * snapshot on both ends.
  */
-const YOUTUBE_ANALYTICS_METRICS: readonly string[] = [
-  "yt_analytics.views",
-  "yt_analytics.estimatedMinutesWatched",
-  "yt_analytics.netSubscribers",
-  "yt_analytics.averageViewDuration",
-];
-
-/**
- * Analytics rows are one value *per day* (a flow), unlike subscriberCount/viewCount (a running
- * total). A period is therefore the sum of its days (the mean for an average), never "the latest
- * value" — comparing one day to another day would say nothing about growth.
- */
-const ANALYTICS_AGGREGATION: Record<string, "sum" | "mean"> = {
-  "yt_analytics.views": "sum",
-  "yt_analytics.estimatedMinutesWatched": "sum",
-  "yt_analytics.netSubscribers": "sum",
-  "yt_analytics.averageViewDuration": "mean",
+const DERIVED_FLOW_METRICS: Record<string, { source: string }> = {
+  viewCountDaily: { source: "viewCount" },
 };
-
-/** The API reports a day 48–72h late, so a period ends this many days before today to compare full days with full days. */
-export const ANALYTICS_LAG_DAYS = 3;
 
 export const GROWTH_METRIC_LABEL: Record<string, string> = {
   subscriberCount: "구독자 수",
-  viewCount: "조회수",
-  matchedPostCount: "확인된 글 수",
+  viewCount: "채널 누적 조회수",
+  viewCountDaily: "일별 조회수 증가량 (누적 조회수의 차이)",
+  videoCount: "공개 영상 수",
+  matchedPostCount: "확인된 공개 글 수 (피드 기준)",
+  postsLast7Days: "최근 7일 게시 수",
   postsLast30Days: "최근 30일 게시 수",
-  postCount: "게시글 수",
-  "yt_analytics.views": "조회수 (기간 합계)",
-  "yt_analytics.estimatedMinutesWatched": "시청 시간 (기간 합계, 분)",
-  "yt_analytics.netSubscribers": "구독자 증감 (기간 합계)",
-  "yt_analytics.averageViewDuration": "평균 시청 지속시간 (초)",
+  postCount: "확인된 공개 글 수 (피드 기준)",
 };
 
 /** Below this many snapshots in the current period, there isn't enough history to call it a trend yet. */
@@ -97,37 +72,44 @@ export interface GrowthMetricSeries {
   points: GrowthSeriesPoint[];
   /** True if any snapshot behind this metric came from scripts/seed-growth-demo.sql — the UI must show a "데모 데이터" badge. */
   hasDemoSeedData: boolean;
-  /**
-   * Ticket 1-10: set only for yt_analytics.* metrics (always "EXTERNAL_VERIFIED",
-   * since they only ever appear when a real OAuth-connected scope confirmed
-   * them) — undefined for every other metric, which keeps their display
-   * unchanged. Reuses growth-report.ts's MetricSource rather than inventing
-   * a second source-classification type.
-   */
-  source?: MetricSource;
+  /** True if a snapshot came from the mock provider (CHANNEL_DATA_PROVIDER=mock): sample numbers, never real performance. */
+  hasSampleData: boolean;
+  /** "SUM" metrics (flows, e.g. a day's increase) add up inside a week/month bucket; running totals keep the last value. */
+  kind: "TOTAL" | "FLOW";
 }
 
-/** What the owner has to do (or wait for) before YouTube Analytics numbers appear; null when nothing is needed. */
-export type YouTubeAnalyticsNoticeKind = "CONNECT" | "RECONNECT" | "CHANNEL_MISMATCH" | "API_DISABLED" | "QUOTA" | "WAITING";
+export type CollectionState = "SUCCESS" | "FAILED" | "QUOTA_EXCEEDED" | "UNAVAILABLE" | "PENDING";
 
-export interface YouTubeAnalyticsNotice {
-  kind: YouTubeAnalyticsNoticeKind;
-  message: string;
+/** Where the daily collection of one channel stands, for the "마지막 갱신" line and the failure / baseline messages. */
+export interface ChannelCollectionInfo {
+  state: CollectionState;
+  /** ISO time of the last attempt (success or not). Null before the first collection. */
+  lastCollectedAt: string | null;
+  /** The next scheduled 06:00 KST collection, or null when the channel is paused. */
+  nextCollectionAt: string | null;
+  /** How many different KST days have a real snapshot: 1 means "baseline only", the trend starts with the second. */
+  measuredDays: number;
+  /** Paused after repeated failures: nothing is collected until the channel is registered again. */
+  paused: boolean;
 }
+
+export type GrowthGranularity = "day" | "week" | "month";
 
 export interface ChannelGrowthSeries {
   channelId: string;
   platform: ChannelPlatform;
   externalId: string;
   url: string;
+  displayName: string | null;
+  thumbnailUrl: string | null;
+  collection: ChannelCollectionInfo;
   metrics: GrowthMetricSeries[];
-  /** YouTube channels only: why owner-only Analytics numbers are missing, with the fix. */
-  analyticsNotice?: YouTubeAnalyticsNotice | null;
 }
 
 export interface GrowthSeriesResult {
   businessId: string;
   days: number;
+  granularity: GrowthGranularity;
   channels: ChannelGrowthSeries[];
   hasAnyData: boolean;
 }
@@ -201,7 +183,42 @@ export function endOfKstDayMs(date: string): number {
   return Date.parse(`${date}T00:00:00.000Z`) + DAY_MS - 1 - 9 * 3_600_000;
 }
 
-function buildMetricSeries(metric: string, rows: Array<{ value: number; recorded_at: string; source: string }>, nowMs: number, days: number, metricSource?: MetricSource): GrowthMetricSeries {
+/** Monday-based week start (KST calendar date) of a YYYY-MM-DD date. */
+function weekStart(date: string): string {
+  const ms = Date.parse(`${date}T00:00:00Z`);
+  const weekday = (new Date(ms).getUTCDay() + 6) % 7; // Monday = 0
+  return new Date(ms - weekday * DAY_MS).toISOString().slice(0, 10);
+}
+
+function bucketKey(date: string, granularity: GrowthGranularity): string {
+  if (granularity === "week") return weekStart(date);
+  if (granularity === "month") return `${date.slice(0, 7)}-01`;
+  return date;
+}
+
+/** Folds the day-by-day points into week / month buckets: a running total keeps its last known value, a flow adds up. */
+function bucketPoints(points: GrowthSeriesPoint[], granularity: GrowthGranularity, kind: "TOTAL" | "FLOW"): GrowthSeriesPoint[] {
+  if (granularity === "day") return points;
+  const buckets = new Map<string, GrowthSeriesPoint[]>();
+  for (const point of points) {
+    const key = bucketKey(point.date, granularity);
+    buckets.set(key, [...(buckets.get(key) ?? []), point]);
+  }
+  return [...buckets.entries()].map(([date, inside]) => {
+    const known = inside.filter((point) => point.value !== null);
+    const measured = inside.some((point) => point.measured);
+    if (known.length === 0) return { date, value: null, measured };
+    return { date, value: kind === "FLOW" ? known.reduce((sum, point) => sum + (point.value ?? 0), 0) : (known[known.length - 1].value as number), measured };
+  });
+}
+
+type SeriesRow = { value: number; recorded_at: string; source: string };
+
+function flags(rows: SeriesRow[]) {
+  return { hasDemoSeedData: rows.some((row) => row.source === "DEMO_SEED"), hasSampleData: rows.some((row) => row.source === "mock") };
+}
+
+function buildMetricSeries(metric: string, rows: SeriesRow[], nowMs: number, days: number, granularity: GrowthGranularity): GrowthMetricSeries {
   const currentPeriodStart = nowMs - days * DAY_MS;
   const rowsInCurrentPeriod = rows.filter((row) => Date.parse(row.recorded_at) >= currentPeriodStart);
 
@@ -226,126 +243,123 @@ function buildMetricSeries(metric: string, rows: Array<{ value: number; recorded
     previous,
     absoluteDelta,
     deltaPercent: deltaPercent(current, previous),
-    points,
-    hasDemoSeedData: rows.some((row) => row.source === "DEMO_SEED"),
-    source: metricSource,
+    points: bucketPoints(points, granularity, "TOTAL"),
+    ...flags(rows),
+    kind: "TOTAL",
   };
-}
-
-function aggregate(values: number[], mode: "sum" | "mean"): number | null {
-  if (values.length === 0) return null;
-  const total = values.reduce((sum, value) => sum + value, 0);
-  return mode === "sum" ? total : Math.round((total / values.length) * 10) / 10;
-}
-
-/** Period totals for a per-day metric: this period vs the one before it, ending ANALYTICS_LAG_DAYS ago. */
-function buildFlowSeries(metric: string, rows: Array<{ value: number; recorded_at: string; source: string }>, nowMs: number, days: number): GrowthMetricSeries {
-  const mode = ANALYTICS_AGGREGATION[metric] ?? "sum";
-  const endMs = nowMs - ANALYTICS_LAG_DAYS * DAY_MS;
-  const currentStart = endMs - days * DAY_MS;
-  const previousStart = currentStart - days * DAY_MS;
-  const time = (row: { recorded_at: string }) => Date.parse(row.recorded_at);
-  const inCurrent = rows.filter((row) => time(row) > currentStart && time(row) <= endMs + DAY_MS);
-  const inPrevious = rows.filter((row) => time(row) > previousStart && time(row) <= currentStart);
-
-  const current = aggregate(inCurrent.map((row) => row.value), mode);
-  const previous = aggregate(inPrevious.map((row) => row.value), mode);
-  const byDate = new Map(inCurrent.map((row) => [kstDate(time(row)), row.value]));
-  const points: GrowthSeriesPoint[] = [];
-  for (let offset = days - 1; offset >= 0; offset--) {
-    const date = kstDate(endMs - offset * DAY_MS);
-    points.push({ date, value: byDate.get(date) ?? null, measured: byDate.has(date) });
-  }
-
-  return {
-    metric,
-    label: GROWTH_METRIC_LABEL[metric] ?? metric,
-    status: inCurrent.length < MIN_SNAPSHOTS_FOR_TREND ? "COLLECTING" : "OK",
-    current,
-    previous,
-    absoluteDelta: current !== null && previous !== null ? Math.round((current - previous) * 10) / 10 : null,
-    deltaPercent: deltaPercent(current, previous),
-    points,
-    hasDemoSeedData: rows.some((row) => row.source === "DEMO_SEED"),
-    source: "EXTERNAL_VERIFIED",
-  };
-}
-
-/** Plain-language state of YouTube Analytics for one business, from what the connection and the last collection recorded. */
-export function describeYouTubeAnalyticsState(
-  connection: { status: string; metadata: unknown } | null,
-): YouTubeAnalyticsNotice | null {
-  if (!connection || connection.status !== "CONNECTED") {
-    return { kind: "CONNECT", message: "YouTube 계정을 연결하고 Analytics 권한을 허용하면 조회수·시청 시간·구독자 증감을 정확히 볼 수 있어요." };
-  }
-  if (!hasYouTubeAnalyticsScope({ metadata: connection.metadata as never })) {
-    return { kind: "RECONNECT", message: "Analytics 권한이 아직 없어요. 설정에서 YouTube를 다시 연결하고 ‘YouTube Analytics 보고서 보기’를 허용해주세요." };
-  }
-  const metadata = connection.metadata && typeof connection.metadata === "object" && !Array.isArray(connection.metadata) ? (connection.metadata as Record<string, unknown>) : {};
-  const analytics = metadata.analytics && typeof metadata.analytics === "object" ? (metadata.analytics as Record<string, unknown>) : null;
-  switch (analytics?.status) {
-    case "TOKEN_REVOKED":
-    case "SCOPE_MISSING":
-      return { kind: "RECONNECT", message: "YouTube 연결이 만료됐거나 권한이 바뀌었어요. 설정에서 다시 연결해주세요." };
-    case "CHANNEL_MISMATCH":
-      return { kind: "CHANNEL_MISMATCH", message: "연결한 구글 계정의 채널과 추적 중인 채널이 달라요. 채널 주인 계정으로 다시 연결해주세요." };
-    case "API_DISABLED":
-    case "NOT_CONFIGURED":
-      return { kind: "API_DISABLED", message: "서비스 쪽 YouTube Analytics 설정이 아직 끝나지 않았어요. 관리자에게 문의해주세요." };
-    case "QUOTA":
-      return { kind: "QUOTA", message: "YouTube 조회 한도에 걸려 잠시 쉬고 있어요. 곧 다시 수집해요." };
-    case "WAITING_FOR_DATA":
-      return { kind: "WAITING", message: "아직 받을 데이터가 없어요. YouTube Analytics는 보통 2~3일 늦게 집계돼요." };
-    default:
-      return null;
-  }
 }
 
 /**
- * Per-channel, per-metric time series for the growth report (ticket 1-7):
- * current value, vs.-previous-period comparison, and a chart-ready series
- * for the selected period only. Reuses getGrowthSummary's exact "gap day"
- * rule (latestBefore) and null-handling (deltaPercent) rather than
- * reimplementing them — see summary.ts.
- *
- * Every platform's metric list comes from ALLOWED_GROWTH_METRICS, not
- * "whichever metrics this channel happens to have snapshots for": a
- * YouTube channel with a hidden subscriber count still gets a
- * `subscriberCount` entry (current/previous both null, no points), so the
- * screen can show "측정 불가" instead of silently omitting it — and a
- * naver_blog/tistory channel can never surface a metric outside its own
- * allowed list, no matter what ends up in the snapshots table.
+ * Day-over-day increase of a running total (viewCount → viewCountDaily). A day only gets a value when it has its own
+ * snapshot AND the previous measured day is at most 3 days earlier, so a gap in collection is never smeared into one
+ * misleadingly large "day". The period figure is the sum of those increases; there is no comparison with the previous
+ * period unless that period has increases of its own.
  */
-export async function getChannelGrowthSeries(businessId: string, options: { days?: number; now?: Date } = {}): Promise<GrowthSeriesResult> {
+function buildDailyIncreaseSeries(metric: string, source: SeriesRow[], nowMs: number, days: number, granularity: GrowthGranularity): GrowthMetricSeries {
+  const sorted = [...source].sort((a, b) => Date.parse(a.recorded_at) - Date.parse(b.recorded_at));
+  const increases = new Map<string, number>();
+  for (let i = 1; i < sorted.length; i++) {
+    const day = kstDate(Date.parse(sorted[i].recorded_at));
+    const previousDay = kstDate(Date.parse(sorted[i - 1].recorded_at));
+    const gapDays = (Date.parse(`${day}T00:00:00Z`) - Date.parse(`${previousDay}T00:00:00Z`)) / DAY_MS;
+    if (gapDays < 1 || gapDays > 3) continue;
+    const increase = sorted[i].value - sorted[i - 1].value;
+    // A running total can drop (a removed video); that is a correction, not a negative number of views.
+    if (increase >= 0) increases.set(day, increase);
+  }
+  const periodStartMs = nowMs - days * DAY_MS;
+  const periodDays = new Set<string>();
+  for (let offset = days - 1; offset >= 0; offset--) periodDays.add(kstDate(nowMs - offset * DAY_MS));
+  const previousStartMs = periodStartMs - days * DAY_MS;
+  let current = 0;
+  let currentCount = 0;
+  let previous = 0;
+  let previousCount = 0;
+  for (const [day, value] of increases) {
+    const dayMs = Date.parse(`${day}T00:00:00Z`) - 9 * 3_600_000;
+    if (periodDays.has(day)) {
+      current += value;
+      currentCount++;
+    } else if (dayMs >= previousStartMs && dayMs < periodStartMs) {
+      previous += value;
+      previousCount++;
+    }
+  }
+  const points: GrowthSeriesPoint[] = [];
+  for (let offset = days - 1; offset >= 0; offset--) {
+    const date = kstDate(nowMs - offset * DAY_MS);
+    points.push({ date, value: increases.get(date) ?? null, measured: increases.has(date) });
+  }
+  const hasCurrent = currentCount > 0;
+  const hasPrevious = previousCount > 0;
+  return {
+    metric,
+    label: GROWTH_METRIC_LABEL[metric] ?? metric,
+    status: currentCount < MIN_SNAPSHOTS_FOR_TREND ? "COLLECTING" : "OK",
+    current: hasCurrent ? current : null,
+    previous: hasPrevious ? previous : null,
+    absoluteDelta: hasCurrent && hasPrevious ? current - previous : null,
+    deltaPercent: hasCurrent && hasPrevious ? deltaPercent(current, previous) : null,
+    points: bucketPoints(points, granularity, "FLOW"),
+    ...flags(source),
+    kind: "FLOW",
+  };
+}
+
+type ChannelRow = {
+  id: string;
+  platform: ChannelPlatform;
+  external_id: string;
+  url: string;
+  status: string;
+  display_name: string | null;
+  thumbnail_url: string | null;
+  next_snapshot_at: string | null;
+  last_collected_at: string | null;
+  last_collection_status: string | null;
+};
+
+function collectionInfo(channel: ChannelRow, measuredDays: number): ChannelCollectionInfo {
+  const raw = channel.last_collection_status;
+  const state: CollectionState = raw === "SUCCESS" || raw === "FAILED" || raw === "QUOTA_EXCEEDED" || raw === "UNAVAILABLE" ? raw : measuredDays > 0 ? "SUCCESS" : "PENDING";
+  const paused = channel.status === "PAUSED" || channel.status === "ERROR";
+  const scheduled = channel.next_snapshot_at ? Date.parse(channel.next_snapshot_at) : NaN;
+  // A retry slot (30 min) is internal: what the owner is told is always the next regular 06:00 KST.
+  const nextCollectionAt = paused ? null : (Number.isFinite(scheduled) && scheduled > Date.now() + 2 * 3_600_000 ? new Date(scheduled) : nextDailyCollectionAt(new Date())).toISOString();
+  return { state, lastCollectedAt: channel.last_collected_at, nextCollectionAt, measuredDays, paused };
+}
+
+/**
+ * Per-channel, per-metric time series for the growth report: current value, vs.-previous-period comparison, and a
+ * chart-ready series for the selected period (day / week / month buckets). Reuses getGrowthSummary's exact "gap day"
+ * rule (latestBefore) and null-handling (deltaPercent) rather than reimplementing them — see summary.ts.
+ *
+ * Every platform's metric list comes from ALLOWED_GROWTH_METRICS, not "whichever metrics this channel happens to have
+ * snapshots for": a YouTube channel with a hidden subscriber count still gets a `subscriberCount` entry (current and
+ * previous both null, no points), so the screen can say "측정 불가" instead of silently omitting it — and a blog can
+ * never surface a view/visitor metric, no matter what ends up in the snapshots table. Old `yt_analytics.*` snapshots
+ * (from the removed OAuth integration) stay in the database but are never read here.
+ */
+export async function getChannelGrowthSeries(businessId: string, options: { days?: number; now?: Date; granularity?: GrowthGranularity } = {}): Promise<GrowthSeriesResult> {
   const days = options.days ?? 30;
+  const granularity = options.granularity ?? "day";
   const nowMs = (options.now ?? new Date()).getTime();
   const supabase = await createClient();
 
   const { data: channelRows, error: channelsError } = await supabase
     .from("tracked_channels")
-    .select("id, platform, external_id, url")
-    .eq("business_id", businessId);
+    .select("id, platform, external_id, url, status, display_name, thumbnail_url, next_snapshot_at, last_collected_at, last_collection_status")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: true });
   if (channelsError) throw new ChannelsError("DATABASE_ERROR", "추적 중인 채널을 불러오지 못했습니다.", { cause: channelsError });
 
-  const channels = (channelRows ?? []) as Array<{ id: string; platform: ChannelPlatform; external_id: string; url: string }>;
-  if (channels.length === 0) return { businessId, days, channels: [], hasAnyData: false };
+  // A stable on-screen order: YouTube, Naver, Tistory (rows registered together share one created_at).
+  const platformRank = (platform: string) => ["youtube", "naver_blog", "tistory"].indexOf(platform);
+  const channels = ((channelRows ?? []) as ChannelRow[]).map((channel, index) => ({ channel, index })).sort((a, b) => platformRank(a.channel.platform) - platformRank(b.channel.platform) || a.index - b.index).map(({ channel }) => channel);
+  if (channels.length === 0) return { businessId, days, granularity, channels: [], hasAnyData: false };
 
-  // Ticket 1-10: yt_analytics.* only ever shows for a currently-connected,
-  // correctly-scoped YouTube integration — disconnecting (data preserved,
-  // see docs/person1/PLAN_1-10.md) or a scope predating this feature both
-  // fall through to false here, which is what hides those rows below.
-  let youtubeAnalyticsConnected = false;
-  let analyticsNotice: YouTubeAnalyticsNotice | null = null;
-  if (channels.some((channel) => channel.platform === "youtube")) {
-    const { data: business } = await supabase.from("businesses").select("owner_id").eq("id", businessId).maybeSingle();
-    const connection = business?.owner_id ? await getConnection(supabase, business.owner_id, businessId, "youtube") : null;
-    youtubeAnalyticsConnected = connection?.status === "CONNECTED" && hasYouTubeAnalyticsScope(connection);
-    analyticsNotice = describeYouTubeAnalyticsState(connection);
-  }
-
-  const since = new Date(nowMs - (days * 2 + ANALYTICS_LAG_DAYS + 1) * DAY_MS).toISOString();
-  const channelIds = channels.map((channel) => channel.id);
-  const snapshots = await fetchSnapshots(supabase, channelIds, since);
+  const since = new Date(nowMs - (days * 2 + 1) * DAY_MS).toISOString();
+  const snapshots = await fetchSnapshots(supabase, channels.map((channel) => channel.id), since);
 
   const byChannelMetric = new Map<string, SnapshotRow[]>();
   for (const row of snapshots) {
@@ -356,23 +370,23 @@ export async function getChannelGrowthSeries(businessId: string, options: { days
   }
 
   const result: ChannelGrowthSeries[] = channels.map((channel) => {
-    const metricNames: string[] = [...ALLOWED_GROWTH_METRICS[channel.platform]];
-    if (channel.platform === "youtube" && youtubeAnalyticsConnected) metricNames.push(...YOUTUBE_ANALYTICS_METRICS);
-
+    const rowsOf = (metric: string) => byChannelMetric.get(`${channel.id}:${metric}`) ?? [];
+    const measuredDays = new Set(snapshots.filter((row) => row.channel_id === channel.id).map((row) => kstDate(Date.parse(row.recorded_at)))).size;
     return {
       channelId: channel.id,
       platform: channel.platform,
       externalId: channel.external_id,
       url: channel.url,
-      metrics: metricNames.map((metric) =>
-        YOUTUBE_ANALYTICS_METRICS.includes(metric)
-          ? buildFlowSeries(metric, byChannelMetric.get(`${channel.id}:${metric}`) ?? [], nowMs, days)
-          : buildMetricSeries(metric, byChannelMetric.get(`${channel.id}:${metric}`) ?? [], nowMs, days),
-      ),
-      ...(channel.platform === "youtube" ? { analyticsNotice } : {}),
+      displayName: channel.display_name,
+      thumbnailUrl: channel.thumbnail_url,
+      collection: collectionInfo(channel, measuredDays),
+      metrics: ALLOWED_GROWTH_METRICS[channel.platform].map((metric) => {
+        const derived = DERIVED_FLOW_METRICS[metric];
+        return derived ? buildDailyIncreaseSeries(metric, rowsOf(derived.source), nowMs, days, granularity) : buildMetricSeries(metric, rowsOf(metric), nowMs, days, granularity);
+      }),
     };
   });
 
   const hasAnyData = result.some((channel) => channel.metrics.some((metric) => metric.current !== null || metric.points.some((point) => point.value !== null)));
-  return { businessId, days, channels: result, hasAnyData };
+  return { businessId, days, granularity, channels: result, hasAnyData };
 }

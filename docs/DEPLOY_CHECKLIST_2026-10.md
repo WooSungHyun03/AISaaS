@@ -39,7 +39,7 @@ node --env-file=.env.local scripts/check-providers.mjs   # 결제·문의·환�
 | `TTS_PROVIDER=elevenlabs`, `ELEVENLABS_API_KEY`, `TTS_VOICE_ID` | 한국어 음성 보완 (선택) |
 | `ALLOW_PAID_AI_CALLS=true`, `BUDGET_PERIOD_START`, `BUDGET_PERIOD_END` | **유료 호출 허용 + 운영 기간.** 둘 다 없으면 유료 생성이 모두 막힘 (자동 월 초기화 없음) |
 | `BUDGET_VIDEO_USD/_ITEMS`, `BUDGET_BLOG_USD/_ITEMS` (선택) | 기본: 영상 $50·10편, 블로그 $20·10편 |
-| `YOUTUBE_CLIENT_ID/SECRET`, `YOUTUBE_API_KEY`, `NAVER_CLIENT_ID/SECRET` | 이미 있음. 네이버 블로그는 이제 키 없이도 RSS로 진단 |
+| `YOUTUBE_API_KEY`, `NAVER_CLIENT_ID/SECRET` | `YOUTUBE_API_KEY`는 Production 체크 필수(공개 데이터 수집용). `YOUTUBE_CLIENT_*` 는 더 이상 쓰지 않으니 삭제. 네이버 블로그는 키 없이 RSS로 수집 |
 
 `NEXT_PUBLIC_*`는 빌드 때 들어가므로 바꾼 뒤 반드시 다시 배포하세요.
 
@@ -59,21 +59,21 @@ npx supabase db push --linked
 
 운영 관리자 계정으로 회원가입과 이메일 확인을 마친 다음, `docs/ADMIN_BOOTSTRAP.sql`의 이메일을 바꿔 Supabase SQL Editor에서 한 번 실행하세요. 관리자 등록 화면은 제공하지 않습니다. 등록 후 `/admin`에서 대시보드가 열리고 `admin_audit_log`에 접근 기록이 추가되는지 확인합니다.
 
-## 4. Google Cloud (YouTube Analytics)
+## 4. Google Cloud (YouTube Data API 키)
 
-`docs/person1/GOOGLE_CLOUD_SETUP_youtube_analytics.md` 그대로: YouTube Analytics API 켜기 → 동의 화면에 `yt-analytics.readonly`,
-`youtube.readonly` 추가 → 테스트 사용자 등록 → 이미 연결한 계정은 설정에서 **다시 연결**(세 권한 모두 허용).
+OAuth는 쓰지 않습니다. `docs/EXTERNAL_SETUP.md` 2번대로 **YouTube Data API v3** 를 켜고 API 키를 만들어 `YOUTUBE_API_KEY` 로 넣으세요.
+운영 DB에는 마이그레이션 `0075_channel_collection_v2.sql` 을 적용합니다(옛 OAuth 연결 비밀값 삭제, 수집 상태 컬럼, 영상별 스냅샷·수집 실행 기록 테이블).
 
 ## 5. 스케줄러
 
-추가 등록 없음. 채널 지표 일일 수집은 이미 등록된 5분 틱(`/api/cron/run-automations`)이 함께 처리합니다.
+추가 등록 없음. 채널 지표 일일 수집(매일 06:00 KST)은 이미 등록된 5분 틱(`/api/cron/run-automations`)이 함께 처리합니다. 확인: Supabase SQL Editor에서 `select jobname, schedule, active from cron.job;` 에 `run-due-automations` 가 `*/5 * * * *` 로 active 인지 봅니다.
 
 ## 6. 확인 순서 (스모크 테스트)
 
 1. 이용권 구매 → 토스 테스트 결제 → `요금제`에서 잔여/만료 확인
 2. 홍보 대상(가게/상품/플랫폼) 선택 → 블로그 한 편 → 이용내역에 사용 1회
 3. 마케팅 진단: 홈페이지 주소 / 네이버 블로그 / 티스토리 / 유튜브 추가
-4. 설정에서 YouTube 연결 → 성장 리포트에서 Analytics(2~3일 늦게 집계됨)
+4. 마케팅 진단에서 YouTube 채널 주소 → "채널 확인" → "이 채널로 등록" → 다음 날 06:00(KST) 이후 성장 리포트에 일/주/월 변화가 쌓이는지, `/admin/collection` 에 실행 기록이 남는지 확인
 5. 캘린더에 일정 추가·반복·드래그, 문의 보내기 → 관리자 계정으로 답변
 6. 테스트 주문의 환불 요청 제출 → 같은 주문 중복 제출 차단 → 요청 상태 확인 (자동 환불은 실행되지 않음)
 7. 비로그인·일반 사용자의 `/admin` 접근 차단 → 관리자 로그인 → 대시보드 수치·최근 결제/오류/환불/문의 확인 → 감사 로그 생성 확인

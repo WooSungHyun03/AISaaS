@@ -30,6 +30,10 @@ export interface NaverBlogMetrics {
    * that mention the blog id). Missing on rows/mocks from before RSS support, which were search-based.
    */
   basis?: "rss" | "search";
+  /** The posts the feed showed (newest first, title + link + time). Only the RSS path fills it; search results never put bodies here. */
+  /** The blog's own name from its feed. */
+  blogTitle?: string | null;
+  posts?: Array<{ title: string | null; url: string | null; publishedAt: string }>;
 }
 
 export type NaverBlogCollector = (externalId: string, businessName: string | undefined, now?: Date) => Promise<NaverBlogMetrics>;

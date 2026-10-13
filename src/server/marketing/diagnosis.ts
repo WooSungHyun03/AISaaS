@@ -47,6 +47,12 @@ const MAX_BODY_TEXT_LENGTH = 6_000;
 const MAX_TITLE_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 500;
 
+const TEXT_FETCH_OPTIONS: FetchContentOptions = {
+  acceptHeader: "text/plain, */*;q=0.1",
+  isAcceptableContentType: (contentType) => contentType.includes("text/plain"),
+  unsupportedContentMessage: "텍스트 응답만 처리할 수 있습니다.",
+};
+
 function assertPublicHttpUrl(value: string): URL {
   let url: URL;
   try {
@@ -251,6 +257,11 @@ export async function fetchPublicHtml(urlString: string): Promise<FetchedPage> {
  */
 export async function fetchPublicXml(urlString: string): Promise<FetchedPage> {
   return fetchHop(urlString, MAX_REDIRECTS, Date.now() + TOTAL_FETCH_DEADLINE_MS, XML_FETCH_OPTIONS);
+}
+
+/** Same SSRF protections as fetchPublicHtml, for a plain-text file (robots.txt). */
+export async function fetchPublicText(urlString: string): Promise<FetchedPage> {
+  return fetchHop(urlString, MAX_REDIRECTS, Date.now() + TOTAL_FETCH_DEADLINE_MS, TEXT_FETCH_OPTIONS);
 }
 
 export function decodeHtmlEntities(value: string): string {

@@ -1,8 +1,9 @@
 import "server-only";
 import { DiagnosisError, fetchPublicXml } from "@/server/marketing/diagnosis";
+import { isFetchAllowedByRobots } from "./robots";
 import { NaverCollectorError } from "./naver-types";
 import type { NaverBlogMetrics } from "./naver-types";
-import { parseRssPublishDates } from "./rss";
+import { parseRssChannelTitle, parseRssItems, parseRssPublishDates } from "./rss";
 
 /**
  * A Naver blog's public RSS (`rss.blog.naver.com/{id}.xml`) lists the blog's own latest posts with
@@ -28,7 +29,10 @@ export async function collectNaverBlogRssMetrics(externalId: string, now: Date =
 
   let xml: string;
   try {
-    xml = (await fetchPublicXml(`https://rss.blog.naver.com/${externalId}.xml`)).html;
+    const feedUrl = `https://rss.blog.naver.com/${externalId}.xml`;
+    // robots.txt first: if the feed does not allow automated reads the blog is "cannot be measured", not zero.
+    if (!(await isFetchAllowedByRobots(feedUrl))) return emptyMetrics();
+    xml = (await fetchPublicXml(feedUrl)).html;
   } catch (cause) {
     if (cause instanceof DiagnosisError && (cause.code === "BLOCKED_TARGET" || cause.code === "INVALID_URL")) throw cause;
     return emptyMetrics();
@@ -50,6 +54,8 @@ export async function collectNaverBlogRssMetrics(externalId: string, now: Date =
     lastPostDate: days[0],
     firstPostDate: days[days.length - 1],
     basis: "rss",
+    blogTitle: parseRssChannelTitle(xml),
+    posts: parseRssItems(xml, MAX_ITEMS).map((item) => ({ title: item.title, url: item.link, publishedAt: item.publishedAt })),
   };
 }
 

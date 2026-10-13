@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, diagnoseWebsiteMock, revalidatePathMock, registerAndDiagnoseChannelMock, diagnoseChannelMock, removeTrackedChannelMock } = vi.hoisted(() => ({
+const { createClientMock, diagnoseWebsiteMock, revalidatePathMock, registerAndDiagnoseChannelMock, diagnoseChannelMock, removeTrackedChannelMock, previewChannelMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   diagnoseWebsiteMock: vi.fn(),
   revalidatePathMock: vi.fn(),
   registerAndDiagnoseChannelMock: vi.fn(),
   diagnoseChannelMock: vi.fn(),
   removeTrackedChannelMock: vi.fn(),
+  previewChannelMock: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
@@ -17,16 +18,16 @@ vi.mock("@/server/marketing/diagnosis", async () => {
 });
 vi.mock("@/server/channels", async () => {
   const actual = await vi.importActual<typeof import("@/server/channels")>("@/server/channels");
-  return { ...actual, registerAndDiagnoseChannel: registerAndDiagnoseChannelMock, diagnoseChannel: diagnoseChannelMock, removeTrackedChannel: removeTrackedChannelMock };
+  return { ...actual, registerAndDiagnoseChannel: registerAndDiagnoseChannelMock, diagnoseChannel: diagnoseChannelMock, removeTrackedChannel: removeTrackedChannelMock, previewChannel: previewChannelMock };
 });
 
-const { runDiagnosis, addChannel, rediagnoseChannel, removeChannel } = await import("./actions");
+const { runDiagnosis, addChannel, rediagnoseChannel, removeChannel, previewChannelAction } = await import("./actions");
 const { DiagnosisError } = await import("@/server/marketing/diagnosis");
 const { ChannelsError, DiagnosisRateLimitError } = await import("@/server/channels");
 
 type QueryResult = { data: unknown; error: unknown };
 
-function makeClient(options: { business?: QueryResult; insert?: QueryResult; recentCount?: number; connections?: Array<{ provider: string }> } = {}) {
+function makeClient(options: { business?: QueryResult; insert?: QueryResult; recentCount?: number; channels?: Array<{ platform: string }> } = {}) {
   const inserted: Array<Record<string, unknown>> = [];
   const businessResult = options.business ?? { data: { id: "business-1", name: "우리가게", industry: "카페", sns_links: { naver_blog: "https://blog.naver.com/x" } }, error: null };
   const insertResult = options.insert ?? { data: { id: "diagnosis-1", created_at: "2026-10-01T00:00:00.000Z" }, error: null };
@@ -37,10 +38,10 @@ function makeClient(options: { business?: QueryResult; insert?: QueryResult; rec
         select: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue(businessResult) })) })) })),
       };
     }
-    if (table === "integration_connections") {
+    if (table === "tracked_channels") {
       const builder: Record<string, unknown> = {};
       for (const method of ["select", "eq"]) builder[method] = vi.fn(() => builder);
-      builder.then = (resolve: (value: unknown) => unknown) => resolve({ data: options.connections ?? [], error: null });
+      builder.then = (resolve: (value: unknown) => unknown) => resolve({ data: options.channels ?? [], error: null });
       return builder;
     }
     if (table === "marketing_diagnoses") {
@@ -172,8 +173,8 @@ describe("runDiagnosis", () => {
     expect(inserted).toHaveLength(0);
   });
 
-  it("passes connected integrations to the scorer so connected channels count", async () => {
-    const { client } = makeClient({ connections: [{ provider: "instagram" }] });
+  it("passes the registered (tracked) channels to the scorer so they count as channels the business has", async () => {
+    const { client } = makeClient({ channels: [{ platform: "youtube" }] });
     createClientMock.mockResolvedValue(client);
     diagnoseWebsiteMock.mockResolvedValue({
       score: 50, scoreBreakdown: [], evidence: {}, aiUsed: false, missingChannels: [], contentStatus: "ok", snsActivity: "ok", recommendations: [],
@@ -182,7 +183,7 @@ describe("runDiagnosis", () => {
 
     await runDiagnosis({}, formData({ businessId: "business-1", url: "https://example.com" }));
 
-    expect(diagnoseWebsiteMock.mock.calls[0][2]).toMatchObject({ connectedProviders: ["instagram"] });
+    expect(diagnoseWebsiteMock.mock.calls[0][2]).toMatchObject({ connectedProviders: ["youtube"] });
   });
 
   it("rate-limits repeated diagnoses of the same business before fetching or calling the AI", async () => {
@@ -203,7 +204,7 @@ describe("runDiagnosis", () => {
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) },
       from: vi.fn((table: string) => {
         if (table === "businesses") return { select: vi.fn(() => ({ eq: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle: vi.fn().mockResolvedValue({ data: { id: "business-1", name: "우리가게", industry: "카페", sns_links: {} }, error: null }) })) })) })) };
-        if (table === "integration_connections") {
+        if (table === "tracked_channels") {
           const builder: Record<string, unknown> = {};
           for (const method of ["select", "eq"]) builder[method] = vi.fn(() => builder);
           builder.then = (resolve: (value: unknown) => unknown) => resolve({ data: [], error: null });
@@ -333,6 +334,81 @@ describe("addChannel", () => {
     const result = await addChannel({}, withFormData({ businessId: "business-1", url: "https://youtube.com/@mychannel" }));
 
     expect(result.error).toBeTruthy();
+  });
+});
+
+describe("addChannel: replacing a channel (주소 변경) and the hourly diagnosis limit", () => {
+  const withReplace = (replaceChannelId: string) => withFormData({ businessId: "business-1", url: "https://youtube.com/@new", replaceChannelId });
+
+  it("removes the old channel only after the new one is registered", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient({ trackedChannel: { data: { id: "old-channel" }, error: null } }));
+    registerAndDiagnoseChannelMock.mockResolvedValue({ ok: true, channelId: "new-channel", diagnosis: { channel: "youtube" } });
+    removeTrackedChannelMock.mockResolvedValue({ status: "removed" });
+
+    const result = await addChannel({}, withReplace("old-channel"));
+
+    expect(result).toEqual({ channelId: "new-channel" });
+    expect(removeTrackedChannelMock).toHaveBeenCalledWith("old-channel");
+    expect(registerAndDiagnoseChannelMock.mock.invocationCallOrder[0]).toBeLessThan(removeTrackedChannelMock.mock.invocationCallOrder[0]);
+  });
+
+  it("keeps the old channel when the new one cannot be registered", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient({ trackedChannel: { data: { id: "old-channel" }, error: null } }));
+    registerAndDiagnoseChannelMock.mockResolvedValue({ ok: false, message: "채널을 찾을 수 없어요." });
+
+    const result = await addChannel({}, withReplace("old-channel"));
+
+    expect(result.error).toBe("채널을 찾을 수 없어요.");
+    expect(removeTrackedChannelMock).not.toHaveBeenCalled();
+  });
+
+  it("never removes a channel that is not one of this business's own, and never the channel it just registered", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient({ trackedChannel: { data: null, error: null } }));
+    registerAndDiagnoseChannelMock.mockResolvedValue({ ok: true, channelId: "new-channel", diagnosis: { channel: "youtube" } });
+    await addChannel({}, withReplace("someone-elses-channel"));
+    expect(removeTrackedChannelMock).not.toHaveBeenCalled();
+
+    createClientMock.mockResolvedValue(makeOwnershipClient({ trackedChannel: { data: { id: "new-channel" }, error: null } }));
+    await addChannel({}, withReplace("new-channel"));
+    expect(removeTrackedChannelMock).not.toHaveBeenCalled();
+  });
+
+  it("reports the new channel as saved, with a notice, when the hourly diagnosis limit was reached", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    registerAndDiagnoseChannelMock.mockResolvedValue({ ok: true, channelId: "channel-1", diagnosis: null });
+
+    const result = await addChannel({}, withFormData({ businessId: "business-1", url: "https://youtube.com/@mychannel" }));
+
+    expect(result.error).toBeUndefined();
+    expect(result.channelId).toBe("channel-1");
+    expect(result.notice).toContain("다시 진단하기");
+  });
+});
+
+describe("previewChannelAction", () => {
+  it("needs a signed-in user and an address, and saves nothing", async () => {
+    createClientMock.mockResolvedValue({ auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) } });
+    expect(await previewChannelAction("https://youtube.com/@x")).toEqual({ error: "로그인이 필요합니다." });
+
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    expect(await previewChannelAction("   ")).toEqual({ error: "채널 주소를 입력해주세요." });
+    expect(previewChannelMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the preview for a resolvable channel and the message for one that is not", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    previewChannelMock.mockResolvedValueOnce({ ok: true, preview: { platform: "youtube", externalId: "UCx", displayName: "우리 채널" } });
+    expect(await previewChannelAction("https://youtube.com/@x", "")).toEqual({ preview: { platform: "youtube", externalId: "UCx", displayName: "우리 채널" } });
+    expect(previewChannelMock).toHaveBeenCalledWith("https://youtube.com/@x", undefined);
+
+    previewChannelMock.mockResolvedValueOnce({ ok: false, message: "채널을 찾을 수 없어요." });
+    expect(await previewChannelAction("https://youtube.com/@missing")).toEqual({ error: "채널을 찾을 수 없어요." });
+  });
+
+  it("maps a provider failure (e.g. quota) to a Korean message instead of throwing", async () => {
+    createClientMock.mockResolvedValue(makeOwnershipClient());
+    previewChannelMock.mockRejectedValue(Object.assign(new Error("quota"), { code: "QUOTA_EXCEEDED" }));
+    expect((await previewChannelAction("https://youtube.com/@x")).error).toContain("할당량");
   });
 });
 

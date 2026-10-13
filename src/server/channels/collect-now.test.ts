@@ -1,15 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, snapshotChannelMetricsMock, collectYouTubeAnalyticsIfConnectedMock, loggerWarnMock } = vi.hoisted(() => ({
+const { createClientMock, collectAndPersistChannelMock, recordCollectionFailureMock, startRunMock, finishRunMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
-  snapshotChannelMetricsMock: vi.fn().mockResolvedValue(undefined),
-  collectYouTubeAnalyticsIfConnectedMock: vi.fn().mockResolvedValue(undefined),
-  loggerWarnMock: vi.fn(),
+  collectAndPersistChannelMock: vi.fn().mockResolvedValue({ status: "SUCCESS", metricsSaved: 3, contentSaved: 1 }),
+  recordCollectionFailureMock: vi.fn().mockResolvedValue(undefined),
+  startRunMock: vi.fn().mockResolvedValue("run-1"),
+  finishRunMock: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
-vi.mock("./collect-pipeline", () => ({ snapshotChannelMetrics: snapshotChannelMetricsMock }));
-vi.mock("./youtube-analytics-pipeline", () => ({ collectYouTubeAnalyticsIfConnected: collectYouTubeAnalyticsIfConnectedMock }));
-vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: loggerWarnMock, error: vi.fn() } }));
+vi.mock("./collect-pipeline", () => ({ collectAndPersistChannel: collectAndPersistChannelMock }));
+vi.mock("./persist", async (importOriginal) => ({ ...(await importOriginal<typeof import("./persist")>()), recordCollectionFailure: recordCollectionFailureMock }));
+vi.mock("./collection-runs", () => ({ startCollectionRun: startRunMock, finishCollectionRun: finishRunMock }));
 
 const { collectChannelNow } = await import("./collect-now");
 
@@ -51,7 +52,7 @@ function makeClient({
 
 afterEach(() => {
   vi.clearAllMocks();
-  collectYouTubeAnalyticsIfConnectedMock.mockResolvedValue(undefined);
+  collectAndPersistChannelMock.mockResolvedValue({ status: "SUCCESS", metricsSaved: 3, contentSaved: 1 });
 });
 
 describe("collectChannelNow", () => {
@@ -62,7 +63,7 @@ describe("collectChannelNow", () => {
     const result = await collectChannelNow("channel-1", NOW);
 
     expect(result).toEqual({ status: "collected" });
-    expect(snapshotChannelMetricsMock).toHaveBeenCalledTimes(1);
+    expect(collectAndPersistChannelMock).toHaveBeenCalledTimes(1);
     expect(client.snapshotEqDate).toHaveBeenCalledWith("recorded_date", "2026-10-10");
   });
 
@@ -73,7 +74,7 @@ describe("collectChannelNow", () => {
     const result = await collectChannelNow("channel-1", NOW);
 
     expect(result).toEqual({ status: "already_collected_today" });
-    expect(snapshotChannelMetricsMock).not.toHaveBeenCalled();
+    expect(collectAndPersistChannelMock).not.toHaveBeenCalled();
   });
 
   it("throws when the channel doesn't exist (or isn't the caller's, per RLS)", async () => {
@@ -94,15 +95,24 @@ describe("collectChannelNow", () => {
     await expect(collectChannelNow("channel-1", NOW)).rejects.toMatchObject({ code: "DATABASE_ERROR" });
   });
 
-  it("ticket 1-10: a YouTube Analytics failure never blocks '지금 수집' from reporting success", async () => {
-    const client = makeClient();
-    createClientMock.mockResolvedValue(client);
-    collectYouTubeAnalyticsIfConnectedMock.mockRejectedValue(new Error("boom"));
+  it("logs the manual run, and a blog with no public data is reported as unavailable (not collected)", async () => {
+    createClientMock.mockResolvedValue(makeClient());
+    collectAndPersistChannelMock.mockResolvedValue({ status: "UNAVAILABLE", metricsSaved: 0, contentSaved: 0 });
 
     const result = await collectChannelNow("channel-1", NOW);
 
-    expect(result).toEqual({ status: "collected" });
-    expect(snapshotChannelMetricsMock).toHaveBeenCalledTimes(1);
-    expect(loggerWarnMock).toHaveBeenCalledWith("youtube_analytics_collection_failed_unexpectedly", expect.objectContaining({ channelId: "channel-1" }));
+    expect(result).toEqual({ status: "unavailable" });
+    expect(startRunMock).toHaveBeenCalledWith(expect.objectContaining({ trigger: "MANUAL_USER" }));
+    expect(finishRunMock).toHaveBeenCalledWith("run-1", expect.objectContaining({ total: 1, succeeded: 0, failed: 1 }));
+  });
+
+  it("records a collector failure on the channel, closes the run as failed and rethrows", async () => {
+    createClientMock.mockResolvedValue(makeClient());
+    collectAndPersistChannelMock.mockRejectedValue(new Error("boom"));
+
+    await expect(collectChannelNow("channel-1", NOW)).rejects.toThrow("boom");
+
+    expect(recordCollectionFailureMock).toHaveBeenCalledWith("channel-1", expect.any(Error), NOW);
+    expect(finishRunMock).toHaveBeenCalledWith("run-1", expect.objectContaining({ failed: 1, errorSummary: "boom" }));
   });
 });

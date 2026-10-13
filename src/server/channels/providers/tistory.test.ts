@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { httpsRequestMock, lookupMock } = vi.hoisted(() => ({
   httpsRequestMock: vi.fn(),
@@ -8,8 +8,13 @@ const { httpsRequestMock, lookupMock } = vi.hoisted(() => ({
 vi.mock("node:dns/promises", () => ({ lookup: lookupMock }));
 vi.mock("node:https", () => ({ request: httpsRequestMock }));
 
+const { robotsAllowedMock } = vi.hoisted(() => ({ robotsAllowedMock: vi.fn() }));
+vi.mock("./robots", async (importOriginal) => ({ ...(await importOriginal<typeof import("./robots")>()), isFetchAllowedByRobots: robotsAllowedMock }));
+
 const { collectTistoryRssMetrics } = await import("./tistory");
 const { DiagnosisError } = await import("@/server/marketing/diagnosis");
+
+beforeEach(() => robotsAllowedMock.mockResolvedValue(true));
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -97,15 +102,16 @@ const CDATA_VARIANT_FEED = `<?xml version="1.0" encoding="UTF-8"?>
 </rss>`;
 
 describe("collectTistoryRssMetrics: real-shaped fixtures", () => {
-  it("parses pubDate from an entity-escaped feed (no CDATA) with no title/description extraction", async () => {
+  it("parses pubDate from an entity-escaped feed (no CDATA) (title and link are kept for the post list, never the description/body)", async () => {
     mockOneRequest(makeMockResponse(200, XML_HEADERS), REAL_SHAPE_ENTITY_FEED);
     const result = await collectTistoryRssMetrics("https://notice.tistory.com/");
 
     expect(result.unavailableReason).toBeNull();
-    expect(result.posts).toEqual([
-      { publishedAt: new Date("2026-08-24T17:01:12+09:00").toISOString() },
-      { publishedAt: new Date("2026-06-25T11:08:31+09:00").toISOString() },
+    expect(result.posts.map((post) => post.publishedAt)).toEqual([
+      new Date("2026-08-24T17:01:12+09:00").toISOString(),
+      new Date("2026-06-25T11:08:31+09:00").toISOString(),
     ]);
+    expect(Object.keys(result.posts[0]).sort()).toEqual(["publishedAt", "title", "url"]);
   });
 
   it("parses pubDate from a CDATA-wrapped feed, including a CDATA-wrapped pubDate tag itself", async () => {
@@ -113,10 +119,11 @@ describe("collectTistoryRssMetrics: real-shaped fixtures", () => {
     const result = await collectTistoryRssMetrics("https://myname.tistory.com/");
 
     expect(result.unavailableReason).toBeNull();
-    expect(result.posts).toEqual([
-      { publishedAt: new Date("2026-10-09T09:00:00+09:00").toISOString() },
-      { publishedAt: new Date("2026-10-02T09:00:00+09:00").toISOString() },
+    expect(result.posts.map((post) => post.publishedAt)).toEqual([
+      new Date("2026-10-09T09:00:00+09:00").toISOString(),
+      new Date("2026-10-02T09:00:00+09:00").toISOString(),
     ]);
+    expect(Object.keys(result.posts[0]).sort()).toEqual(["publishedAt", "title", "url"]);
   });
 
   it("requests {blogUrl}/rss, reusing the stored channel URL rather than rebuilding it from externalId", async () => {
@@ -142,7 +149,7 @@ describe("collectTistoryRssMetrics: pubDate edge cases", () => {
   it("returns an empty, non-error result for a feed with 0 items", async () => {
     mockOneRequest(makeMockResponse(200, XML_HEADERS), "<rss><channel></channel></rss>");
     const result = await collectTistoryRssMetrics("https://myname.tistory.com/");
-    expect(result).toEqual({ posts: [], observedCapped: false, unavailableReason: null });
+    expect(result).toMatchObject({ posts: [], observedCapped: false, unavailableReason: null });
   });
 
   it("flags observedCapped when the feed returns exactly 30 items", async () => {
@@ -165,7 +172,7 @@ describe("collectTistoryRssMetrics: graceful degradation", () => {
   it("returns unavailableReason instead of throwing on a 404", async () => {
     mockOneRequest(makeMockResponse(404, XML_HEADERS));
     const result = await collectTistoryRssMetrics("https://myname.tistory.com/");
-    expect(result).toEqual({ posts: [], observedCapped: false, unavailableReason: expect.any(String) });
+    expect(result).toMatchObject({ posts: [], observedCapped: false, unavailableReason: expect.any(String) });
   });
 
   it("returns unavailableReason instead of throwing on a 403 (private blog)", async () => {
@@ -192,5 +199,14 @@ describe("collectTistoryRssMetrics: SSRF (also applies to custom domains, not ju
   it("rejects (throws) when a *.tistory.com host resolves to a private address", async () => {
     lookupMock.mockResolvedValueOnce([{ address: "127.0.0.1", family: 4 }]);
     await expect(collectTistoryRssMetrics("https://myname.tistory.com/")).rejects.toMatchObject({ code: "BLOCKED_TARGET" });
+  });
+});
+
+describe("collectTistoryRssMetrics: robots.txt", () => {
+  it("reports 'cannot be measured' without requesting the feed when robots.txt disallows it", async () => {
+    robotsAllowedMock.mockResolvedValue(false);
+    const result = await collectTistoryRssMetrics("https://my.tistory.com");
+    expect(result).toMatchObject({ posts: [], unavailableReason: expect.stringContaining("robots.txt") });
+    expect(httpsRequestMock).not.toHaveBeenCalled();
   });
 });

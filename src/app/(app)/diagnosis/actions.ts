@@ -4,13 +4,42 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { diagnoseWebsite, DiagnosisError } from "@/server/marketing/diagnosis";
 import type { ScoreItem } from "@/server/marketing/scoring";
-import { ChannelsError, DiagnosisRateLimitError, channelPlatformSchema, diagnoseChannel, registerAndDiagnoseChannel, removeTrackedChannel } from "@/server/channels";
-import type { ChannelPlatform } from "@/server/channels";
+import { ChannelsError, DiagnosisRateLimitError, channelPlatformSchema, diagnoseChannel, previewChannel, registerAndDiagnoseChannel, removeTrackedChannel } from "@/server/channels";
+import type { ChannelPlatform, ChannelPreview } from "@/server/channels";
 import type { BusinessSnsLinks, Json } from "@/types/domain";
 
 export interface ChannelActionState {
   error?: string;
   channelId?: string;
+  /** Not an error: the channel was saved, with something the owner should know (e.g. the diagnosis waits for the hourly limit). */
+  notice?: string;
+}
+
+export interface ChannelPreviewState {
+  preview?: ChannelPreview;
+  error?: string;
+}
+
+/**
+ * "확인" 단계 — 저장하기 전에 주소가 가리키는 채널(이름·사진·공개 수치)을 보여준다.
+ * 아무것도 저장하지 않고, 로그인한 사용자만 쓸 수 있다(YouTube 조회는 API 할당량을 1 쓴다).
+ */
+export async function previewChannelAction(url: string, platformHintRaw = ""): Promise<ChannelPreviewState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+  const trimmed = url.trim();
+  if (!trimmed) return { error: "채널 주소를 입력해주세요." };
+  if (trimmed.length > 500) return { error: "채널 주소가 너무 길어요." };
+  const hint = channelPlatformSchema.safeParse(platformHintRaw);
+  try {
+    const result = await previewChannel(trimmed, hint.success ? hint.data : undefined);
+    return result.ok ? { preview: result.preview } : { error: result.message };
+  } catch (error) {
+    return { error: describeChannelError(error) };
+  }
 }
 
 /** Shared by addChannel/rediagnoseChannel below — maps every error diagnoseChannel/registerAndDiagnoseChannel can throw to a Korean message. */
@@ -71,8 +100,26 @@ export async function addChannel(_prevState: ChannelActionState, formData: FormD
   }
   if (!result.ok) return { error: result.message };
 
+  // "주소 변경": the new channel is registered first; only then is the old one removed, so a typo never leaves the business with nothing.
+  const replaceId = String(formData.get("replaceChannelId") ?? "");
+  if (replaceId && replaceId !== result.channelId) {
+    const { data: old } = await supabase.from("tracked_channels").select("id").eq("id", replaceId).eq("business_id", businessId).maybeSingle();
+    if (old) {
+      try {
+        await removeTrackedChannel(replaceId);
+      } catch {
+        revalidatePath("/diagnosis");
+        return { channelId: result.channelId, error: "새 채널은 등록했지만 이전 채널을 지우지 못했어요. 이전 채널은 직접 삭제해주세요." };
+      }
+      revalidatePath("/growth-report");
+    }
+  }
+
   revalidatePath("/diagnosis");
-  return { channelId: result.channelId };
+  return {
+    channelId: result.channelId,
+    ...(result.diagnosis === null ? { notice: "채널은 등록했어요. 시간당 진단 한도에 도달해서 진단은 잠시 뒤에 ‘다시 진단하기’로 받을 수 있어요. 성장 기록은 내일 아침 6시부터 쌓여요." } : {}),
+  };
 }
 
 /** "다시 진단하기" — 이미 등록된 채널 하나를 다시 진단한다(1시간 캐시/시간당 한도는 diagnoseChannel 내부에서 그대로 적용됨). */
@@ -228,18 +275,14 @@ export async function runDiagnosis(_prevState: DiagnosisActionState, formData: F
     return { error: "진단을 너무 자주 요청했어요. 잠시 뒤(최대 1시간)에 다시 시도해주세요." };
   }
 
-  const { data: connections } = await supabase
-    .from("integration_connections")
-    .select("provider")
-    .eq("user_id", user.id)
-    .eq("business_id", business.id)
-    .eq("status", "CONNECTED");
+  // Channels the owner registered by address (no account connection): they count as channels the business has.
+  const { data: trackedChannels } = await supabase.from("tracked_channels").select("platform").eq("business_id", business.id).eq("status", "ACTIVE");
 
   let outcome;
   try {
     outcome = await diagnoseWebsite(business, url, {
       profileSnsLinks: (business.sns_links && typeof business.sns_links === "object" && !Array.isArray(business.sns_links) ? business.sns_links : {}) as BusinessSnsLinks,
-      connectedProviders: (connections ?? []).map((connection) => connection.provider),
+      connectedProviders: (trackedChannels ?? []).map((channel) => channel.platform),
     });
   } catch (error) {
     return { error: describeDiagnosisError(error) };

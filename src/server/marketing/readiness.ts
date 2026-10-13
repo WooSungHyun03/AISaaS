@@ -22,12 +22,8 @@ export interface ReadinessScoreResult {
   nextTodo: ReadinessScoreRow | null;
 }
 
-function isChannelConnected(status: string | undefined): boolean {
-  return status === "CONNECTED";
-}
-
 /**
- * "마케팅 운영 준비 점수" — 저장된 사업 정보/연결 상태/최근 콘텐츠 제작 데이터로 계산한
+ * "마케팅 운영 준비 점수" — 저장된 사업 정보/등록한 채널/최근 콘텐츠 제작 데이터로 계산한
  * 운영 준비도. 홈페이지 콘텐츠 자체의 품질 점수(diagnoseWebsite, /diagnosis의
  * "홈페이지로 자동 채우기")와는 다른 지표라 섞어 쓰지 않는다.
  *
@@ -38,20 +34,20 @@ function isChannelConnected(status: string | undefined): boolean {
 export async function getReadinessScore(business: Business, userId: string): Promise<ReadinessScoreResult> {
   const supabase = await createClient();
 
-  const [{ data: connections, error: connectionError }, { data: automations, error: automationError }] = await Promise.all([
+  const [{ data: channels, error: channelError }, { data: automations, error: automationError }] = await Promise.all([
+    // A registered YouTube channel address (public data only — there is no account connection).
     supabase
-      .from("integration_connections")
-      .select("provider, status, account_identifier")
-      .eq("user_id", userId)
+      .from("tracked_channels")
+      .select("platform, display_name, url")
       .eq("business_id", business.id)
-      .neq("status", "DISCONNECTED"),
+      .eq("platform", "youtube"),
     supabase
       .from("automations")
       .select("id, name, status, template_id, last_run_at, next_run_at")
       .eq("user_id", userId)
       .eq("business_id", business.id),
   ]);
-  const readError = connectionError || automationError;
+  const readError = channelError || automationError;
   if (readError) throw new Error("마케팅 준비 점수를 불러오지 못했습니다.", { cause: readError });
 
   const automationIds = (automations ?? []).map((automation) => automation.id);
@@ -67,8 +63,8 @@ export async function getReadinessScore(business: Business, userId: string): Pro
     : { count: 0, error: null };
   if (recentSuccessResult.error) throw new Error("최근 콘텐츠 운영 기록을 불러오지 못했습니다.", { cause: recentSuccessResult.error });
 
-  const youtube = connections?.find((connection) => connection.provider === "youtube");
-  const hasYouTube = isChannelConnected(youtube?.status);
+  const youtube = channels?.[0];
+  const hasYouTube = Boolean(youtube);
   const activeAutomations = (automations ?? []).filter((automation) => automation.status === "ACTIVE");
   const recentSuccesses = recentSuccessResult.count ?? 0;
 
@@ -105,10 +101,10 @@ export async function getReadinessScore(business: Business, userId: string): Pro
       key: "youtube",
       label: "YouTube",
       ready: hasYouTube,
-      detail: hasYouTube ? (youtube?.account_identifier ?? "계정이 연결돼 있어요") : "연결된 계정이 없어요",
-      href: `/settings?business=${business.id}`,
-      cta: "계정 연결",
-      todo: "YouTube 계정을 연결하는 것",
+      detail: hasYouTube ? (youtube?.display_name ?? youtube?.url ?? "채널이 등록돼 있어요") : "등록된 채널이 없어요",
+      href: `/diagnosis?business=${business.id}`,
+      cta: "채널 등록",
+      todo: "YouTube 채널 주소를 등록하는 것",
       points: hasYouTube ? 20 : 0,
       max: 20,
     },

@@ -44,6 +44,17 @@ export function shortDate(date: string): string {
   return month && day ? `${Number(month)}/${Number(day)}` : date;
 }
 
+export type ChartGranularity = "day" | "week" | "month";
+
+/** What a point's date means on the axis and in the tooltip: a day, the week starting that Monday, or a month. */
+export function pointDateLabel(date: string, granularity: ChartGranularity = "day"): string {
+  if (granularity === "month") {
+    const [year, month] = date.split("-");
+    return month ? `${year}.${Number(month)}월` : date;
+  }
+  return granularity === "week" ? `${shortDate(date)} 주` : shortDate(date);
+}
+
 /** Numbers as a Korean owner reads them: 1,234 / 1.2만, never an unlabelled raw float. */
 export function formatMetricValue(value: number): string {
   if (Math.abs(value) >= 100_000) return `${(Math.round(value / 1_000) / 10).toLocaleString("ko-KR")}만`;
@@ -75,7 +86,7 @@ export function buildChartModel(points: GrowthSeriesPoint[]) {
  * pointer or the arrow keys. The drawing keeps its aspect ratio (no stretched dots) and scales with its container,
  * so it is the same chart on a phone and on a desktop.
  */
-export function GrowthLineChart({ points, label, unit = "", className }: { points: GrowthSeriesPoint[]; label: string; unit?: string; className?: string }) {
+export function GrowthLineChart({ points, label, unit = "", granularity = "day", className }: { points: GrowthSeriesPoint[]; label: string; unit?: string; granularity?: ChartGranularity; className?: string }) {
   const titleId = useId();
   const [active, setActive] = useState<number | null>(null);
   const model = buildChartModel(points);
@@ -86,7 +97,7 @@ export function GrowthLineChart({ points, label, unit = "", className }: { point
 
   const { scaled, byIndex, indexes, min, max, flat } = model;
   const defined = points.filter((point) => point.value !== null);
-  const summary = `${label} 추이: ${defined.map((point) => `${point.date} ${formatMetricValue(point.value!)}${unit}`).join(", ")}`;
+  const summary = `${label} 추이: ${defined.map((point) => `${pointDateLabel(point.date, granularity)} ${formatMetricValue(point.value!)}${unit}`).join(", ")}`;
   const last = scaled[scaled.length - 1];
   const middleValue = (min + max) / 2;
   const yFor = (value: number) => (flat ? PLOT.top + model.plotHeight / 2 : PLOT.top + 6 + (1 - (value - min) / (max - min)) * (model.plotHeight - 12));
@@ -142,7 +153,7 @@ export function GrowthLineChart({ points, label, unit = "", className }: { point
           </g>
         ))}
         {xLabels.map(({ index, anchor }) => (
-          <text key={index} x={xFor(index)} y={HEIGHT - 6} textAnchor={anchor} fontSize={10} fill="var(--muted-foreground)">{shortDate(points[index].date)}</text>
+          <text key={index} x={xFor(index)} y={HEIGHT - 6} textAnchor={anchor} fontSize={10} fill="var(--muted-foreground)">{pointDateLabel(points[index].date, granularity)}</text>
         ))}
         {scaled.length > 1 ? <path d={buildLinePath(scaled)} fill="none" stroke="var(--primary)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" /> : null}
         {indexes.map((index) => {
@@ -163,7 +174,7 @@ export function GrowthLineChart({ points, label, unit = "", className }: { point
           className="pointer-events-none absolute -top-1 z-10 -translate-y-full whitespace-nowrap rounded-lg border bg-popover px-2.5 py-1.5 text-xs shadow-md"
           style={{ left: `${Math.min(Math.max((activeXY.x / WIDTH) * 100, 14), 86)}%`, transform: "translate(-50%, -100%)" }}
         >
-          <p className="font-semibold">{shortDate(activePoint.date)}</p>
+          <p className="font-semibold">{pointDateLabel(activePoint.date, granularity)}</p>
           <p className="tabular">{label} {formatMetricValue(activePoint.value!)}{unit}</p>
           {activePoint.measured === false ? <p className="text-muted-foreground">이날은 측정이 없어 이전 값이에요</p> : null}
         </div>

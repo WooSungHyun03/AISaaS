@@ -2,12 +2,12 @@ import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env/server";
 import { ChannelsError } from "./summary";
-import { collectRawChannelMetrics, toSnapshotMetricsRecord } from "./raw-metrics";
+import { collectRawChannelMetrics } from "./raw-metrics";
 import type { RawChannelMetrics, TrackedChannelForCollection } from "./raw-metrics";
 import { scoreYouTubeChannel, uploadsWithinDays } from "./youtube-scoring";
 import { scoreTistoryChannel, postsWithinDays } from "./tistory-scoring";
 import { scoreNaverBlogChannel } from "./naver-blog-scoring";
-import { saveMetricSnapshot } from "./snapshot";
+import { persistChannelCollection } from "./persist";
 import { recordDiagnosisAttempt } from "./diagnosis-rate-limit";
 import type { ChannelDiagnosis } from "./types";
 
@@ -162,14 +162,7 @@ export async function diagnoseChannel(
 
   // Ticket 1-6's "(a) 진단 시 자동 저장" — reuses the metrics already
   // fetched above instead of calling the provider again.
-  await saveSnapshotsFromRawMetrics(trackedChannel.id, raw, now);
+  await persistChannelCollection({ channelId: trackedChannel.id, raw, now });
 
   return mapRowToChannelDiagnosis(inserted as ChannelDiagnosisSelection, trackedChannel.platform);
-}
-
-async function saveSnapshotsFromRawMetrics(channelId: string, raw: RawChannelMetrics, now: Date): Promise<void> {
-  const source = serverEnv.CHANNEL_DATA_PROVIDER;
-  for (const [metric, value] of Object.entries(toSnapshotMetricsRecord(raw))) {
-    await saveMetricSnapshot({ channelId, metric, value, source, recordedAt: now });
-  }
 }

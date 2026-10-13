@@ -193,6 +193,8 @@ the handler receives `runId`.
 
 ### Instagram Professional Account Connection (Day 8)
 
+> **폐기됨 (2026-10-13).** Instagram 연동과 YouTube 계정 연결(OAuth)은 제거되었고, 이 구간과 아래 `oauth.ts`·`integration-settings.tsx` 설명은 이력으로만 남깁니다.
+
 A `feature/directory-cs` merge (2026-09-26, before this Day started) had
 already landed a working Meta OAuth flow — `src/server/connectors/
 instagram/oauth.ts`, `src/app/api/integrations/instagram/{connect,
@@ -709,6 +711,30 @@ See `supabase/migrations/` for the authoritative schema (RLS policies in `0012_r
 Everything a user can query directly is RLS-scoped to `owner_id`/`user_id`; writes that must bypass RLS (usage counters, subscription updates, cron-driven runs) go through the service-role client in `src/lib/supabase/admin.ts`, which is only ever imported from trusted server code, never from a route a browser can trigger without the secret/entitlement checks in front of it.
 
 Automation Guides content (title/description shown on `/guides`) is a static TS array in `src/app/(public)/guides/page.tsx` — not a database table, MDX, or CMS. Only the FAQ accordion on that page comes from `faqs`. Keep this static until the content volume or a non-developer editing need actually justifies a database-backed or CMS approach.
+
+## Channel growth collection (public data, no OAuth)
+
+2026-10-13 기준 채널 성장 리포트는 계정 연결 없이 **공개 데이터만** 씁니다. 자세한 감사 결과는 `docs/ARCHITECTURE_AUDIT_2026-10-13.md`, 운영 절차는 `docs/person1/METRICS_COLLECTION_CRON.md`.
+
+```
+채널 등록   previewChannelAction("채널 확인": 저장 없음) → addChannel("이 채널로 등록")
+            └ resolveParsedChannel: YouTube는 Data API(1유닛)로 정식 Channel ID(UC…)·이름·사진 확인, 블로그는 RSS
+            └ tracked_channels(+display_name, thumbnail_url) , next_snapshot_at = 다음 06:00 KST
+
+매일 06:00 KST  pg_cron(5분) → Edge Function → /api/cron/run-automations → processDueChannels
+            └ 선점(CAS) → collectRawChannelMetrics(provider) → persistChannelCollection
+                 ├ marketing_metric_snapshots   (날짜별 upsert, source live|mock|DEMO_SEED)
+                 ├ channel_content_snapshots    (영상·글별 일별 스냅샷, 채널당 20,000행 상한)
+                 └ tracked_channels             (표시 정보, last_collected_at, last_collection_status)
+            └ channel_collection_runs          (관리자 /admin/collection)
+
+화면        getChannelGrowthSeries (일/주/월 버킷, 합계형 TOTAL vs 증가형 FLOW, collection 상태)
+            getChannelContentReports (영상·글별 기간 증가량, 주간 게시 수)
+```
+
+- 모듈 위치: `src/server/channels/` (`schedule`, `preview`, `register`, `persist`, `collect-pipeline`, `collect-now`, `collection-runs`, `growth-series`, `growth-content`, `providers/*`).
+- `CHANNEL_DATA_PROVIDER=live|mock`: mock은 운영에서 거부되고 화면에 "샘플 데이터"로 표시됩니다.
+- 측정하지 못한 값은 저장하지도 표시하지도 않습니다(0으로 채우지 않음). `viewCountDaily`는 인접한 두 측정일의 공개 누적 조회수 차이일 뿐, YouTube Analytics의 일별 조회수가 아닙니다.
 
 ## Integration Connections & Secret Storage
 

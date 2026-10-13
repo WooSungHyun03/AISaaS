@@ -18,7 +18,7 @@ import { readDeferredJob } from "@/server/automations/runner";
 import { CreditNotice } from "@/components/billing/credit-notice";
 import { PromotionTargetCard } from "@/components/business/promotion-target-card";
 import { getUsableCredits } from "@/server/billing/run-credits";
-import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
+import type { AutomationSchedule } from "@/types/automation";
 
 /** Server Actions on this page call the AI / video providers; give them room beyond the 10s default. */
 export const maxDuration = 300;
@@ -48,12 +48,11 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const businessPicker = businesses && businesses.length > 1 ? <nav className="flex flex-wrap gap-2" aria-label="사업체 선택">{businesses.map((business) => <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness.id ? "default" : "outline"}><Link href={`/shorts?business=${business.id}`} aria-current={business.id === selectedBusiness.id ? "page" : undefined}>{business.name}</Link></Button>)}</nav> : null;
   if (!automation) return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<EmptyState mascot="point" title={`${selectedBusiness.name}의 숏폼을 시작해보세요`} description="기본 예약 설정을 만든 뒤 바로 AI 영상 미리보기를 생성할 수 있어요." action={<ShortsCreateButton businessId={selectedBusiness.id} />} /></div>;
 
-  const [runsResult, connectionsResult, inFlightResult] = await Promise.all([
+  const [runsResult, inFlightResult] = await Promise.all([
     supabase.from("automation_runs").select("id,status,output,created_at").eq("automation_id", automation.id).order("created_at", { ascending: false }).limit(30),
-    supabase.from("integration_connections").select("provider,status").eq("user_id", user.id).eq("business_id", selectedBusiness.id).eq("provider", "youtube"),
     supabase.from("automation_runs").select("id,output").eq("automation_id", automation.id).in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle(),
   ]);
-  if (runsResult.error || connectionsResult.error || inFlightResult.error) throw new Error("숏폼 작업 상태를 불러오지 못했습니다.");
+  if (runsResult.error || inFlightResult.error) throw new Error("숏폼 작업 상태를 불러오지 못했습니다.");
 
   const safeRuns = (runsResult.data ?? []).filter((run) => run.status === "SUCCESS").map((run) => ({ ...run, safe: toSafeAutomationRunOutput(run.output) }));
   const previewRun = safeRuns.find((run) => {
@@ -81,12 +80,6 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     qa: previewRun.safe.qa,
     sample: previewRun.safe.sampleVideo,
   } : null;
-  const publications = safeRuns.flatMap((run) => (Object.entries(run.safe?.publicationResults ?? {}) as Array<[ShortsPublishPlatform, NonNullable<typeof run.safe>["publicationResults"][ShortsPublishPlatform]]>)
-    .filter((entry): entry is [ShortsPublishPlatform, NonNullable<typeof entry[1]>] => Boolean(entry[1]))
-    .map(([platform, result]) => ({ runId: run.id, createdAt: run.created_at, platform, ...result })));
-  const connectionMap = Object.fromEntries((connectionsResult.data ?? []).map((item) => [item.provider, item.status])) as Partial<Record<ShortsPublishPlatform, string>>;
-  const config = automation.config && typeof automation.config === "object" && !Array.isArray(automation.config) ? automation.config as Record<string, unknown> : {};
-  const configuredPlatforms: ShortsPublishPlatform[] = Array.isArray(config.platforms) ? config.platforms.filter((item): item is ShortsPublishPlatform => item === "youtube") : [];
   const schedule = automation.schedule as unknown as AutomationSchedule;
   const settings = parseShortsSettings(automation.config);
   const assetViews = await assetViewsFor(settings.assets, user.id, automation.id);
@@ -108,7 +101,7 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     />
   ) : null;
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio publishingSlot={publishingSlot} referencesSlot={<ShortsAssetsCard automationId={automation.id} assets={assetViews} brief={settings.brief} durationSec={settings.durationSec} voiceMode={settings.voiceMode} disabled={Boolean(inFlightResult.data)} />} hasImages={assetViews.some((asset) => asset.kind === "image" || asset.kind === "video")} automationId={automation.id} automationStatus={automation.status} schedule={schedule} configuredPlatforms={configuredPlatforms} connections={{ youtube: connectionMap.youtube ?? null }} latestPreview={latestPreview} publications={publications} hasInFlightRun={Boolean(inFlightResult.data)} progress={jobState?.progress ?? null} job={job} nextRunAt={automation.next_run_at} /></div>;
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio publishingSlot={publishingSlot} referencesSlot={<ShortsAssetsCard automationId={automation.id} assets={assetViews} brief={settings.brief} durationSec={settings.durationSec} voiceMode={settings.voiceMode} disabled={Boolean(inFlightResult.data)} />} hasImages={assetViews.some((asset) => asset.kind === "image" || asset.kind === "video")} automationId={automation.id} automationStatus={automation.status} schedule={schedule} latestPreview={latestPreview} hasInFlightRun={Boolean(inFlightResult.data)} progress={jobState?.progress ?? null} job={job} nextRunAt={automation.next_run_at} /></div>;
 }
 
 function PageHeading() {

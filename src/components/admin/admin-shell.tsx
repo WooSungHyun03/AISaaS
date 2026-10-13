@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, AlertTriangle, ArrowLeft, CreditCard, LayoutDashboard, MessageCircleQuestion, RotateCcw, ShieldCheck, Users } from "lucide-react";
+import { Activity, AlertTriangle, ArrowLeft, CreditCard, Database, LayoutDashboard, MessageCircleQuestion, RotateCcw, ShieldCheck, Users } from "lucide-react";
 import { signOut } from "@/app/(auth)/actions";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ const ADMIN_NAV = [
   { href: "/admin/refunds", label: "환불", icon: RotateCcw },
   { href: "/admin/inquiries", label: "고객 문의", icon: MessageCircleQuestion },
   { href: "/admin/usage", label: "사용량", icon: Activity },
+  { href: "/admin/collection", label: "채널 수집", icon: Database },
   { href: "/admin/errors", label: "오류", icon: AlertTriangle },
 ] as const;
 

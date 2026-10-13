@@ -104,6 +104,10 @@ docker compose up --build
 
 `Dockerfile`은 3단계(deps → builder → runner) 빌드로 최종 이미지에 소스/devDependencies가 남지 않고, `next.config.ts`의 `output: "standalone"`이 필요한 `node_modules`만 추립니다. 실제 시크릿은 이미지에 포함되지 않고 컨테이너 실행 시(`--env-file`/`env_file`)에만 주입됩니다. `/api/health`가 헬스체크 엔드포인트입니다.
 
+## 채널 성장 리포트 (공개 데이터 자동 수집)
+
+사용자는 채널 주소(YouTube·네이버 블로그·티스토리)만 등록합니다. 계정 연결(OAuth)은 없고, 매일 06:00(KST)에 이미 등록된 5분 cron 틱이 공개 지표만 수집해 성장 리포트에 일/주/월 그래프로 보여줍니다. 운영에 필요한 값은 `YOUTUBE_API_KEY`(Production)와 `CHANNEL_DATA_PROVIDER=live`(미설정이면 운영에서 live)뿐입니다. 수집 기록과 수동 "지금 수집"은 관리자 `/admin/collection`에 있습니다. 자세한 내용: [docs/person1/METRICS_COLLECTION_CRON.md](docs/person1/METRICS_COLLECTION_CRON.md), [docs/EXTERNAL_SETUP.md](docs/EXTERNAL_SETUP.md), [docs/ARCHITECTURE_AUDIT_2026-10-13.md](docs/ARCHITECTURE_AUDIT_2026-10-13.md).
+
 ## CI
 
 `.github/workflows/ci.yml`이 `main` push와 그 대상 PR에서 lint → typecheck → test → build → docker build를 순서대로 실행합니다 (실제 배포는 그대로 Vercel의 git 연동이 담당 — 이 워크플로는 검증 게이트입니다). 불필요한 Actions 사용량을 피하기 위해 다른 브랜치에서는 실행되지 않습니다.
@@ -132,7 +136,7 @@ supabase/
   functions/      # Edge Function (cron 트리거)
   seed.sql        # 초기 데이터
 worker/ffmpeg/    # 광고 영상 후처리 워커 (Node + FFmpeg, Docker)
-docs/             # ARCHITECTURE.md, TEAM_GUIDE.md, AD_SHORTS.md, AI_SETUP.md
+docs/             # ARCHITECTURE.md, ARCHITECTURE_AUDIT_*.md, TEAM_GUIDE.md, AD_SHORTS.md, AI_SETUP.md
 .github/workflows/ci.yml   # lint/typecheck/test/build/docker build
 Dockerfile, .dockerignore, compose.yaml   # 컨테이너 빌드/로컬 실행
 ```

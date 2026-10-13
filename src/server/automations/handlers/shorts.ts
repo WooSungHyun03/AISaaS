@@ -18,7 +18,6 @@ import {
   withBudgetScope,
   type WanPricingInput,
 } from "@/server/budget";
-import { publishShortsToPlatforms } from "@/server/automations/shorts-publishing";
 import { getPostprocessProvider, MockPostprocessProvider, type ComposeOverlay, type PostprocessProvider, type VideoAnalysis } from "@/server/connectors/postprocess";
 import { getTtsProvider } from "@/server/connectors/tts";
 import { getWanProvider, isRealVideoGeneration, wanHandleSchema, type WanHandle, type WanRequest } from "@/server/connectors/wan";
@@ -35,7 +34,6 @@ import {
 } from "@/server/shorts/ad-plan";
 import {
   ensureShortsBuckets,
-  isOwnedAssetPath,
   REFERENCE_BUCKET,
   resolveAssetUrls,
   signAsset,
@@ -43,7 +41,7 @@ import {
   VIDEO_URL_TTL_SEC,
   videoStoragePath,
 } from "@/server/shorts/assets";
-import { shortsContentSchema, type ShortsContent } from "@/server/shorts/content";
+import { type ShortsContent } from "@/server/shorts/content";
 import { withImageAnalysis } from "@/server/shorts/describe-images";
 import { generateShortsPublishing } from "@/server/shorts/publishing-generate";
 import { shortsPublishingSchema, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
@@ -71,7 +69,6 @@ import type {
   AutomationHandlerOutcome,
   AutomationHandlerResult,
   AutomationRunContext,
-  ShortsPublishPlatform,
 } from "@/types/automation";
 import type { Json } from "@/types/domain";
 
@@ -111,8 +108,6 @@ const jobStateSchema = z.object({
   durationSec: z.number().int().min(20).max(30),
   voiceMode: z.enum(["native", "tts"]),
   previewOnly: z.boolean(),
-  // Older in-flight jobs may still carry "instagram"; it is dropped when the job reads its platforms.
-  platforms: z.array(z.enum(["instagram", "youtube"])).transform((list) => list.filter((value): value is ShortsPublishPlatform => value === "youtube")),
   plan: adPlanSchema,
   assets: z.array(shortsAssetSchema),
   wanPrompt: z.string(),
@@ -174,91 +169,12 @@ function postprocessFor(): PostprocessProvider {
 
 const scoped = <T,>(ctx: AutomationRunContext, attempt: number, fn: () => Promise<T>) => withBudgetScope({ kind: "VIDEO", runId: ctx.runId, attempt }, fn);
 
-function scheduledPlatforms(config: AutomationRunContext["config"]): ShortsPublishPlatform[] {
-  // Publishing is opt-in: an automation without an explicit platform list only renders a preview.
-  if (!Array.isArray(config.platforms)) return [];
-  const platforms = config.platforms.filter((value): value is ShortsPublishPlatform => value === "youtube");
-  return [...new Set(platforms)];
-}
-
 function videoLink(ctx: AutomationRunContext): string | null {
   return promotionFieldValue(ctx.business, "actionUrl") ?? promotionFieldValue(ctx.business, "website");
 }
 
 /** Failures that mean fal refused the request before queueing anything: nothing was billed. */
 const UNBILLED_SUBMIT_CODES = new Set(["INVALID_TARGET", "NOT_CONFIGURED", "AUTH_FAILED", "PERMISSION_DENIED", "UPSTREAM_CLIENT_ERROR"]);
-
-async function publishExistingPreview(ctx: AutomationRunContext): Promise<AutomationHandlerResult> {
-  const request = ctx.shorts?.publish;
-  if (!request) throw new Error("게시할 Shorts 미리보기를 확인할 수 없습니다.");
-  const admin = createAdminClient();
-  const { data: sourceRun, error } = await admin
-    .from("automation_runs")
-    .select("output,status")
-    .eq("id", request.sourceRunId)
-    .eq("automation_id", ctx.automation.id)
-    .maybeSingle();
-  if (error || !sourceRun || sourceRun.status !== "SUCCESS") {
-    throw new Error("게시할 Shorts 미리보기를 찾을 수 없습니다. 영상을 다시 만들어주세요.");
-  }
-  const output = sourceRun.output && typeof sourceRun.output === "object" && !Array.isArray(sourceRun.output) ? (sourceRun.output as Record<string, unknown>) : null;
-  const content = shortsContentSchema.safeParse(output);
-  const videoPath = typeof output?.videoPath === "string" ? output.videoPath : "";
-  if (isSampleVideo(output)) {
-    throw new Error("테스트용 샘플 영상은 게시할 수 없어요. 영상 제작 서비스를 연결한 뒤 다시 만들어주세요.");
-  }
-  // A video made by this pipeline lives in private Storage: the address for the platforms is signed now. Older videos kept a public address.
-  let videoUrl = typeof output?.videoUrl === "string" ? output.videoUrl : "";
-  if (videoPath) {
-    if (!isOwnedAssetPath(videoPath, ctx.automation.user_id, ctx.automation.id)) throw new Error("게시할 영상 정보가 올바르지 않습니다. 영상을 다시 만들어주세요.");
-    videoUrl = await signAsset(admin, VIDEO_BUCKET, videoPath, 60 * 60);
-  }
-  const topic = typeof output?.topic === "string" ? output.topic : content.success ? content.data.hook : "";
-  if (!content.success || !/^https:\/\//i.test(videoUrl)) {
-    throw new Error("게시할 영상 정보가 올바르지 않습니다. 영상을 다시 만들어주세요.");
-  }
-
-  // The owner's edited posting text (saved on the history row) wins over what the AI first wrote.
-  const { data: workingCopy } = await admin.from("content_history").select("publishing").eq("run_id", request.sourceRunId).maybeSingle();
-  const edited = shortsPublishingSchema.safeParse(workingCopy?.publishing);
-  const generated = shortsPublishingSchema.safeParse(output?.publishing);
-  const publishing = edited.success ? edited.data : generated.success ? generated.data : undefined;
-
-  const publicationResults = await publishShortsToPlatforms({
-    userId: ctx.automation.user_id,
-    businessId: ctx.business.id,
-    title: content.data.hook,
-    caption: content.data.caption,
-    videoUrl,
-    platforms: request.platforms,
-    publishing,
-    link: videoLink(ctx),
-  });
-  return {
-    output: {
-      operation: "PUBLISH",
-      sourceRunId: request.sourceRunId,
-      ...content.data,
-      ...(publishing ? { publishing } : {}),
-      topic,
-      ...(videoPath ? { videoPath } : { videoUrl }),
-      publicationResults,
-    } as unknown as Json,
-    externalUrl: videoPath ? undefined : videoUrl,
-    title: content.data.hook,
-    topic,
-    contentType: "shorts-publish",
-    aiGenerationCount: 0,
-    externalApiCallCount: request.platforms.length,
-  };
-}
-
-/** The placeholder a mock video generator returns is an address, not a video: it must never be shown as a finished Short. */
-function isSampleVideo(output: Record<string, unknown> | null | undefined): boolean {
-  if (!output) return false;
-  if (output.sampleVideo === true) return true;
-  return typeof output.videoUrl === "string" && /\.invalid(\/|$)/.test(output.videoUrl);
-}
 
 /** What the owner told the pipeline, checked before a credit is touched or a cent is reserved. */
 function requireInputs(settings: ShortsSettings): void {
@@ -360,7 +276,6 @@ async function startRun(ctx: AutomationRunContext): Promise<AutomationHandlerOut
         durationSec: settings.durationSec,
         voiceMode: settings.voiceMode,
         previewOnly,
-        platforms: previewOnly ? [] : scheduledPlatforms(ctx.config),
         plan,
         assets,
         wanPrompt,
@@ -703,18 +618,6 @@ async function complete(ctx: AutomationRunContext, state: JobState, finalPath: s
     privacy: "private",
   };
   const qa = state.qa ?? { status: "NEEDS_HUMAN_CHECK", findings: [], summary: "", aiChecked: false };
-  const publicationResults = state.platforms.length > 0 && !sample
-    ? await publishShortsToPlatforms({
-      userId: ctx.automation.user_id,
-      businessId: ctx.business.id,
-      title: content.hook,
-      caption: content.caption,
-      videoUrl,
-      platforms: state.platforms,
-      publishing: state.publishing,
-      link: videoLink(ctx),
-    })
-    : {};
   const spend = await summarizeRunSpend(ctx.runId).catch(() => null);
   const wanAttempts = state.attempts.filter((item) => item.outcome !== "lost").length || 1;
 
@@ -741,7 +644,6 @@ async function complete(ctx: AutomationRunContext, state: JobState, finalPath: s
         actualPrompt: state.generated?.actualPrompt ?? null,
         ...(spend && spend.steps.length > 0 ? { costUsd: spend.totalUsd, steps: spend.steps } : {}),
       },
-      publicationResults,
     } as unknown as Json,
     externalUrl: undefined,
     title: content.hook,
@@ -749,7 +651,7 @@ async function complete(ctx: AutomationRunContext, state: JobState, finalPath: s
     content: content.script,
     contentType: "shorts",
     aiGenerationCount: Math.max(1, state.aiCalls),
-    externalApiCallCount: wanAttempts + (state.voice ? 1 : 0) + (sample ? 0 : state.platforms.length),
+    externalApiCallCount: wanAttempts + (state.voice ? 1 : 0),
   };
 }
 
@@ -773,14 +675,12 @@ async function resumeRun(ctx: AutomationRunContext, raw: Json): Promise<Automati
 export const shortsAutomationHandler: AutomationHandler = {
   templateSlug: "shorts",
 
-  /** A re-publish costs nothing. Real video generation, or any real AI call, draws on the video budget. */
-  metered(ctx) {
-    if (ctx.shorts?.publish) return null;
+  /** Real video generation, or any real AI call, draws on the video budget. */
+  metered() {
     return isRealVideoGeneration() || serverEnv.AI_PROVIDER !== "mock" ? "VIDEO" : null;
   },
 
   preflight(ctx) {
-    if (ctx.shorts?.publish) return null;
     const unavailable = "영상 제작 서비스가 아직 연결되지 않아 지금은 광고 영상을 만들 수 없어요. 이용권은 차감되지 않았어요. 관리자에게 문의해주세요.";
     // Without a real generator a production run would "succeed" with a placeholder instead of a video.
     if (process.env.NODE_ENV === "production" && !isRealVideoGeneration()) return unavailable;
@@ -796,7 +696,6 @@ export const shortsAutomationHandler: AutomationHandler = {
   },
 
   async run(ctx: AutomationRunContext): Promise<AutomationHandlerOutcome> {
-    if (ctx.shorts?.publish) return publishExistingPreview(ctx);
     return startRun(ctx);
   },
 

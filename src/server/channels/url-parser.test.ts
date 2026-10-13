@@ -6,27 +6,27 @@ const UC_ID = "UC1234567890123456789012"; // UC + 22 chars = 24 total
 describe("parseChannelUrl: youtube", () => {
   it("parses an http @handle URL", () => {
     const result = parseChannelUrl("http://youtube.com/@mychannel");
-    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel" });
+    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel", youtubeLookup: { handle: "@mychannel" } });
   });
 
   it("parses an https @handle URL with www", () => {
     const result = parseChannelUrl("https://www.youtube.com/@mychannel");
-    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel" });
+    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel", youtubeLookup: { handle: "@mychannel" } });
   });
 
   it("parses the mobile host m.youtube.com", () => {
     const result = parseChannelUrl("https://m.youtube.com/@mychannel");
-    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel" });
+    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel", youtubeLookup: { handle: "@mychannel" } });
   });
 
   it("ignores a trailing slash", () => {
     const result = parseChannelUrl("https://youtube.com/@mychannel/");
-    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel" });
+    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel", youtubeLookup: { handle: "@mychannel" } });
   });
 
   it("ignores a query string", () => {
     const result = parseChannelUrl("https://youtube.com/@mychannel?si=abc123");
-    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel" });
+    expect(result).toEqual({ ok: true, platform: "youtube", externalId: "@mychannel", normalizedUrl: "https://youtube.com/@mychannel", youtubeLookup: { handle: "@mychannel" } });
   });
 
   it("is case-insensitive on host and the /channel/ keyword", () => {
@@ -114,5 +114,15 @@ describe("parseChannelUrl: unsupported formats and the platform hint escape hatc
     // @ts-expect-error intentionally invalid hint to verify the schema guard
     const result = parseChannelUrl("https://example.com/my-blog", "not-a-platform");
     expect(result.ok).toBe(false);
+  });
+});
+
+describe("parseChannelUrl: youtube legacy /user/ addresses", () => {
+  it("resolves /user/<name> through the username lookup", () => {
+    expect(parseChannelUrl("https://www.youtube.com/user/oldname")).toEqual({ ok: true, platform: "youtube", externalId: "oldname", normalizedUrl: "https://youtube.com/user/oldname", youtubeLookup: { username: "oldname" } });
+  });
+
+  it("refuses /c/<name> and asks for the @handle address", () => {
+    expect(parseChannelUrl("https://www.youtube.com/c/customname")).toEqual({ ok: false, message: expect.stringContaining("@핸들") });
   });
 });

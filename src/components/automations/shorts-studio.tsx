@@ -1,21 +1,16 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClock, Check, CircleAlert, CircleCheck, ExternalLink, Film, LoaderCircle, Play, Send } from "lucide-react";
+import { CalendarClock, Check, CircleAlert, CircleCheck, Film, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
-import { advanceShortsJob, createShortsAutomation, generateShortsPreview, publishShortsNow, saveShortsSchedule } from "@/app/(app)/shorts/actions";
+import { advanceShortsJob, createShortsAutomation, generateShortsPreview, saveShortsSchedule } from "@/app/(app)/shorts/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FormMessage } from "@/components/ui/form-message";
 import { ScheduleFields, ScheduleHiddenInputs, scheduleToValue } from "@/components/automations/schedule-fields";
 import { cn } from "@/lib/utils";
-import type { AutomationSchedule, ShortsPublishPlatform } from "@/types/automation";
-
-const PLATFORM = {
-  youtube: { label: "YouTube Shorts", icon: Play },
-} as const;
+import type { AutomationSchedule } from "@/types/automation";
 
 interface Preview {
   runId: string;
@@ -71,15 +66,6 @@ function JobSteps({ job }: { job: ShortsJobInfo | null }) {
   );
 }
 
-interface Publication {
-  runId: string;
-  createdAt: string;
-  platform: ShortsPublishPlatform;
-  externalId: string | null;
-  externalUrl: string | null;
-  privacy: "private" | null;
-}
-
 export function ShortsCreateButton({ businessId }: { businessId: string }) {
   const [pending, startTransition] = useTransition();
   const router = useRouter();
@@ -97,10 +83,7 @@ export function ShortsStudio({
   automationId,
   automationStatus,
   schedule,
-  configuredPlatforms,
-  connections,
   latestPreview,
-  publications,
   hasInFlightRun,
   progress,
   job,
@@ -112,10 +95,7 @@ export function ShortsStudio({
   automationId: string;
   automationStatus: string;
   schedule: AutomationSchedule;
-  configuredPlatforms: ShortsPublishPlatform[];
-  connections: Record<ShortsPublishPlatform, string | null>;
   latestPreview: Preview | null;
-  publications: Publication[];
   hasInFlightRun: boolean;
   /** Short status of a video that is being made in the background, if any. */
   progress: string | null;
@@ -130,11 +110,8 @@ export function ShortsStudio({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [busyAction, setBusyAction] = useState<"generate" | "publish" | "schedule" | null>(null);
+  const [busyAction, setBusyAction] = useState<"generate" | "schedule" | null>(null);
   const [scheduleValue, setScheduleValue] = useState(() => scheduleToValue(schedule, { timeOfDay: "18:00" }));
-  const [platforms, setPlatforms] = useState<ShortsPublishPlatform[]>(() =>
-    configuredPlatforms.filter((platform) => connections[platform] === "CONNECTED"),
-  );
   const busy = pending || hasInFlightRun;
 
   // While a video is being made in the background, nudge it forward every few seconds (the cron tick
@@ -160,10 +137,6 @@ export function ShortsStudio({
     return () => window.clearInterval(timer);
   }, [hasInFlightRun, automationId, router]);
 
-  const togglePlatform = (platform: ShortsPublishPlatform) => {
-    setPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform]);
-  };
-
   const run = (kind: typeof busyAction, task: () => Promise<{ error?: string; pending?: boolean }>, success: string, pendingMessage?: string) => {
     setBusyAction(kind);
     startTransition(async () => {
@@ -187,7 +160,7 @@ export function ShortsStudio({
         <JobSteps job={job} />
         <p className="text-xs leading-5 text-muted-foreground">광고 영상은 몇 분에서 십여 분 걸릴 수 있어요. 이 화면을 닫아도 계속 만들어지고, 끝나면 이곳에 나타나요.</p>
       </div> : null}
-      {automationStatus === "ERROR" ? <FormMessage>최근 실행 오류로 예약이 멈췄어요. 연결을 확인한 뒤 아래 예약 설정을 다시 저장해주세요.</FormMessage> : null}
+      {automationStatus === "ERROR" ? <FormMessage>최근 실행 오류로 예약이 멈췄어요. 아래 예약 설정을 다시 저장해주세요.</FormMessage> : null}
 
       <section aria-labelledby="preview-heading" className="grid gap-6 lg:grid-cols-[minmax(280px,380px)_1fr]">
         <div className="overflow-hidden rounded-3xl border bg-neutral-950 shadow-sm">
@@ -247,30 +220,8 @@ export function ShortsStudio({
           {publishingSlot}
 
           <div className="rounded-2xl border bg-card p-5 sm:p-6">
-            <h3 className="font-bold">게시할 플랫폼</h3>
-            <p className="mt-1 text-sm text-muted-foreground">미리보기를 확인한 뒤 원하는 곳에 바로 게시해요.</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {(Object.keys(PLATFORM) as ShortsPublishPlatform[]).map((platform) => {
-                const item = PLATFORM[platform];
-                const Icon = item.icon;
-                const connected = connections[platform] === "CONNECTED";
-                const checked = platforms.includes(platform);
-                return <label key={platform} className={cn("flex items-center gap-3 rounded-xl border p-4", connected ? "cursor-pointer hover:bg-muted/50" : "bg-muted/50 text-muted-foreground")}>
-                  <input type="checkbox" checked={checked && connected} disabled={!connected || busy} onChange={() => togglePlatform(platform)} className="size-4 accent-primary" />
-                  <Icon className="size-5" aria-hidden="true" /><span className="min-w-0 flex-1 text-sm font-semibold">{item.label}</span>
-                  {connected ? <Badge variant="success">연결됨</Badge> : <Link href="/settings" className="text-xs font-semibold text-primary underline underline-offset-2">연결</Link>}
-                </label>;
-              })}
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <Button disabled={busy || !latestPreview || latestPreview.sample || platforms.length === 0 || platforms.some((platform) => connections[platform] !== "CONNECTED")} onClick={() => latestPreview && run("publish", () => publishShortsNow(automationId, latestPreview.runId, platforms), "선택한 플랫폼에 게시했어요.")}>
-                {busyAction === "publish" ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Send aria-hidden="true" />}{busyAction === "publish" ? "게시 중…" : "지금 게시"}
-              </Button>
-              <p className="text-xs leading-5 text-muted-foreground">YouTube는 현재 비공개 상태로 업로드됩니다.</p>
-            </div>
-            <p className="mt-4 rounded-xl bg-muted px-4 py-3 text-xs leading-5 text-muted-foreground">
-              TikTok 연동은 공식 API 심사(약 3주, 전용 UI 요건)로 추후 지원 예정입니다.
-            </p>
+            <h3 className="font-bold">내 채널에 올리기</h3>
+            <p className="mt-1 text-sm leading-6 text-muted-foreground">영상 파일을 내려받고 위 게시 문구(제목·설명·태그)를 복사해서 YouTube Shorts나 인스타그램 릴스 등에 직접 올려주세요. 계정 연결이나 자동 게시는 하지 않아요.</p>
           </div>
         </div>
       </section>
@@ -282,14 +233,8 @@ export function ShortsStudio({
         <form className="mt-6 space-y-5" action={(formData) => run("schedule", () => saveShortsSchedule(automationId, formData), "예약 설정을 저장하고 켰어요.")}>
           <ScheduleFields idPrefix="shorts" label="예약" value={scheduleValue} onChange={setScheduleValue} disabled={busy} />
           <ScheduleHiddenInputs value={scheduleValue} />
-          {platforms.map((platform) => <input key={platform} type="hidden" name="platforms" value={platform} />)}
           <div className="flex flex-wrap items-center gap-3"><Button type="submit" variant="outline" disabled={busy || !hasImages}>{busyAction === "schedule" ? <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden="true" /> : <Check aria-hidden="true" />}{busyAction === "schedule" ? "저장 중…" : "예약 저장하고 켜기"}</Button></div>
         </form>
-      </section>
-
-      <section aria-labelledby="publish-history-heading" className="space-y-3">
-        <div className="flex items-center justify-between gap-3"><h2 id="publish-history-heading" className="text-lg font-extrabold tracking-[-0.03em]">최근 게시 결과</h2><Link href="/usage" className="text-sm font-semibold text-primary hover:underline">전체 이용내역</Link></div>
-        {publications.length === 0 ? <p className="rounded-2xl bg-muted px-5 py-6 text-sm text-muted-foreground">아직 게시한 기록이 없어요. 영상을 만든 뒤 플랫폼을 선택해 게시해보세요.</p> : <ul className="divide-y overflow-hidden rounded-2xl border bg-card">{publications.map((item) => <li key={`${item.runId}-${item.platform}`} className="flex flex-wrap items-center gap-3 px-5 py-4 sm:px-6"><Badge variant="success">{PLATFORM[item.platform].label}</Badge><span className="min-w-0 flex-1 text-sm text-muted-foreground">{new Date(item.createdAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} · ID {item.externalId ?? "확인 중"}{item.privacy === "private" ? " · 비공개" : ""}</span>{item.externalUrl ? <Button asChild size="sm" variant="ghost"><a href={item.externalUrl} target="_blank" rel="noopener noreferrer">열기 <ExternalLink aria-hidden="true" /></a></Button> : null}<Button asChild size="sm" variant="ghost"><Link href={`/automations/${automationId}/runs/${item.runId}`}>기록 보기</Link></Button></li>)}</ul>}
       </section>
     </div>
   );

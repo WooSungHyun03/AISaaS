@@ -15,6 +15,32 @@ export function parsePubDate(raw: string | null): string | null {
   return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
 }
 
+/** The feed's own title (the first `<title>` before any `<item>`), i.e. the blog's name. */
+export function parseRssChannelTitle(xml: string): string | null {
+  const head = xml.split(/<item\b/i)[0] ?? "";
+  return extractTag(head, "title")?.slice(0, 120) ?? null;
+}
+
+export interface RssItem {
+  title: string | null;
+  link: string | null;
+  publishedAt: string;
+}
+
+/** Title, link and publish time of the first `maxItems` `<item>`s (newest first); items without a readable date are skipped. */
+export function parseRssItems(xml: string, maxItems: number): RssItem[] {
+  const blocks = Array.from(xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)).map((match) => match[1]);
+  const items: RssItem[] = [];
+  for (const block of blocks.slice(0, maxItems)) {
+    const publishedAt = parsePubDate(extractTag(block, "pubDate"));
+    if (!publishedAt) continue;
+    const rawLink = extractTag(block, "link");
+    const link = rawLink && /^https?:\/\//i.test(rawLink) ? rawLink.slice(0, 1000) : null;
+    items.push({ title: extractTag(block, "title")?.slice(0, 300) ?? null, link, publishedAt });
+  }
+  return items.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+}
+
 /**
  * The publish dates (newest first) of the first `maxItems` `<item>`s of an RSS feed.
  * `itemCount` is how many items the feed held in that window, so callers can tell "the feed is full"
