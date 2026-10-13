@@ -12,7 +12,7 @@ export const metadata = { title: "요금제" };
 
 const KIND_COPY: Record<CreditKind, { title: string; description: string }> = {
   BLOG: { title: "블로그 포스팅", description: "네이버 블로그용 글을 필요한 횟수만 구매하세요." },
-  SHORTS: { title: "숏폼 제작", description: "세로형 캐릭터 숏폼 영상 제작에 사용해요." },
+  SHORTS: { title: "숏폼 제작", description: "상품·매장 사진으로 세로형 광고 영상을 만드는 데 사용해요." },
 };
 
 function ProductAction({ product, isAuthenticated }: { product: ProductConfig; isAuthenticated: boolean }) {

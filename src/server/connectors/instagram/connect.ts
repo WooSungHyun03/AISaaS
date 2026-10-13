@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createConnection, getConnection, getConnectionSecret, updateConnectionStatus } from "@/server/connectors/integrations";
 import type { Database } from "@/types/database.types";
-import { buildInstagramAuthorizationUrl, exchangeInstagramCode, getInstagramProfile, isProfessionalInstagramAccount } from "./oauth";
+import { buildInstagramAuthorizationUrl, exchangeInstagramCode, getInstagramProfile, isProfessionalInstagramAccount, refreshInstagramLongToken } from "./oauth";
 import { InstagramConnector } from "./index";
 
 type DbClient = SupabaseClient<Database>;
@@ -84,13 +84,17 @@ export async function completeInstagramOAuth(
   }
 }
 
+/** A long-lived token lasts 60 days; it is renewed once it has less than this left (and is at least a day old). */
+export const INSTAGRAM_REFRESH_WITHIN_DAYS = 10;
+const DAY_MS = 86_400_000;
+
 /**
  * Builds an `InstagramConnector` from a business's stored
- * `integration_connections` row, decrypting the access token through Vault
- * Returns
- * null for any business without a usable CONNECTED Instagram connection;
- * automation handlers decide whether that's a hard failure or a fallback
- * to the legacy env-configured connector.
+ * `integration_connections` row, decrypting the access token through Vault.
+ * Returns null for any business without a usable CONNECTED Instagram
+ * connection (including an expired token); automation handlers decide whether
+ * that's a hard failure or a fallback to the legacy env-configured connector.
+ * A token close to expiry is renewed on the way.
  */
 export async function loadInstagramConnector(
   admin: DbClient,
@@ -100,11 +104,44 @@ export async function loadInstagramConnector(
   const connection = await getConnection(admin, userId, businessId, "instagram");
   if (!connection || connection.status !== "CONNECTED") return null;
 
-  const accessToken = await getConnectionSecret(admin, connection);
+  let accessToken = await getConnectionSecret(admin, connection);
   if (!accessToken) return null;
 
-  const metadata = (connection.metadata ?? {}) as { accountId?: string };
+  const metadata = (connection.metadata ?? {}) as { accountId?: string; expiresAt?: string };
   if (!metadata.accountId) return null;
+
+  // A token past its expiry cannot be refreshed any more: the owner has to connect again (the screen says so).
+  const expiresAt = metadata.expiresAt ? Date.parse(metadata.expiresAt) : NaN;
+  if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+    try {
+      await updateConnectionStatus(admin, connection.id, "EXPIRED");
+    } catch {
+      /* The status is informational; the caller still gets "not connected". */
+    }
+    return null;
+  }
+
+  // Keep a working connection working: renew the token while it is still valid, before it runs out.
+  const tokenAgeMs = Date.now() - Date.parse(connection.updated_at ?? connection.connected_at);
+  if (Number.isFinite(expiresAt) && expiresAt - Date.now() < INSTAGRAM_REFRESH_WITHIN_DAYS * DAY_MS && tokenAgeMs >= DAY_MS) {
+    try {
+      const refreshed = await refreshInstagramLongToken(accessToken);
+      await createConnection(
+        {
+          userId,
+          businessId,
+          provider: "instagram",
+          accountIdentifier: connection.account_identifier,
+          secret: refreshed.accessToken,
+          metadata: { ...metadata, ...(refreshed.expiresIn ? { expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000).toISOString() } : {}) },
+        },
+        admin,
+      );
+      accessToken = refreshed.accessToken;
+    } catch {
+      // The current token is still valid; the next use tries again.
+    }
+  }
 
   return new InstagramConnector({ accessToken, igUserId: metadata.accountId });
 }

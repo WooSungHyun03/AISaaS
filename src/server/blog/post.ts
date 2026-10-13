@@ -21,8 +21,14 @@ export const blogBlockSchema = z.discriminatedUnion("type", [
     items: z.array(inlineText(220)).min(2).max(8),
   }),
   z.object({ type: z.literal("callout"), label: inlineText(24), text: inlineText(500) }),
-  /** A spot for one of the owner's own photos: what it should show, and an optional caption. */
-  z.object({ type: z.literal("photo"), slot: inlineText(160), caption: z.string().trim().max(120).default("") }),
+  /** A spot for one of the owner's own photos: what it should show, an optional caption, and (when the owner uploaded references) which photo fits. */
+  z.object({
+    type: z.literal("photo"),
+    slot: inlineText(160),
+    caption: z.string().trim().max(120).default(""),
+    /** Which of the owner's uploaded photos (1-based, in the order they were listed) belongs here. Absent = the owner picks. */
+    ref: z.number().int().min(1).max(10).optional(),
+  }),
   /** Business facts (address, hours …). Built from the business profile by the app, never by the AI. */
   z.object({
     type: z.literal("info"),

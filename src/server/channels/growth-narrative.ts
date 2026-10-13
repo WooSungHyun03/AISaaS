@@ -1,6 +1,7 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
 import { generateText } from "@/server/ai/generate";
+import { isMockAiText } from "@/server/ai/mock-marker";
 import { stripUnverifiedNumbers } from "@/server/shared/ai-number-guard";
 import { ChannelsError } from "./summary";
 import { kstDate } from "./growth-series";
@@ -13,19 +14,53 @@ export interface GrowthNarrativeResult {
   aiUsed: boolean;
 }
 
-/** Deterministic, always available — used when the AI step fails or gets fully stripped. */
-function buildRuleBasedNarrative(channel: ChannelGrowthSeries): string {
+/** Whether the last character is read with a final consonant (받침): decides 은/는 and 이에요/예요. Digits are read as Korean numerals. */
+function hasBatchim(text: string): boolean {
+  const last = text.trim().slice(-1);
+  if (/\d/.test(last)) return "013678".includes(last); // 영 일 삼 육 칠 팔 end in a consonant; 이 사 오 구 do not
+  const code = last.charCodeAt(0);
+  return code >= 0xac00 && code <= 0xd7a3 && (code - 0xac00) % 28 !== 0;
+}
+
+const UNIT: Record<string, string> = {
+  subscriberCount: "명",
+  viewCount: "회",
+  matchedPostCount: "개",
+  postsLast30Days: "개",
+  postCount: "개",
+  "yt_analytics.views": "회",
+  "yt_analytics.estimatedMinutesWatched": "분",
+  "yt_analytics.netSubscribers": "명",
+  "yt_analytics.averageViewDuration": "초",
+};
+
+/** 1,234 with its unit ("1,050명"): the numbers are the real ones, only formatted for reading. */
+function amount(metric: string, value: number): string {
+  return `${value.toLocaleString("ko-KR")}${UNIT[metric] ?? ""}`;
+}
+
+const copula = (text: string) => `${text}${hasBatchim(text) ? "이에요" : "예요"}`;
+
+/**
+ * Deterministic and always available — used when the AI step fails, is not connected, or gets fully stripped. It is
+ * built only from the measured numbers: current value, the change against the previous period, and nothing else.
+ */
+function buildRuleBasedNarrative(channel: ChannelGrowthSeries, days = 30): string {
   const sentences: string[] = [];
   for (const metric of channel.metrics) {
+    const name = metric.label.replace(/\s*\(.*\)\s*$/, "");
+    const topic = `${name}${hasBatchim(name) ? "은" : "는"}`;
     if (metric.status === "COLLECTING") {
-      sentences.push(`${metric.label}은 아직 데이터를 모으는 중이에요.`);
+      sentences.push(`${topic} 아직 데이터를 모으는 중이에요.`);
     } else if (metric.current === null) {
       continue;
     } else if (metric.absoluteDelta === null) {
-      sentences.push(`${metric.label}은 지금 ${metric.current}이에요. 비교할 이전 기간 데이터가 없어요.`);
+      sentences.push(`${topic} 지금 ${copula(amount(metric.metric, metric.current))}. 비교할 이전 기간 데이터가 없어요.`);
+    } else if (metric.absoluteDelta === 0) {
+      sentences.push(`${topic} 이전 ${days}일과 같은 ${copula(amount(metric.metric, metric.current))}.`);
     } else {
-      const sign = metric.absoluteDelta > 0 ? "+" : "";
-      sentences.push(`${metric.label}이 이전 기간보다 ${sign}${metric.absoluteDelta} 변해서 지금 ${metric.current}이에요.`);
+      const direction = metric.absoluteDelta > 0 ? "늘었어요" : "줄었어요";
+      sentences.push(`${topic} 이전 ${days}일보다 ${amount(metric.metric, Math.abs(metric.absoluteDelta))} ${direction}. 지금은 ${copula(amount(metric.metric, metric.current))}.`);
     }
   }
   return sentences.join(" ") || "아직 비교할 만한 데이터가 쌓이지 않았어요.";
@@ -71,13 +106,14 @@ function buildNarrativePrompt(channel: ChannelGrowthSeries, business: Pick<Busin
 
 /** The AI step only — no caching. See getOrCreateGrowthNarrative for the cached entry point actually used by the page. */
 export async function buildGrowthNarrative(channel: ChannelGrowthSeries, business: Pick<Business, "name" | "industry">, days: number): Promise<GrowthNarrativeResult> {
-  const ruleBased = buildRuleBasedNarrative(channel);
+  const ruleBased = buildRuleBasedNarrative(channel, days);
 
   let verified: string | null = null;
   try {
     const { system, prompt } = buildNarrativePrompt(channel, business, days);
     const raw = await generateText({ system, prompt, maxTokens: 300 });
-    verified = stripUnverifiedNumbers(raw, buildAllowedSourceText(channel)) || null;
+    // The mock provider answers with a placeholder: never show it, fall back to the summary built from the real numbers.
+    verified = isMockAiText(raw) ? null : stripUnverifiedNumbers(raw, buildAllowedSourceText(channel)) || null;
   } catch {
     verified = null;
   }
@@ -116,7 +152,9 @@ export async function getOrCreateGrowthNarrative(
     .maybeSingle();
   if (selectError) throw new ChannelsError("DATABASE_ERROR", "기존 성장 해석을 확인하지 못했습니다.", { cause: selectError });
 
-  const cached = latest as NarrativeRow | null;
+  // A row written while the mock AI was active holds its placeholder text: it is never reused, a fresh one replaces it.
+  const cachedRow = latest as NarrativeRow | null;
+  const cached = cachedRow && !isMockAiText(cachedRow.narrative) ? cachedRow : null;
   // A rule-based fallback (AI call failed) is only reused for an hour, so one
   // AI outage does not hide the AI narrative for the rest of the KST day.
   const fallbackStillFresh = cached !== null && now.getTime() - Date.parse(cached.created_at) < FALLBACK_RETRY_MS;

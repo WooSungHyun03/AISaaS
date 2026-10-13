@@ -59,7 +59,7 @@ function renderBlock(block: BlogBlock, platform: BlogPlatform, theme?: BlogRende
     case "callout":
       return `<div style="margin:22px 0;padding:16px 20px;border:1px solid ${COLOR.calloutBorder};background-color:${COLOR.calloutBg};border-radius:12px;">${p(`margin:0 0 6px;font-size:${bodySize}px;font-weight:700;color:${theme?.headingColor ?? COLOR.heading};`, escapeHtml(block.label))}${p(`margin:0;font-size:${bodySize}px;line-height:1.85;color:${bodyColor};`, inlineToHtml(block.text))}</div>`;
     case "photo":
-      return p(`margin:22px 0;padding:18px 12px;border:1px dashed #D1D5DB;text-align:center;font-size:14px;color:${COLOR.muted};`, `📷 <strong>이미지 ${photoNumber} 삽입 자리</strong> · ${inlineToHtml(block.slot)}${block.caption ? `<br>${inlineToHtml(block.caption)}` : ""}`);
+      return p(`margin:22px 0;padding:18px 12px;border:1px dashed #D1D5DB;text-align:center;font-size:14px;color:${COLOR.muted};`, `📷 <strong>이미지 ${photoNumber} 삽입 자리</strong>${block.ref ? ` (올려주신 참고 사진 ${block.ref}번)` : ""} · ${inlineToHtml(block.slot)}${block.caption ? `<br>${inlineToHtml(block.caption)}` : ""}`);
     case "info": {
       if (semantic) {
         const rows = block.rows.map((row) => `<tr><th style="width:96px;padding:10px 12px;border:1px solid #E5E7EB;background-color:#F9FAFB;text-align:left;font-size:15px;color:${COLOR.heading};">${escapeHtml(row.label)}</th><td style="padding:10px 12px;border:1px solid #E5E7EB;font-size:15px;color:${COLOR.text};">${inlineToHtml(row.value)}</td></tr>`).join("");
@@ -124,7 +124,7 @@ export function renderBlogText(post: BlogPost): string {
           break;
         case "photo":
           photoNumber += 1;
-          out.push(`[이미지 ${photoNumber} 삽입] ${stripInlineMarkup(block.slot)}`);
+          out.push(`[이미지 ${photoNumber} 삽입${block.ref ? ` · 참고 사진 ${block.ref}번` : ""}] ${stripInlineMarkup(block.slot)}`);
           break;
         case "info":
           out.push(block.rows.map((row) => `${row.label}: ${stripInlineMarkup(row.value)}`).join("\n"));

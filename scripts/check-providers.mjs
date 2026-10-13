@@ -74,11 +74,12 @@ ok("예산 한도", `영상 $${env.BUDGET_VIDEO_USD || 50} / ${env.BUDGET_VIDEO_
 if (env.BILLING_PROVIDER === "mock" && env.ALLOW_MOCK_BILLING !== "true") {
   bad("BILLING_PROVIDER", "mock 결제는 운영 환경에서 막혀 있어요. toss로 바꾸거나(데모라면) ALLOW_MOCK_BILLING=true");
 } else if (env.BILLING_PROVIDER === "toss") {
-  const client = env.NEXT_PUBLIC_TOSS_CLIENT_KEY ?? "";
+  const client = env.NEXT_PUBLIC_TOSS_CLIENT_KEY || env.TOSS_CLIENT_KEY || "";
   const secret = env.TOSS_SECRET_KEY ?? "";
-  if (!client) bad("NEXT_PUBLIC_TOSS_CLIENT_KEY", "not set (결제창에 필요해요. NEXT_PUBLIC 값은 설정 뒤 다시 배포해야 반영돼요)");
-  else if (!client.startsWith("test_ck_")) bad("NEXT_PUBLIC_TOSS_CLIENT_KEY", "테스트 클라이언트 키(test_ck_…)만 쓸 수 있어요");
-  else ok("NEXT_PUBLIC_TOSS_CLIENT_KEY", "테스트 키 형식 OK");
+  if (!client) bad("NEXT_PUBLIC_TOSS_CLIENT_KEY", "not set (결제창에 필요해요. NEXT_PUBLIC 값은 설정 뒤 다시 배포해야 반영돼요). 이름이 TOSS_CLIENT_KEY 여도 읽지만 NEXT_PUBLIC_TOSS_CLIENT_KEY 를 권장해요");
+  else if (!env.NEXT_PUBLIC_TOSS_CLIENT_KEY) ok("TOSS_CLIENT_KEY", "접두사 없는 이름으로 읽혀요(서버가 결제창에 전달). NEXT_PUBLIC_TOSS_CLIENT_KEY 로 옮기면 더 확실해요");
+  if (client && !client.startsWith("test_ck_")) bad("NEXT_PUBLIC_TOSS_CLIENT_KEY", "테스트 클라이언트 키(test_ck_…)만 쓸 수 있어요");
+  else if (client) ok("토스 클라이언트 키", "테스트 키 형식 OK");
   if (!secret) bad("TOSS_SECRET_KEY", "not set");
   else if (!secret.startsWith("test_sk_")) bad("TOSS_SECRET_KEY", "테스트 시크릿 키(test_sk_…)만 쓸 수 있어요");
   else ok("TOSS_SECRET_KEY", "테스트 키 형식 OK");

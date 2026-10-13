@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildLinePath, scaleGrowthPoints } from "./growth-line-chart";
+import { buildChartModel, buildLinePath, formatMetricValue, scaleGrowthPoints, shortDate } from "./growth-line-chart";
 
 const DIMENSIONS = { width: 300, height: 96 };
 
@@ -63,5 +63,44 @@ describe("buildLinePath", () => {
 
   it("produces just a single M (no line segment) for one point", () => {
     expect(buildLinePath([{ x: 10, y: 20 }])).toBe("M 10.00 20.00");
+  });
+});
+
+describe("chart model and labels", () => {
+  const day = (date: string, value: number | null, measured = true) => ({ date, value, measured });
+
+  it("has no model when nothing was ever collected (the card shows its empty state instead of an empty frame)", () => {
+    expect(buildChartModel([day("2026-10-08", null), day("2026-10-09", null)])).toBeNull();
+  });
+
+  it("keeps every point inside the plot area, lowest value at the bottom and highest at the top", () => {
+    const model = buildChartModel([day("2026-10-08", 100), day("2026-10-09", 150), day("2026-10-10", 200)])!;
+    expect(model.min).toBe(100);
+    expect(model.max).toBe(200);
+    const ys = model.scaled.map((point) => point.y);
+    expect(ys[0]).toBeGreaterThan(ys[1]);
+    expect(ys[1]).toBeGreaterThan(ys[2]);
+    for (const point of model.scaled) {
+      expect(point.x).toBeGreaterThanOrEqual(44);
+      expect(point.x).toBeLessThanOrEqual(310);
+      expect(point.y).toBeGreaterThanOrEqual(12);
+      expect(point.y).toBeLessThanOrEqual(126);
+    }
+  });
+
+  it("starts a late-collected metric partway across the chart and treats an unchanged value as a flat line", () => {
+    const model = buildChartModel([day("2026-10-07", null), day("2026-10-08", null), day("2026-10-09", 40), day("2026-10-10", 40)])!;
+    expect(model.flat).toBe(true);
+    expect(model.indexes).toEqual([2, 3]);
+    expect(model.scaled[0].x).toBeGreaterThan(44 + 100);
+    expect(model.scaled[0].y).toBe(model.scaled[1].y);
+  });
+
+  it("formats dates and numbers the way an owner reads them", () => {
+    expect(shortDate("2026-10-09")).toBe("10/9");
+    expect(formatMetricValue(1234)).toBe("1,234");
+    expect(formatMetricValue(12.34)).toBe("12.3");
+    expect(formatMetricValue(250_000)).toBe("25만");
+    expect(formatMetricValue(-5)).toBe("-5");
   });
 });

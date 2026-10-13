@@ -4,9 +4,13 @@ import type { AutomationHandlerResult, AutomationRunContext } from "@/types/auto
 
 const { generateStructuredMock, summarizeRunSpendMock } = vi.hoisted(() => ({ generateStructuredMock: vi.fn(), summarizeRunSpendMock: vi.fn() }));
 vi.mock("@/server/ai/generate", () => ({ generateStructured: generateStructuredMock }));
-vi.mock("@/server/budget", () => ({ summarizeRunSpend: summarizeRunSpendMock }));
+vi.mock("@/server/budget", () => ({ summarizeRunSpend: summarizeRunSpendMock, isBudgetError: () => false }));
+// The handler looks up the owner's other uploaded photos with the admin client; keep the unit tests off any real database.
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => { throw new Error("no database in unit tests"); } }));
+const { describeImagesMock } = vi.hoisted(() => ({ describeImagesMock: vi.fn() }));
+vi.mock("@/server/shorts/describe-images", () => ({ withImageAnalysis: describeImagesMock }));
 
-const { blogAutomationHandler } = await import("./blog");
+const { blogAutomationHandler, applyPlannedPhotoRefs, normalizePhotoRefs } = await import("./blog");
 import { mockBlogDraft, mockBlogFix, mockBlogGuide, mockBlogPlan, mockBlogReview } from "@/server/ai/providers/mock-blog";
 import { serverEnv } from "@/lib/env/server";
 import { aiGuideDraftSchema } from "@/server/ai/prompts/blog-guide";
@@ -389,5 +393,92 @@ describe("blogAutomationHandler", () => {
       expect(guide.seo.tags).not.toContain("최고의맛집");
       expect(guide.seo.tags).not.toContain("광고");
     });
+  });
+});
+
+
+describe("blog reference photos", () => {
+  const uploaded = (id: string, label: string) => ({ id, kind: "image", origin: "upload", source: `user-1/auto-1/assets/${id}.jpg`, label });
+  const withPhotos = () => baseContext({ config: { ...config, assets: [uploaded("a1", "소금빵 진열"), uploaded("a2", "매장 입구")] } as never });
+  const described = (assets: Array<{ id: string; label: string }>) =>
+    assets.map((asset, index) => ({ ...asset, kind: "image", origin: "upload", source: `user-1/auto-1/assets/${asset.id}.jpg`, role: index === 0 ? "product" : "place", summary: index === 0 ? "갓 구운 소금빵이 쟁반에 담겨 있다" : "나무 문이 있는 매장 입구" }));
+
+  /** The planner puts photo 1 in the first section and photo 2 in the second. */
+  const plannedWithPhotos = (request: Request) => {
+    const plan = JSON.parse(mockBlogPlan(request.prompt, request.system)) as { sections: Array<{ photo: string | null; photoRef?: number | null }> };
+    plan.sections[0].photo = "진열대 위 소금빵";
+    plan.sections[0].photoRef = 1;
+    plan.sections[1].photo = "매장 입구";
+    plan.sections[1].photoRef = 2;
+    return plan;
+  };
+
+  it("looks at the photos once, tells the planner and writer what they show, and records the references used", async () => {
+    describeImagesMock.mockImplementation(async (_owner: unknown, assets: Array<{ id: string; label: string }>) => described(assets));
+    useMockModels({ plan: plannedWithPhotos });
+
+    const result = await runToEnd(withPhotos());
+
+    expect(describeImagesMock).toHaveBeenCalledTimes(1);
+    expect(describeImagesMock.mock.calls[0][2]).toBe("blog.photos");
+    const [plan, draft] = requests();
+    expect(plan.system).toContain("사진 1번 [product]: 갓 구운 소금빵이 쟁반에 담겨 있다");
+    expect(plan.system).toContain("사진 2번 [place]: 나무 문이 있는 매장 입구");
+    expect(plan.prompt).toContain('"photoRef"');
+    expect(draft.prompt).toContain("ref = 1");
+    expect(draft.prompt).toContain("ref = 2");
+    // The plan's choice is carried into the post when the writer leaves it out.
+    expect(result.content).toContain("[사진 1]");
+    expect(result.content).toContain("[사진 2]");
+    expect(result.output).toMatchObject({
+      references: [
+        { number: 1, id: "a1", kind: "image", role: "product", summary: expect.stringContaining("소금빵"), path: "user-1/auto-1/assets/a1.jpg" },
+        { number: 2, id: "a2", kind: "image", role: "place" },
+      ],
+    });
+  });
+
+  it("still writes the post when the photos cannot be analysed, using the owner's own labels", async () => {
+    describeImagesMock.mockRejectedValue(new Error("vision down"));
+    useMockModels();
+
+    const result = await runToEnd(withPhotos());
+
+    expect(requests()[0].system).toContain("사진 1번: 사장님 설명: 소금빵 진열");
+    expect(result.output).toMatchObject({ references: [{ number: 1, summary: "" }, { number: 2, summary: "" }] });
+  });
+
+  it("makes no vision call and records no references when nothing was uploaded", async () => {
+    useMockModels();
+    const result = await runToEnd(baseContext());
+    expect(describeImagesMock).not.toHaveBeenCalled();
+    expect(requests()[0].system).not.toContain("사장님이 올린 사진");
+    expect(result.output).toMatchObject({ references: [] });
+  });
+
+  it("never uses a photo whose file belongs to another automation", async () => {
+    describeImagesMock.mockImplementation(async (_owner: unknown, assets: Array<{ id: string; label: string }>) => described(assets));
+    useMockModels();
+    const foreign = { ...uploaded("x1", "남의 사진"), source: "user-2/auto-9/assets/x1.jpg" };
+    const result = await runToEnd(baseContext({ config: { ...config, assets: [foreign] } as never }));
+    expect(describeImagesMock).not.toHaveBeenCalled();
+    expect(result.output).toMatchObject({ references: [] });
+  });
+
+  it("drops refs to photos that do not exist or are used twice", () => {
+    const photo = (ref?: number) => ({ type: "photo" as const, slot: "자리", caption: "", ...(ref ? { ref } : {}) });
+    const sections = normalizePhotoRefs([{ blocks: [photo(1), photo(1), photo(5), photo()] }], 2);
+    expect(sections[0].blocks.map((block) => ("ref" in block ? block.ref : undefined))).toEqual([1, undefined, undefined, undefined]);
+  });
+
+  it("fills the planned photo into the matching section only where the writer left it out and the photo is still free", () => {
+    const plan = JSON.parse(mockBlogPlan("AUTOBIZ_BLOG_PLAN_V2", "")) as Parameters<typeof applyPlannedPhotoRefs>[1];
+    plan.sections[0].photoRef = 1;
+    plan.sections[1].photoRef = 2;
+    const photo = (ref?: number) => ({ type: "photo" as const, slot: "자리", caption: "", ...(ref ? { ref } : {}) });
+    const refsOf = (sections: Array<{ blocks: Array<{ type: string }> }>) => sections.map((section) => section.blocks.map((block) => ("ref" in block ? block.ref : undefined)));
+    expect(refsOf(applyPlannedPhotoRefs([{ blocks: [photo()] }, { heading: "a", blocks: [photo()] }, { heading: "b", blocks: [photo()] }], plan))).toEqual([[undefined], [1], [2]]);
+    // Photo 1 is already used by the writer elsewhere: the plan does not use it a second time.
+    expect(refsOf(applyPlannedPhotoRefs([{ blocks: [photo(1)] }, { heading: "a", blocks: [photo()] }], plan))).toEqual([[1], [undefined]]);
   });
 });

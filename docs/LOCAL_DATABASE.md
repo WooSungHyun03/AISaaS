@@ -119,3 +119,20 @@ npx vitest run src/server/admin/admin-security.db.test.ts
 
 운영 최초 관리자는 회원가입과 이메일 확인을 먼저 마친 뒤, 운영 담당자가 [ADMIN_BOOTSTRAP.sql](ADMIN_BOOTSTRAP.sql)의 이메일을 바꿔 Supabase SQL Editor에서 실행합니다. 애플리케이션 화면에서는 관리자 추가 기능을 제공하지 않습니다.
 
+
+## 브라우저 검증과 이용방법 스크린샷 (로컬 전용)
+
+`playwright-core`와 시스템에 설치된 Chrome으로 로컬 스택(`http://localhost:3100`)만 검사합니다. 운영 주소에는 실행되지 않습니다.
+
+```bash
+bash scripts/dev-db.sh
+docker exec -i supabase_db_autobiz-dev-db psql -U postgres -d postgres < scripts/seed-growth-demo.sql
+docker exec -i supabase_db_autobiz-dev-db psql -U postgres -d postgres < scripts/sql/seed-guide-screens.sql
+# 연결 버튼이 켜진 화면을 찍으려면 자리표시 값만 넣어 실행합니다(어디로도 전송되지 않아요).
+YOUTUBE_CLIENT_ID=x YOUTUBE_CLIENT_SECRET=x INSTAGRAM_APP_ID=x INSTAGRAM_APP_SECRET=x npx next dev -p 3100
+
+npm run e2e:photos     # 블로그·숏폼 참고 사진 (PC + 휴대폰, 18개)
+npm run e2e:admin      # /admin 접근 권한
+npm run e2e:guide      # 이용방법 페이지(이미지 로딩·확대·가로 스크롤)
+npm run guide:capture  # public/guide 의 스크린샷 다시 찍기 (--reuse, --only 슬러그/id)
+```

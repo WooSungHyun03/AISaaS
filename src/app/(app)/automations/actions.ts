@@ -10,6 +10,7 @@ import { computeNextRunAt } from "@/server/automations/scheduler";
 import { parseScheduleFromForm } from "@/server/automations/schedule-input";
 import { AUTOMATION_AVAILABILITY, type AutomationSchedule } from "@/types/automation";
 import { blogSetupSchema, type BlogAutomationConfig } from "@/types/blog-automation";
+import { parseShortsSettings } from "@/types/shorts-reference";
 import type { Json } from "@/types/domain";
 
 export interface AutomationActionState {
@@ -202,7 +203,9 @@ export async function updateAutomation(automationId: string, formData: FormData)
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "블로그 설정을 확인해주세요." };
     const blogConfig: BlogAutomationConfig = parsed.data;
 
-    config = blogConfig as unknown as Json;
+    // The settings form does not carry the uploaded reference photos: they live next to it in the same config and must survive a save.
+    const referencePhotos = parseShortsSettings(automation.config).assets.filter((asset) => asset.kind === "image");
+    config = { ...blogConfig, ...(referencePhotos.length > 0 ? { assets: referencePhotos } : {}) } as unknown as Json;
   }
 
   let nextRunAt: string | null = null;

@@ -19,6 +19,8 @@ import { blogSetupSchema } from "@/types/blog-automation";
 import { parseShortsSettings } from "@/types/shorts-reference";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { VIDEO_BUCKET, isOwnedAssetPath, signAsset } from "@/server/shorts/assets";
+import { usedReferenceViews } from "@/server/shorts/asset-views";
+import { UsedReferences } from "@/components/automations/used-references";
 import { promotionFieldValue } from "@/lib/promotion";
 
 const formatter = new Intl.DateTimeFormat("ko-KR", {
@@ -72,6 +74,7 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
     : null;
   const editedShortsPublishing = shortsPublishingSchema.safeParse(workingCopy?.publishing);
   // An ad video lives in private Storage: sign a fresh address for this page view. Older videos kept a public address.
+  const usedReferences = output && output.references.length > 0 ? await usedReferenceViews(output.references, user.id, automation.id).catch(() => null) : null;
   const videoUrl = output?.videoPath && isOwnedAssetPath(output.videoPath, user.id, automation.id)
     ? await signAsset(createAdminClient(), VIDEO_BUCKET, output.videoPath, 60 * 60).catch(() => null)
     : output?.videoUrl ?? null;
@@ -111,7 +114,7 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
           {!output ? <p className="rounded-2xl bg-muted px-5 py-6 text-[15px] text-muted-foreground">이번에는 보여줄 결과가 없어요.</p> : (
             <div className="space-y-6 rounded-2xl border bg-card px-5 py-6 sm:px-8">
               {workingCopy?.content && looksLikeBlogMarkup(workingCopy.content) ? (
-                <BlogWorkspace contentId={workingCopy.id} title={workingCopy.title ?? output.title ?? ""} markup={workingCopy.content} editedAt={workingCopy.edited_at} platform={output.platform ?? "naver"} notes={output.qualityNotes} guide={output.publishingGuide} guideContext={blogContext ?? blogGuideContext({ name: automation.name, industry: null, location: null, brand_tone: null, keywords: output.keywords, promotion_type: null }, { platform: output.platform ?? "naver", keywords: output.keywords }, ownedImages)} />
+                <BlogWorkspace contentId={workingCopy.id} title={workingCopy.title ?? output.title ?? ""} markup={workingCopy.content} editedAt={workingCopy.edited_at} platform={output.platform ?? "naver"} notes={output.qualityNotes} guide={output.publishingGuide} references={(usedReferences ?? []).filter((reference) => reference.kind === "image")} guideContext={blogContext ?? blogGuideContext({ name: automation.name, industry: null, location: null, brand_tone: null, keywords: output.keywords, promotion_type: null }, { platform: output.platform ?? "naver", keywords: output.keywords }, ownedImages)} />
               ) : workingCopy?.content ? (
                 <ContentEditor contentId={workingCopy.id} title={workingCopy.title ?? output.title ?? ""} content={workingCopy.content} editedAt={workingCopy.edited_at} />
               ) : output.title ? <div><p className={label}>제목</p><p className="mt-1 text-xl font-extrabold leading-8 tracking-[-0.03em]">{output.title}</p></div> : null}
@@ -125,6 +128,7 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
                 </div>
               ) : null}
               {output.imageSuggestion && !(workingCopy?.content && looksLikeBlogMarkup(workingCopy.content)) ? <div><p className={label}>이미지 제안</p><p className="mt-1 text-[15px] leading-7">{output.imageSuggestion}</p></div> : null}
+              {usedReferences ? <UsedReferences references={usedReferences} /> : null}
               {output.callToAction ? <div><p className={label}>행동 유도 문구</p><p className="mt-1 text-[15px] leading-7">{output.callToAction}</p></div> : null}
               {output.keywords.length ? <div><p className={label}>키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.keywords.map((keyword) => <Badge key={keyword} variant="brand">{keyword}</Badge>)}</div></div> : null}
               {output.seoKeywords.length ? <div><p className={label}>SEO 키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.seoKeywords.map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>)}</div></div> : null}

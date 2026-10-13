@@ -6,9 +6,10 @@ import { ShortsCreateButton, ShortsStudio, type ShortsJobInfo } from "@/componen
 import { ShortsPublishingPanel } from "@/components/automations/shorts-publishing-panel";
 import { shortsPublishingSchema } from "@/server/shorts/publishing-metadata";
 import { promotionFieldValue } from "@/lib/promotion";
-import { ShortsAssetsCard, type AssetView } from "@/components/automations/shorts-assets";
+import { ShortsAssetsCard } from "@/components/automations/shorts-assets";
+import { assetViewsFor } from "@/server/shorts/asset-views";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { REFERENCE_BUCKET, VIDEO_BUCKET, isOwnedAssetPath, signAsset } from "@/server/shorts/assets";
+import { VIDEO_BUCKET, isOwnedAssetPath, signAsset } from "@/server/shorts/assets";
 import { parseShortsSettings } from "@/types/shorts-reference";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
@@ -122,30 +123,4 @@ function jobInfoOf(state: unknown): ShortsJobInfo | null {
   const stage = record.stage;
   if (stage !== "SUBMIT" && stage !== "WAIT" && stage !== "CHECK" && stage !== "VOICE" && stage !== "FINISH") return null;
   return { stage, attempt: typeof record.attempt === "number" ? record.attempt : 1, needsVoice: record.voiceMode === "tts" || record.needsVoice === true };
-}
-
-/** Previews for the materials card: mascot poses are static files, uploads get a short-lived signed URL. */
-async function assetViewsFor(
-  assets: ReturnType<typeof parseShortsSettings>["assets"],
-  userId: string,
-  automationId: string,
-): Promise<AssetView[]> {
-  const uploadPaths = assets
-    .filter((item) => item.origin === "upload" && isOwnedAssetPath(item.source, userId, automationId))
-    .map((item) => item.source);
-  const signed = new Map<string, string>();
-  if (uploadPaths.length > 0) {
-    const { data } = await createAdminClient().storage.from(REFERENCE_BUCKET).createSignedUrls(uploadPaths, 60 * 30);
-    for (const item of data ?? []) if (item.path && item.signedUrl) signed.set(item.path, item.signedUrl);
-  }
-  return assets.map((item) => ({
-    id: item.id,
-    kind: item.kind,
-    origin: item.origin,
-    label: item.label,
-    role: item.role ?? null,
-    summary: item.summary ?? "",
-    durationSec: item.durationSec ?? null,
-    previewUrl: item.origin === "mascot" ? `/shorts-mascot/${item.source}.png` : signed.get(item.source) ?? null,
-  }));
 }

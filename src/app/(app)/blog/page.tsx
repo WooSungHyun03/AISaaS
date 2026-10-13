@@ -9,6 +9,9 @@ import { EmptyState } from "@/components/ui/page-state";
 import { CreditNotice } from "@/components/billing/credit-notice";
 import { PromotionTargetCard } from "@/components/business/promotion-target-card";
 import { QuickBlogStart } from "@/components/automations/quick-blog-start";
+import { ReferencePhotos } from "@/components/automations/reference-photos";
+import { assetViewsFor } from "@/server/shorts/asset-views";
+import { parseShortsSettings } from "@/types/shorts-reference";
 import { getUsableCredits } from "@/server/billing/run-credits";
 import { readDeferredJob } from "@/server/automations/runner";
 import { describeSchedule } from "@/server/automations/schedule-input";
@@ -135,6 +138,11 @@ export default async function BlogPage({
   const inFlightAutomationIds = new Set((inFlightResult.data ?? []).map((run) => run.automation_id));
   const progressByAutomation = new Map((inFlightResult.data ?? []).map((run) => [run.automation_id, readDeferredJob(run.output)?.progress ?? null]));
   const businessPickerList = businessOwnerBusinesses.data ?? [];
+  // Photos the owner gave each blog automation (looked at by the AI when the post is written).
+  const photoViewsByAutomation = new Map(await Promise.all(automations.map(async (automation) => {
+    const photos = parseShortsSettings(automation.config).assets.filter((asset) => asset.kind === "image" && asset.origin === "upload");
+    return [automation.id, await assetViewsFor(photos, user.id, automation.id).catch(() => [])] as const;
+  })));
 
   return (
     <div className="mx-auto max-w-4xl space-y-10">
@@ -179,6 +187,14 @@ export default async function BlogPage({
                 <RunNowButton automationId={automation.id} hasInFlightRun={hasInFlightRun} progress={progressByAutomation.get(automation.id) ?? null} />
               </div>
             </div>
+
+            <ReferencePhotos
+              automationId={automation.id}
+              assets={photoViewsByAutomation.get(automation.id) ?? []}
+              disabled={hasInFlightRun}
+              heading="글에 쓸 참고 사진"
+              description="사진을 올리면 AI가 사진에 보이는 것을 읽고, 글의 알맞은 자리에 사진을 맞춰 안내해요. 사진에 없는 내용은 지어내지 않아요. 올린 사진은 나만 볼 수 있어요."
+            />
 
             {items.length === 0 ? (
               <p className="rounded-2xl bg-muted px-5 py-6 text-[15px] text-muted-foreground">아직 만든 글이 없어요. 위에서 ‘지금 만들기’를 눌러보세요.</p>

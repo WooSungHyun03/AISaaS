@@ -10,7 +10,11 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:credits-db": "node scripts/test-credit-ledger.mjs",
-    "check:providers": "node scripts/check-providers.mjs"
+    "check:providers": "node scripts/check-providers.mjs",
+    "e2e:photos": "node scripts/e2e/reference-photos.e2e.mjs",
+    "e2e:admin": "node scripts/e2e/admin-access.e2e.mjs",
+    "e2e:guide": "node scripts/e2e/guide-pages.e2e.mjs",
+    "guide:capture": "node scripts/e2e/capture-guide.mjs"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.21",
@@ -44,6 +48,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "playwright-core": "^1.64.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.1"

@@ -1,14 +1,12 @@
 import "server-only";
 import { z } from "zod";
 import { generateStructured } from "@/server/ai/generate";
-import type { AIImageInput } from "@/server/ai/provider";
 import { isNearDuplicateTopic } from "@/server/ai/similarity";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { serverEnv } from "@/lib/env/server";
 import { logger } from "@/lib/logger";
 import {
   assertPaidCallsAllowed,
-  isBudgetError,
   releaseSpend,
   reserveSpend,
   runPaidCall,
@@ -38,7 +36,6 @@ import {
 import {
   ensureShortsBuckets,
   isOwnedAssetPath,
-  loadImageBytes,
   REFERENCE_BUCKET,
   resolveAssetUrls,
   signAsset,
@@ -47,7 +44,7 @@ import {
   videoStoragePath,
 } from "@/server/shorts/assets";
 import { shortsContentSchema, type ShortsContent } from "@/server/shorts/content";
-import { analyzeImages, prepareVisionImage } from "@/server/shorts/image-analysis";
+import { withImageAnalysis } from "@/server/shorts/describe-images";
 import { generateShortsPublishing } from "@/server/shorts/publishing-generate";
 import { shortsPublishingSchema, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
 import {
@@ -64,6 +61,7 @@ import {
   describeAssetForPrompt,
   parseShortsSettings,
   shortsAssetSchema,
+  summarizeUsedReferences,
   totalSeconds,
   type ShortsAsset,
   type ShortsSettings,
@@ -268,40 +266,6 @@ function requireInputs(settings: ShortsSettings): void {
   }
 }
 
-/** Looks at photos nobody has described yet (once, for the whole run), and remembers the answer for the next video. */
-async function withImageAnalysis(ctx: AutomationRunContext, settings: ShortsSettings): Promise<ShortsAsset[]> {
-  const admin = createAdminClient();
-  const pending = assetsOfKind(settings.assets, "image").filter((asset) => !asset.summary);
-  if (pending.length === 0) return settings.assets;
-  let analyzed: ShortsAsset[] = [];
-  try {
-    const prepared: Array<{ asset: ShortsAsset; vision: AIImageInput }> = [];
-    for (const asset of pending) prepared.push({ asset, vision: await prepareVisionImage(await loadImageBytes(admin, asset, owner(ctx))) });
-    analyzed = await analyzeImages(prepared);
-  } catch (error) {
-    if (isBudgetError(error)) throw error;
-    logger.warn("shorts_image_analysis_failed", { runId: ctx.runId, message: error instanceof Error ? error.message : String(error) });
-    return settings.assets;
-  }
-  const byId = new Map(analyzed.map((asset) => [asset.id, asset]));
-  const merged = settings.assets.map((asset) => byId.get(asset.id) ?? asset);
-  // Best effort: the next video does not pay for the same photos again.
-  try {
-    const { data } = await admin.from("automations").select("config").eq("id", ctx.automation.id).single();
-    const config = data?.config && typeof data.config === "object" && !Array.isArray(data.config) ? (data.config as Record<string, Json | undefined>) : {};
-    if (Array.isArray(config.assets)) {
-      const next = (config.assets as Json[]).map((raw) => {
-        const found = raw && typeof raw === "object" && !Array.isArray(raw) ? byId.get(String((raw as Record<string, Json>).id)) : undefined;
-        return found ? { ...(raw as Record<string, Json>), role: found.role ?? null, summary: found.summary ?? null } : raw;
-      });
-      await admin.from("automations").update({ config: { ...config, assets: next } as unknown as Json }).eq("id", ctx.automation.id);
-    }
-  } catch {
-    // The plan already has what it needs.
-  }
-  return merged;
-}
-
 async function makePlan(ctx: AutomationRunContext, settings: ShortsSettings, assets: ShortsAsset[]): Promise<AdPlan> {
   const images = assetsOfKind(assets, "image");
   const videos = assetsOfKind(assets, "video");
@@ -373,7 +337,7 @@ async function startRun(ctx: AutomationRunContext): Promise<AutomationHandlerOut
 
   try {
     return await scoped(ctx, 1, async () => {
-      const assets = await withImageAnalysis(ctx, settings);
+      const assets = await withImageAnalysis({ runId: ctx.runId, ...owner(ctx) }, settings.assets);
       const plan = await makePlan(ctx, settings, assets);
       const wanPrompt = buildWanPrompt({ plan, durationSec: settings.durationSec, voiceMode: settings.voiceMode });
       const { metadata: publishing } = await generateShortsPublishing({
@@ -764,6 +728,7 @@ async function complete(ctx: AutomationRunContext, state: JobState, finalPath: s
       ...(sample ? { videoUrl, sampleVideo: true } : { videoPath: finalPath, videoUrl }),
       ...(state.publishing ? { publishing: state.publishing } : {}),
       concept: state.plan.concept,
+      references: summarizeUsedReferences(state.assets),
       qa: { ...qa, notes: state.notes.slice(0, 8) },
       generation: {
         pipeline: "wan3-v1",

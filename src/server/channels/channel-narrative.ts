@@ -1,6 +1,7 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
 import { generateText } from "@/server/ai/generate";
+import { isMockAiText } from "@/server/ai/mock-marker";
 import { stripUnverifiedNumbers } from "@/server/shared/ai-number-guard";
 import { PLATFORM_LABEL } from "./platform";
 import type { ChannelDiagnosis } from "./types";
@@ -83,7 +84,8 @@ export async function buildChannelNarrative(diagnosis: ChannelDiagnosis, busines
   try {
     const { system, prompt } = buildNarrativePrompt(diagnosis, business);
     const raw = await generateText({ system, prompt, maxTokens: 300 });
-    verified = stripUnverifiedNumbers(raw, buildAllowedSourceText(diagnosis)) || null;
+    // The mock provider answers with a placeholder: never show it, fall back to the summary built from the real numbers.
+    verified = isMockAiText(raw) ? null : stripUnverifiedNumbers(raw, buildAllowedSourceText(diagnosis)) || null;
   } catch {
     verified = null;
   }
@@ -117,7 +119,7 @@ async function cacheableChannelNarrative(diagnosis: ChannelDiagnosis, business: 
 export async function getChannelNarrative(diagnosis: ChannelDiagnosis, business: Pick<Business, "name" | "industry">): Promise<ChannelNarrativeResult> {
   try {
     // Built per call (not at module load) so importing the channels barrel never touches Next's cache.
-    const cached = unstable_cache(cacheableChannelNarrative, ["channel-narrative-v1"], { revalidate: NARRATIVE_CACHE_SECONDS });
+    const cached = unstable_cache(cacheableChannelNarrative, ["channel-narrative-v2"], { revalidate: NARRATIVE_CACHE_SECONDS });
     return await cached(diagnosis, { name: business.name, industry: business.industry });
   } catch (error) {
     if (error instanceof UncachedNarrative) return error.result;

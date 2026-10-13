@@ -5,6 +5,23 @@ import { AI_TELL_PHRASES, BLOG_LENGTH, UNPROVABLE_CLAIMS } from "@/server/ai/blo
 import { blogBlockSchema, stripInlineMarkup, type BlogPlatform, type BlogPost, type BlogSection } from "@/server/blog/post";
 import { promotionFactLines, promotionGuidance, PROMOTION_STRATEGY, resolvePromotionType } from "@/server/promotion/strategy";
 
+/** A photo the owner uploaded for this post, as the models are told about it (number = 1-based position). */
+export interface BlogReference {
+  number: number;
+  label: string;
+  /** What the vision step saw. Empty when the photo could not be analysed — then only the owner's label is known. */
+  summary: string;
+  role: string | null;
+}
+
+/** Lines that tell the models which of the owner's photos exist and what each one really shows. */
+export function referenceLines(references: BlogReference[] | undefined): string[] {
+  return (references ?? []).map((reference) => {
+    const shows = [reference.summary, reference.label && reference.label !== reference.summary ? `사장님 설명: ${reference.label}` : ""].filter(Boolean).join(" / ");
+    return `사진 ${reference.number}번${reference.role ? ` [${reference.role}]` : ""}: ${shows || "내용 미확인 (사장님이 올린 사진)"}`;
+  });
+}
+
 /** One heading of the plan: what the section is for, and what to say and show there. */
 const planSectionSchema = z.object({
   /** Sub-heading starting with one emoji. */
@@ -14,6 +31,8 @@ const planSectionSchema = z.object({
   points: z.array(z.string().trim().min(1).max(240)).min(1).max(4),
   /** What a photo here should show (the owner's own photo goes in this spot), or null. */
   photo: z.string().trim().max(140).nullable().default(null),
+  /** Which uploaded owner photo (1-based) goes in this photo spot; null when none of them fits. */
+  photoRef: z.number().int().min(1).max(10).nullable().catch(null).default(null),
   extra: z.enum(["quote", "callout", "list", "none"]).default("none"),
 });
 
@@ -89,7 +108,7 @@ export const blogReviewSchema = z.object({
 export type BlogReview = z.infer<typeof blogReviewSchema>;
 
 /** Facts the writer may rely on, as lines, plus the same text for the numeric fact check. */
-export function buildBlogFacts(business: Business, config?: BlogAutomationConfig, calendar?: { goal: string; summary: string; cta: string }): { lines: string[]; text: string } {
+export function buildBlogFacts(business: Business, config?: BlogAutomationConfig, calendar?: { goal: string; summary: string; cta: string }, references?: BlogReference[]): { lines: string[]; text: string } {
   const lines = [
     ...promotionFactLines(business, resolvePromotionType(business)),
     business.description ? `소개: ${business.description}` : null,
@@ -102,6 +121,7 @@ export function buildBlogFacts(business: Business, config?: BlogAutomationConfig
     calendar ? `캘린더 목표: ${calendar.goal}` : null,
     calendar ? `캘린더 내용: ${calendar.summary}` : null,
     calendar ? `캘린더 CTA: ${calendar.cta}` : null,
+    ...referenceLines(references).map((line) => `사장님이 올린 사진 — ${line}`),
   ].filter((line): line is string => Boolean(line));
   return { lines, text: lines.join("\n") };
 }
@@ -128,14 +148,17 @@ const WRITING_RULES = [
   "Keywords: put the main keyword in the first 100 characters and in one sub-heading, and use it naturally 4-7 times in total. Never stuff.",
 ].join("\n");
 
-function buildSystem(business: Business, platform: Exclude<BlogPlatform, "generic">, config?: BlogAutomationConfig, calendar?: { goal: string; summary: string; cta: string }): string {
-  const facts = buildBlogFacts(business, config, calendar);
+function buildSystem(business: Business, platform: Exclude<BlogPlatform, "generic">, config?: BlogAutomationConfig, calendar?: { goal: string; summary: string; cta: string }, references?: BlogReference[]): string {
+  const facts = buildBlogFacts(business, config, calendar, references);
   const type = resolvePromotionType(business);
   return [
     WRITING_RULES,
     PLATFORM_STYLE[platform],
     ...promotionGuidance(type, "blog").slice(0, 3),
     config?.tone ? `Tone for this automation: ${config.tone}` : null,
+    references && references.length > 0
+      ? "The owner uploaded photos (listed in the FACTS as 사장님이 올린 사진). You may describe only what a photo's description says it shows; never invent details about a photo."
+      : null,
     "FACTS (the only things you may state as true):",
     facts.text,
   ].filter(Boolean).join("\n");
@@ -145,12 +168,14 @@ export interface BlogPlanInput {
   business: Business;
   config?: BlogAutomationConfig;
   calendar?: { goal: string; summary: string; cta: string };
+  /** The owner's uploaded photos (already looked at by the vision step), numbered from 1. */
+  references?: BlogReference[];
 }
 
 /** Step 1 (planner): topic, search intent, keywords, outline and photo spots — one call. A calendar item fixes the topic. */
-export function buildBlogPlanPrompt({ business, config, calendar, recentTopics, rejectedTopic, fixedTopic }: BlogPlanInput & { recentTopics: string[]; rejectedTopic?: string; fixedTopic?: string }) {
+export function buildBlogPlanPrompt({ business, config, calendar, references, recentTopics, rejectedTopic, fixedTopic }: BlogPlanInput & { recentTopics: string[]; rejectedTopic?: string; fixedTopic?: string }) {
   const platform = config?.platform ?? "naver";
-  const system = buildSystem(business, platform, config, calendar);
+  const system = buildSystem(business, platform, config, calendar, references);
   const avoidTopics = rejectedTopic ? [...recentTopics, rejectedTopic] : recentTopics;
   const prompt = [
     "AUTOBIZ_BLOG_PLAN_V2",
@@ -167,15 +192,18 @@ export function buildBlogPlanPrompt({ business, config, calendar, recentTopics, 
     "State the searcher's intent in searchIntent and make the post answer exactly that, early. Choose one primary keyword (what the searcher types) and up to four secondary keywords, taken from the facts or the owner's keywords.",
     "Every section's points must come from the FACTS; where facts are thin, plan sections about the reader's situation, how to choose, what to look for, or how the business works — never invented specifics.",
     "Distribute photo spots (what the owner's own photo should show) across at least 4 sections, one quote section and one callout section, and a list where it helps.",
+    references && references.length > 0
+      ? `The owner uploaded ${references.length} real photo(s), listed in the FACTS. Use them: give each photo that fits a section its own photo spot, set that section's "photoRef" to the photo number (each number at most once), and write the section's "photo" text to match what the photo really shows. Sections whose spot has no matching uploaded photo get "photoRef": null.`
+      : null,
     "The final title: primary keyword near the front, 15-35 characters, specific and honest.",
     "Return JSON with exactly these fields:",
-    '{ "topic": "short topic phrase", "title": "final title", "reader": "who this is for and what they want", "angle": "the one angle of this post", "searchIntent": "what the searcher wants to get done", "hookIdea": "how the first two sentences hook the reader", "keywords": { "primary": "...", "secondary": ["..."] }, "sections": [{ "heading": "🥐 sub-heading starting with one emoji", "purpose": "what this section does for the reader", "points": ["fact-based point"], "photo": "what the photo here shows or null", "extra": "quote|callout|list|none" }], "closing": { "takeaway": "one-line takeaway", "cta": "one soft, specific call to action" } }',
+    '{ "topic": "short topic phrase", "title": "final title", "reader": "who this is for and what they want", "angle": "the one angle of this post", "searchIntent": "what the searcher wants to get done", "hookIdea": "how the first two sentences hook the reader", "keywords": { "primary": "...", "secondary": ["..."] }, "sections": [{ "heading": "🥐 sub-heading starting with one emoji", "purpose": "what this section does for the reader", "points": ["fact-based point"], "photo": "what the photo here shows or null", "photoRef": 1 or null, "extra": "quote|callout|list|none" }], "closing": { "takeaway": "one-line takeaway", "cta": "one soft, specific call to action" } }',
   ].filter(Boolean).join("\n");
   return { system, prompt };
 }
 
 const BLOCK_TYPES =
-  'Block types: {"type":"paragraph","text":"…"}, {"type":"quote","text":"…"}, {"type":"list","style":"check|bullet|number","items":["…","…"]}, {"type":"callout","label":"💡 꿀팁","text":"…"}, {"type":"photo","slot":"what the photo shows","caption":"short caption"}. Write inline **bold** and ==highlight== inside the text values.';
+  'Block types: {"type":"paragraph","text":"…"}, {"type":"quote","text":"…"}, {"type":"list","style":"check|bullet|number","items":["…","…"]}, {"type":"callout","label":"💡 꿀팁","text":"…"}, {"type":"photo","slot":"what the photo shows","caption":"short caption","ref":1}. "ref" is only for a section whose plan names an uploaded owner photo (use that number); leave it out otherwise. Write inline **bold** and ==highlight== inside the text values.';
 
 function planBrief(plan: BlogPlan): string {
   return [
@@ -187,15 +215,15 @@ function planBrief(plan: BlogPlan): string {
     "Sections, in order:",
     ...plan.sections.map(
       (section, index) =>
-        `${index + 1}. ${section.heading} — purpose: ${section.purpose}. Points (facts only): ${section.points.join(" / ")}.${section.photo ? ` Photo block: slot = "${section.photo}", plus a short caption.` : " No photo block."}${section.extra === "quote" ? " Include one quote block." : section.extra === "callout" ? ' Include one callout block with a label like "💡 꿀팁" or "📌 포인트".' : section.extra === "list" ? " Include one list block (3-5 short items)." : ""}`,
+        `${index + 1}. ${section.heading} — purpose: ${section.purpose}. Points (facts only): ${section.points.join(" / ")}.${section.photo ? ` Photo block: slot = "${section.photo}", plus a short caption${section.photoRef ? `, ref = ${section.photoRef}` : ""}.` : " No photo block."}${section.extra === "quote" ? " Include one quote block." : section.extra === "callout" ? ' Include one callout block with a label like "💡 꿀팁" or "📌 포인트".' : section.extra === "list" ? " Include one list block (3-5 short items)." : ""}`,
     ),
     `Closing: takeaway: ${plan.closing.takeaway}. CTA: ${plan.closing.cta}.`,
   ].filter(Boolean).join("\n");
 }
 
 /** Step 2 (writer): the whole post in one call, so voice, rhythm and flow stay consistent from the first line to the last. */
-export function buildBlogDraftPrompt({ business, config, calendar, plan }: BlogPlanInput & { plan: BlogPlan }) {
-  const system = buildSystem(business, config?.platform ?? "naver", config, calendar);
+export function buildBlogDraftPrompt({ business, config, calendar, references, plan }: BlogPlanInput & { plan: BlogPlan }) {
+  const system = buildSystem(business, config?.platform ?? "naver", config, calendar, references);
   const prompt = [
     "AUTOBIZ_BLOG_DRAFT_V2",
     "Write the whole blog post now, following this plan.",
@@ -215,8 +243,8 @@ export interface BlogProblemSection {
 }
 
 /** Step 3 (writer): rewrite only the sections that failed the quality gate or the fact check, fixing every listed problem. */
-export function buildBlogFixPrompt({ business, config, calendar, plan, post, targets }: BlogPlanInput & { plan: BlogPlan; post: BlogSection[]; targets: BlogProblemSection[] }) {
-  const system = buildSystem(business, config?.platform ?? "naver", config, calendar);
+export function buildBlogFixPrompt({ business, config, calendar, references, plan, post, targets }: BlogPlanInput & { plan: BlogPlan; post: BlogSection[]; targets: BlogProblemSection[] }) {
+  const system = buildSystem(business, config?.platform ?? "naver", config, calendar, references);
   const prompt = [
     "AUTOBIZ_BLOG_FIX_V2",
     "Part of an already written blog post has problems. Rewrite ONLY the sections listed below, fixing every problem and keeping what already works. Do not touch the other sections.",

@@ -35,6 +35,19 @@ describe("blog markup round trip", () => {
     expect(markupToPost(markup)).toEqual(post);
   });
 
+  it("keeps which uploaded photo belongs in a photo spot through edit and render", () => {
+    const withRef: BlogPost = { ...post, sections: [{ heading: "🥐 진열", blocks: [{ type: "photo", slot: "진열대", caption: "", ref: 2 }, { type: "photo", slot: "입구", caption: "", ref: 10 }, { type: "photo", slot: "자유", caption: "" }] }] };
+    const markup = postToMarkup(withRef);
+    expect(markup).toContain("[사진 2] 진열대");
+    expect(markup).toContain("[사진 10] 입구");
+    expect(markup).toContain("[사진] 자유");
+    expect(markupToPost(markup).sections[0].blocks).toEqual(withRef.sections[0].blocks);
+    expect(renderBlogHtml(withRef, "naver")).toContain("올려주신 참고 사진 2번");
+    expect(renderBlogText(withRef)).toContain("[이미지 1 삽입 · 참고 사진 2번] 진열대");
+    // A number outside 1-10 is not a reference.
+    expect(markupToPost("# 제목\n\n## 소제목\n\n[사진 11] 자리").sections[0].blocks[0]).toEqual({ type: "photo", slot: "자리", caption: "" });
+  });
+
   it("is tolerant: unknown lines become paragraphs and a lone list item stays a paragraph", () => {
     const parsed = markupToPost("# 제목\n\n그냥 문장\n이어지는 줄\n\n- 하나만\n\n[사진]\n\n## 소제목\n\n내용");
     expect(parsed.title).toBe("제목");

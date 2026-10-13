@@ -14,6 +14,9 @@ const serverSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).optional(),
   CRON_SECRET: z.string().min(1).optional(),
   AI_PROVIDER: z.enum(["mock", "openai", "gemini", "anthropic"]).default("mock"),
+  // The mock provider writes placeholder text. In production it is refused (every AI call fails with "AI service not
+  // connected") unless this is explicitly "true" — for demo images only, like ALLOW_MOCK_BILLING.
+  ALLOW_MOCK_AI: z.enum(["true", "false"]).optional(),
   OPENAI_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -40,6 +43,10 @@ const serverSchema = z.object({
   // refused in production unless this is explicitly "true" (demo deployments).
   ALLOW_MOCK_BILLING: z.enum(["true", "false"]).optional(),
   TOSS_SECRET_KEY: z.string().optional(),
+  // Toss's *client* key is public (the checkout widget needs it in the browser), so the app reads it as
+  // NEXT_PUBLIC_TOSS_CLIENT_KEY. A project that stored it as TOSS_CLIENT_KEY (no prefix) still works: the server
+  // reads it here and hands it to the checkout page (src/server/billing/toss-keys.ts).
+  TOSS_CLIENT_KEY: z.string().optional(),
 
 
   META_ACCESS_TOKEN: z.string().optional(),

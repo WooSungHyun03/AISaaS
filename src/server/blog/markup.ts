@@ -10,7 +10,7 @@ import { blogPostSchema, type BlogBlock, type BlogPost, type BlogSection } from 
  *   > 인용구
  *   - 항목                                 (bullet list)   ✔ 항목 (check list)   1. 항목 (numbered)
  *   [포인트] 💡 꿀팁 | 본문                (callout)
- *   [사진] 무엇을 찍을지 | 캡션            (photo slot)
+ *   [사진] 무엇을 찍을지 | 캡션            (photo slot; `[사진 2]` = the owner's uploaded photo no. 2)
  *   [정보] 라벨 | 값                       (business info row; consecutive rows form one box)
  *   ---                                    (divider)
  *   #해시태그 #해시태그                    (last line)
@@ -41,7 +41,7 @@ function blockToLines(block: BlogBlock): string[] {
     case "callout":
       return [`[포인트] ${oneLine(block.label)} | ${oneLine(block.text)}`];
     case "photo":
-      return [`[사진] ${oneLine(block.slot)}${block.caption ? ` | ${oneLine(block.caption)}` : ""}`];
+      return [`[사진${block.ref ? ` ${block.ref}` : ""}] ${oneLine(block.slot)}${block.caption ? ` | ${oneLine(block.caption)}` : ""}`];
     case "info":
       return block.rows.map((row) => `[정보] ${oneLine(row.label)} | ${oneLine(row.value)}`);
     case "divider":
@@ -113,7 +113,7 @@ export function markupToPost(markup: string): BlogPost {
       current.blocks.push({ type: "divider" });
       continue;
     }
-    const tagged = line.match(/^\[(포인트|사진|정보)\]\s*(.*)$/);
+    const tagged = line.match(/^\[(포인트|사진(?:\s*\d{1,2})?|정보)\]\s*(.*)$/);
     if (tagged) {
       const [labelPart, ...rest] = tagged[2].split("|");
       const label = labelPart.trim();
@@ -126,7 +126,10 @@ export function markupToPost(markup: string): BlogPost {
       }
       flushAll();
       if (tagged[1] === "포인트" && label && value) current.blocks.push({ type: "callout", label, text: value });
-      else if (tagged[1] === "사진" && label) current.blocks.push({ type: "photo", slot: label, caption: value });
+      else if (tagged[1].startsWith("사진") && label) {
+        const ref = Number(tagged[1].replace(/\D/g, ""));
+        current.blocks.push({ type: "photo", slot: label, caption: value, ...(ref >= 1 && ref <= 10 ? { ref } : {}) });
+      }
       continue;
     }
     if (line.startsWith("> ")) {

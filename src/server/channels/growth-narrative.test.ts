@@ -52,6 +52,15 @@ describe("buildGrowthNarrative", () => {
     expect(result.narrative).toBe("구독자가 50명 늘어서 1050명이 됐어요.");
   });
 
+  it("never shows the mock provider's placeholder: it falls back to the summary built from the real numbers", async () => {
+    generateTextMock.mockResolvedValue("[MOCK AI RESPONSE]\n\n다음 요청에 대한 예시 결과입니다:\n\"...\"\n\n실제 서비스에서는 AI_PROVIDER 환경변수를 openai 또는 gemini로 설정하면 이 자리에 실제 생성 콘텐츠가 표시됩니다.");
+    const result = await buildGrowthNarrative(CHANNEL, BUSINESS, 7);
+    expect(result.aiUsed).toBe(false);
+    expect(result.narrative).not.toContain("MOCK");
+    expect(result.narrative).not.toContain("AI_PROVIDER");
+    expect(result.narrative).toBe("구독자 수는 이전 7일보다 50명 늘었어요. 지금은 1,050명이에요. 조회수는 아직 데이터를 모으는 중이에요.");
+  });
+
   it("strips a sentence with a hallucinated number, keeping the rest", async () => {
     generateTextMock.mockResolvedValue("구독자가 1050명이에요. 어제보다 900명 늘었어요.");
     const result = await buildGrowthNarrative(CHANNEL, BUSINESS, 7);
@@ -63,7 +72,7 @@ describe("buildGrowthNarrative", () => {
     generateTextMock.mockRejectedValue(new Error("provider down"));
     const result = await buildGrowthNarrative(CHANNEL, BUSINESS, 7);
     expect(result.aiUsed).toBe(false);
-    expect(result.narrative).toContain("+50");
+    expect(result.narrative).toContain("50명 늘었어요");
     expect(result.narrative).toContain("모으는 중");
   });
 
@@ -161,5 +170,39 @@ describe("getOrCreateGrowthNarrative", () => {
     const client = makeClient({ selectResult: { data: null, error: null }, insertResult: { error: new Error("boom") } });
     createClientMock.mockResolvedValue(client);
     await expect(getOrCreateGrowthNarrative(trackedChannel, CHANNEL, BUSINESS, 7, NOW)).rejects.toMatchObject({ name: "ChannelsError", code: "DATABASE_ERROR" });
+  });
+});
+
+describe("getOrCreateGrowthNarrative — rows saved while the mock AI was active", () => {
+  it("ignores a cached placeholder (even one marked as AI-written) and writes a fresh, clean narrative", async () => {
+    generateTextMock.mockResolvedValue("[MOCK AI RESPONSE] 예시");
+    const client = makeClient({ selectResult: { data: { narrative: "[MOCK AI RESPONSE]\n\n다음 요청에 대한 예시 결과입니다", ai_used: true, created_at: NOW.toISOString() }, error: null } });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await getOrCreateGrowthNarrative({ id: "channel-1", business_id: "biz-1" }, CHANNEL, BUSINESS, 7, NOW);
+
+    expect(result.aiUsed).toBe(false);
+    expect(result.narrative).not.toContain("MOCK");
+    expect(client.insertSpy).toHaveBeenCalledWith(expect.objectContaining({ narrative: expect.not.stringContaining("MOCK"), ai_used: false }));
+  });
+});
+
+describe("rule-based narrative wording", () => {
+  const metric = (over: Partial<(typeof CHANNEL.metrics)[number]>) => ({ ...CHANNEL.metrics[0], ...over });
+  const narrate = async (metrics: typeof CHANNEL.metrics) => {
+    generateTextMock.mockRejectedValue(new Error("down"));
+    return (await buildGrowthNarrative({ ...CHANNEL, metrics }, BUSINESS, 30)).narrative;
+  };
+
+  it("says a drop as a drop, and an unchanged value as unchanged, with the right particles", async () => {
+    expect(await narrate([metric({ current: 940, previous: 1000, absoluteDelta: -60, deltaPercent: -6 })])).toBe("구독자 수는 이전 30일보다 60명 줄었어요. 지금은 940명이에요.");
+    expect(await narrate([metric({ current: 1000, previous: 1000, absoluteDelta: 0, deltaPercent: 0 })])).toBe("구독자 수는 이전 30일과 같은 1,000명이에요.");
+    expect(await narrate([metric({ metric: "viewCount", label: "조회수", current: 7, previous: null, absoluteDelta: null, deltaPercent: null })])).toBe("조회수는 지금 7회예요. 비교할 이전 기간 데이터가 없어요.");
+  });
+
+  it("uses each metric's own unit and never invents a number that is not in the data", async () => {
+    const text = await narrate([metric({ metric: "yt_analytics.estimatedMinutesWatched", label: "시청 시간 (기간 합계, 분)", current: 1200, previous: 900, absoluteDelta: 300, deltaPercent: 33 })]);
+    expect(text).toBe("시청 시간은 이전 30일보다 300분 늘었어요. 지금은 1,200분이에요.");
+    expect(text).not.toMatch(/33/);
   });
 });

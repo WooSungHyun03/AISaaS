@@ -1,0 +1,74 @@
+# 외부 서비스 설정 안내 (결제 · YouTube · Instagram)
+
+코드로 고칠 수 있는 부분은 모두 코드에 반영되어 있습니다. 아래는 **콘솔에서 사람이 직접** 해야 하는 설정입니다.
+키 값은 절대 저장소·채팅·스크린샷에 남기지 말고 Vercel 환경변수에만 넣으세요. 환경변수를 바꾼 뒤에는 **다시 배포**해야 적용됩니다
+(`NEXT_PUBLIC_*` 값은 빌드 때 번들에 들어갑니다).
+
+배포 환경이 설정됐는지는 `npm run check:providers`(또는 `node scripts/check-providers.mjs`)로 확인할 수 있고, 관리자 계정으로 설정 화면을 열면
+비어 있는 변수 이름과 등록할 Redirect URI가 그대로 표시됩니다.
+
+## 1. 결제 (Toss Payments, 테스트 모드)
+
+| 변수 | 위치 | 값 |
+| --- | --- | --- |
+| `BILLING_PROVIDER` | Vercel (Production) | `toss` |
+| `NEXT_PUBLIC_TOSS_CLIENT_KEY` (별칭 `TOSS_CLIENT_KEY`) | Vercel | 토스 개발자센터 → API 키 → 클라이언트 키 `test_ck_…` |
+| `TOSS_SECRET_KEY` | Vercel | 시크릿 키 `test_sk_…` |
+| `NEXT_PUBLIC_SITE_URL` | Vercel | 실제 배포 주소(예: `https://example.vercel.app`) |
+
+- 클라이언트 키와 시크릿 키는 **둘 다 테스트 키**여야 합니다. 라이브 키가 섞이면 앱이 결제를 시작하지 않고 `BILLING_KEYS_NOT_TEST`로 막습니다(실결제 방지).
+- `NEXT_PUBLIC_TOSS_CLIENT_KEY`는 빌드 때 번들에 들어가므로 값을 바꾸면 반드시 재배포하세요. 서버가 `TOSS_CLIENT_KEY`도 읽기 때문에 변수 이름을 틀려도 서버 쪽에서 복구됩니다.
+- 결제 성공/실패 URL은 앱이 요청마다 `NEXT_PUBLIC_SITE_URL` 기준으로 만들어 토스에 전달하므로 토스 콘솔에 따로 등록할 Redirect URL은 없습니다.
+- 웹훅: 현재 결제 확정은 성공 URL(`/billing/success`)에서 서버가 토스 승인 API를 호출해 처리하며 웹훅에 의존하지 않습니다. 이용권 지급은 `complete_billing_order`가 주문당 한 번만 처리해 새로고침·중복 확인에도 이중 지급되지 않습니다.
+
+실패 화면의 코드 → 원인
+
+| 코드 | 의미 | 조치 |
+| --- | --- | --- |
+| `BILLING_NOT_CONFIGURED` | 결제 설정이 비어 있음 | 위 표의 변수 확인 |
+| `BILLING_CLIENT_KEY_MISSING` | 클라이언트 키 없음 | `NEXT_PUBLIC_TOSS_CLIENT_KEY` 추가 후 재배포 |
+| `BILLING_KEYS_NOT_TEST` | 테스트 키가 아님 | `test_ck_` / `test_sk_` 키로 교체 |
+| `BILLING_PROVIDER_MOCK` | 운영에서 모의 결제로 설정됨 | `BILLING_PROVIDER=toss` |
+
+관리자 계정에게만 위 원인이 화면에 보이고, 일반 사용자에게는 "결제를 시작하지 못했어요. 잠시 후 다시 시도해주세요" 수준만 보입니다.
+
+## 2. YouTube (Google OAuth)
+
+환경변수: `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET` (Vercel)
+
+Google Cloud Console에서:
+
+1. 프로젝트 선택 → API 및 서비스 → 라이브러리에서 **YouTube Data API v3**와 **YouTube Analytics API**를 사용 설정.
+2. OAuth 동의 화면: 앱 이름·지원 이메일 입력, 범위에 아래 3개 추가.
+   - `https://www.googleapis.com/auth/youtube.upload`
+   - `https://www.googleapis.com/auth/youtube.readonly`
+   - `https://www.googleapis.com/auth/yt-analytics.readonly`
+3. 게시 상태가 "테스트"이면 **테스트 사용자**에 연결할 Google 계정을 등록(미등록 계정은 동의 화면에서 막힘). 운영 공개는 Google 검증(민감 범위) 필요.
+4. 사용자 인증 정보 → OAuth 클라이언트 ID(유형: 웹 애플리케이션) 생성.
+   - 승인된 리디렉션 URI: `<NEXT_PUBLIC_SITE_URL>/api/integrations/youtube/callback` (로컬은 `http://localhost:3000/api/integrations/youtube/callback`)
+5. 클라이언트 ID/보안 비밀번호를 Vercel에 넣고 재배포.
+
+앱은 `access_type=offline`, `prompt=consent`로 요청해 refresh token을 받고, 액세스 토큰은 만료 전에 자동 갱신합니다. 일부 범위를 해제하고 연결하면
+"연결됨(Analytics 제외)"으로 표시되며 설정 화면의 **다시 연결**로 재동의할 수 있습니다. 자세한 내용: `docs/person1/GOOGLE_CLOUD_SETUP_youtube_analytics.md`.
+
+## 3. Instagram (Instagram API with Instagram Login)
+
+환경변수: `INSTAGRAM_APP_ID`, `INSTAGRAM_APP_SECRET` (Vercel). **Meta 앱 ID가 아니라** 앱 대시보드 → Instagram → API 설정에 표시되는 *Instagram 앱 ID / Instagram 앱 시크릿*입니다.
+
+Meta for Developers에서:
+
+1. 앱 유형 **비즈니스**로 앱 생성 → 제품에서 **Instagram**(Instagram API with Instagram Login) 추가.
+2. 비즈니스 로그인 설정 → **OAuth 리디렉션 URL**에 `<NEXT_PUBLIC_SITE_URL>/api/integrations/instagram/callback` 등록 (로컬은 `http://localhost:3000/...`; Meta는 HTTPS를 요구할 수 있으므로 로컬 테스트는 터널 주소를 쓰세요).
+3. 권한: `instagram_business_basic`(계정 정보), `instagram_business_content_publish`(릴스 게시). 앱은 이 둘만 요청하며, 성과 지표용 권한(`instagram_business_manage_insights`)은 요청하지 않으므로 인스타그램 성장 수치는 표시하지 않습니다.
+4. 개발 모드에서는 앱 역할 → **Instagram 테스터**로 추가하고, 테스터 계정이 Instagram 앱(설정 → 웹사이트 권한)에서 초대를 수락해야 합니다. 일반 사용자 공개는 앱 검수(고급 액세스)와 비즈니스 인증이 필요합니다.
+5. 연결할 Instagram 계정은 **비즈니스 또는 크리에이터** 계정이어야 합니다(개인 계정은 `professional_required`).
+6. 값을 Vercel에 넣고 재배포.
+
+토큰: 인증 코드 → 단기 토큰 → 장기 토큰(60일)으로 교환해 Vault에 저장합니다. 앱은 만료 10일 전부터(발급 후 24시간이 지나면) 자동으로 갱신하고,
+이미 만료됐다면 "다시 연결 필요"로 표시합니다.
+
+## 연결 상태가 안 풀릴 때 확인 순서
+
+1. 설정 화면 버튼이 "연동 준비 중"이면 환경변수 미설정입니다(관리자 계정에서 변수 이름이 표시됨).
+2. 클릭 후 Google/Meta 오류 화면이면 Redirect URI·테스트 사용자·앱 역할을 확인하세요.
+3. 돌아왔을 때 "취소했어요"는 사용자가 거부한 경우, "만료됐거나 확인할 수 없어요"는 10분 안에 끝내지 못했거나 쿠키가 막힌 경우입니다.

@@ -1,4 +1,5 @@
 import type { AIProvider, GenerateTextParams, GenerateTextResult } from "../provider";
+import { MOCK_AI_MARKER } from "../mock-marker";
 import { mockAdPlan, mockAdQa, mockImageAnalysis } from "./mock-ad";
 import { mockBlogDraft, mockBlogFix, mockBlogGuide, mockBlogPlan, mockBlogReview } from "./mock-blog";
 
@@ -100,7 +101,7 @@ export class MockAIProvider implements AIProvider {
     if (prompt.includes("AUTOBIZ_BLOG_GUIDE_V1")) return { text: mockBlogGuide(prompt) };
 
     return {
-      text: `[MOCK AI RESPONSE]\n\n다음 요청에 대한 예시 결과입니다:\n"${prompt.slice(0, 200)}"\n\n실제 서비스에서는 AI_PROVIDER 환경변수를 openai 또는 gemini로 설정하면 이 자리에 실제 생성 콘텐츠가 표시됩니다.`,
+      text: `${MOCK_AI_MARKER}\n\n다음 요청에 대한 예시 결과입니다:\n"${prompt.slice(0, 200)}"\n\n실제 서비스에서는 AI_PROVIDER 환경변수를 openai 또는 gemini로 설정하면 이 자리에 실제 생성 콘텐츠가 표시됩니다.`,
     };
   }
 }

@@ -58,7 +58,10 @@ function parsePlatforms(values: string[]): ShortsPublishPlatform[] {
   return [...new Set(values.filter((value): value is ShortsPublishPlatform => value === "instagram" || value === "youtube"))];
 }
 
-async function ownedShortsAutomation(automationId: string) {
+/** Template slugs that can hold uploaded reference files. Blog posts only take photos. */
+const REFERENCE_TEMPLATES = ["shorts", "blog-marketing"] as const;
+
+async function ownedShortsAutomation(automationId: string, allowed: readonly string[] = ["shorts"]) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "로그인이 필요합니다." } as const;
@@ -70,8 +73,8 @@ async function ownedShortsAutomation(automationId: string) {
     .maybeSingle();
   if (error || !automation) return { error: "숏폼 만들기 설정을 찾을 수 없습니다." } as const;
   const { data: template } = await supabase.from("automation_templates").select("slug").eq("id", automation.template_id).maybeSingle();
-  if (template?.slug !== "shorts") return { error: "숏폼 만들기 설정이 아닙니다." } as const;
-  return { supabase, user, automation } as const;
+  if (!template || !allowed.includes(template.slug)) return { error: "숏폼 만들기 설정이 아닙니다." } as const;
+  return { supabase, user, automation, slug: template.slug } as const;
 }
 
 export async function createShortsAutomation(businessId: string): Promise<ShortsActionResult> {
@@ -239,7 +242,7 @@ async function writeShortsConfig(owned: OwnedShorts, patch: ConfigPatch): Promis
     config: { ...rest, ...patch, assets } as unknown as Json,
   }).eq("id", owned.automation.id).eq("user_id", owned.user.id);
   if (error) return "설정을 저장하지 못했어요. 잠시 후 다시 시도해주세요.";
-  revalidatePath("/shorts");
+  revalidatePath(owned.slug === "blog-marketing" ? "/blog" : "/shorts");
   return null;
 }
 
@@ -262,10 +265,11 @@ export async function createShortsAssetUpload(
   automationId: string,
   input: { kind: string; fileName: string; mime: string; bytes: number },
 ): Promise<ShortsUploadTicket> {
-  const owned = await ownedShortsAutomation(automationId);
+  const owned = await ownedShortsAutomation(automationId, REFERENCE_TEMPLATES);
   if ("error" in owned) return { error: owned.error };
   if (!(input.kind in ASSET_LIMITS)) return { error: "올릴 파일의 종류를 확인해주세요." };
   const kind = input.kind as ShortsAssetKind;
+  if (owned.slug === "blog-marketing" && kind !== "image") return { error: "블로그에는 사진만 올릴 수 있어요." };
   const limits = ASSET_LIMITS[kind];
   const extension = extensionOf(input.fileName);
   if (!(limits.extensions as readonly string[]).includes(extension)) return { error: `이 칸에는 ${limits.label} 파일만 올릴 수 있어요.` };
@@ -290,10 +294,11 @@ export async function registerShortsAsset(
   automationId: string,
   input: { assetId: string; path: string; kind: string; label?: string; role?: string },
 ): Promise<ShortsActionResult> {
-  const owned = await ownedShortsAutomation(automationId);
+  const owned = await ownedShortsAutomation(automationId, REFERENCE_TEMPLATES);
   if ("error" in owned) return { error: owned.error };
   if (!(input.kind in ASSET_LIMITS)) return { error: "올릴 파일의 종류를 확인해주세요." };
   const kind = input.kind as ShortsAssetKind;
+  if (owned.slug === "blog-marketing" && kind !== "image") return { error: "블로그에는 사진만 올릴 수 있어요." };
   const prefix = `${owned.user.id}/${automationId}/assets/${input.assetId}.`;
   if (!input.path.startsWith(prefix) || input.path.includes("..") || !/^[0-9a-f-]{36}$/.test(input.assetId)) return { error: "올린 파일 정보가 올바르지 않아요. 다시 올려주세요." };
 
@@ -358,7 +363,7 @@ export async function addMascotReferences(automationId: string): Promise<ShortsA
 }
 
 export async function removeShortsAsset(automationId: string, assetId: string): Promise<ShortsActionResult> {
-  const owned = await ownedShortsAutomation(automationId);
+  const owned = await ownedShortsAutomation(automationId, REFERENCE_TEMPLATES);
   if ("error" in owned) return { error: owned.error };
   const settings = parseShortsSettings(owned.automation.config);
   const target = settings.assets.find((item) => item.id === assetId);
@@ -388,7 +393,7 @@ export async function saveShortsSettings(
 
 /** The owner says what a photo is for (the AI fills in the rest when the video is made). */
 export async function setAssetRole(automationId: string, assetId: string, role: string): Promise<ShortsActionResult> {
-  const owned = await ownedShortsAutomation(automationId);
+  const owned = await ownedShortsAutomation(automationId, REFERENCE_TEMPLATES);
   if ("error" in owned) return { error: owned.error };
   if (!(role in ASSET_ROLES)) return { error: "사진의 쓰임새를 확인해주세요." };
   const settings = parseShortsSettings(owned.automation.config);
@@ -396,4 +401,81 @@ export async function setAssetRole(automationId: string, assetId: string, role: 
   if (!target || target.kind !== "image" || target.origin === "mascot") return { error: "바꿀 사진을 찾을 수 없어요." };
   const failure = await writeShortsConfig(owned, { assets: settings.assets.map((item) => (item.id === assetId ? { ...item, role: role as ShortsAssetRole } : item)) });
   return failure ? { error: failure } : { success: true };
+}
+
+
+export interface ReusableImage {
+  /** `<automationId>:<assetId>` — what to send back to reuseImages. */
+  key: string;
+  label: string;
+  summary: string;
+  fromName: string;
+  previewUrl: string | null;
+}
+
+/** Photos the owner uploaded for this business's other automations (blog or Shorts) that are not in this one yet. */
+async function reusableCandidates(owned: OwnedShorts): Promise<Array<{ key: string; asset: ShortsAsset; fromName: string }>> {
+  const { data: others } = await owned.supabase.from("automations").select("id,name,config")
+    .eq("user_id", owned.user.id).eq("business_id", owned.automation.business_id).neq("id", owned.automation.id).limit(30);
+  const have = new Set(parseShortsSettings(owned.automation.config).assets.flatMap((asset) => [asset.source, asset.copiedFrom ?? ""]));
+  const seen = new Set<string>();
+  const out: Array<{ key: string; asset: ShortsAsset; fromName: string }> = [];
+  for (const row of others ?? []) {
+    for (const asset of parseShortsSettings(row.config).assets) {
+      if (asset.kind !== "image" || asset.origin !== "upload" || !isOwnedAssetPath(asset.source, owned.user.id, row.id)) continue;
+      const original = asset.copiedFrom ?? asset.source;
+      if (have.has(asset.source) || have.has(original) || seen.has(original)) continue;
+      seen.add(original);
+      out.push({ key: `${row.id}:${asset.id}`, asset, fromName: row.name });
+    }
+  }
+  return out;
+}
+
+export async function listReusableImages(automationId: string): Promise<{ error?: string; images?: ReusableImage[] }> {
+  const owned = await ownedShortsAutomation(automationId, REFERENCE_TEMPLATES);
+  if ("error" in owned) return { error: owned.error };
+  const admin = createAdminClient();
+  const candidates = (await reusableCandidates(owned)).slice(0, 24);
+  const images = await Promise.all(candidates.map(async ({ key, asset, fromName }): Promise<ReusableImage> => ({
+    key,
+    label: asset.label,
+    summary: asset.summary ?? "",
+    fromName,
+    previewUrl: await signAsset(admin, REFERENCE_BUCKET, asset.source).catch(() => null),
+  })));
+  return { images };
+}
+
+/** Copies the chosen photos into this automation (a copy, so deleting one place never breaks the other). */
+export async function reuseImages(automationId: string, keys: string[]): Promise<ShortsActionResult & { added?: number }> {
+  const owned = await ownedShortsAutomation(automationId, REFERENCE_TEMPLATES);
+  if ("error" in owned) return { error: owned.error };
+  const wanted = new Set(keys.slice(0, ASSET_LIMITS.image.max));
+  if (wanted.size === 0) return { error: "다시 쓸 사진을 골라주세요." };
+  const settings = parseShortsSettings(owned.automation.config);
+  const room = ASSET_LIMITS.image.max - settings.assets.filter((asset) => asset.kind === "image").length;
+  if (room <= 0) return { error: `사진은 ${ASSET_LIMITS.image.max}장까지만 쓸 수 있어요. 일부를 지운 뒤 골라주세요.` };
+  const picks = (await reusableCandidates(owned)).filter((candidate) => wanted.has(candidate.key)).slice(0, room);
+  if (picks.length === 0) return { error: "고른 사진을 찾을 수 없어요. 화면을 새로고침해주세요." };
+
+  const admin = createAdminClient();
+  const added: ShortsAsset[] = [];
+  const copied: string[] = [];
+  for (const { asset } of picks) {
+    const id = crypto.randomUUID();
+    const extension = extensionOf(asset.source) || "jpg";
+    const path = assetStoragePath(owned.user.id, automationId, id, extension);
+    const { error } = await admin.storage.from(REFERENCE_BUCKET).copy(asset.source, path);
+    if (error) continue;
+    copied.push(path);
+    added.push({ ...asset, id, source: path, copiedFrom: asset.copiedFrom ?? asset.source });
+  }
+  if (added.length === 0) return { error: "사진을 가져오지 못했어요. 잠시 후 다시 시도해주세요." };
+  const failure = await writeShortsConfig(owned, { assets: [...settings.assets, ...added] });
+  if (failure) {
+    await removeAssets(admin, copied).catch(() => undefined);
+    return { error: failure };
+  }
+  return { success: true, added: added.length };
 }

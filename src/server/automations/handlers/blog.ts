@@ -1,5 +1,6 @@
 import "server-only";
 import { generateStructured } from "@/server/ai/generate";
+import { isMockAiBlocked } from "@/server/ai";
 import { isNearDuplicateTopic } from "@/server/ai/similarity";
 import {
   blogDraftSchema,
@@ -13,6 +14,7 @@ import {
   buildBlogReviewPrompt,
   type BlogPlan,
   type BlogProblemSection,
+  type BlogReference,
 } from "@/server/ai/prompts/blog";
 import { assessBlogPost, assignIssues } from "@/server/ai/blog-quality";
 import { postToMarkup } from "@/server/blog/markup";
@@ -21,8 +23,9 @@ import { generatePublishingGuide } from "@/server/blog/publishing-guide-generate
 import { createAdminClient } from "@/lib/supabase/admin";
 import { serverEnv } from "@/lib/env/server";
 import { logger } from "@/lib/logger";
-import { summarizeRunSpend } from "@/server/budget";
-import { parseShortsSettings } from "@/types/shorts-reference";
+import { isBudgetError, summarizeRunSpend } from "@/server/budget";
+import { parseShortsSettings, summarizeUsedReferences, type ShortsAsset } from "@/types/shorts-reference";
+import { withImageAnalysis } from "@/server/shorts/describe-images";
 import { blogSectionSchema, countCharsNoSpaces, postBodyText, stripInlineMarkup, type BlogBlock, type BlogPost, type BlogSection } from "@/server/blog/post";
 import { renderBlogHtml } from "@/server/blog/render";
 import { promotionFieldValue } from "@/lib/promotion";
@@ -49,6 +52,18 @@ const MAX_JOB_MINUTES = 40;
 /** At most this many sections are rewritten by one targeted fix: the ones with the most problems. */
 const MAX_FIX_SECTIONS = 4;
 
+/** A photo the owner uploaded for this post (kept in the job state so later steps and the finished run know what was used). */
+const referenceSchema = z.object({
+  number: z.number().int().min(1).max(10),
+  id: z.string(),
+  kind: z.literal("image"),
+  origin: z.literal("upload"),
+  label: z.string(),
+  role: z.enum(["product", "place", "person", "character", "exact", "other"]).nullable(),
+  summary: z.string(),
+  path: z.string().nullable(),
+});
+
 const stageSchema = z.enum(["DRAFT", "FIX", "REVIEW", "FACT_FIX", "GUIDE"]);
 
 const jobStateSchema = z.object({
@@ -59,6 +74,8 @@ const jobStateSchema = z.object({
   title: z.string(),
   /** Intro, then each body section, then the closing — in order, as far as written. */
   sections: z.array(blogSectionSchema),
+  /** The owner's uploaded photos, numbered from 1 as the prompts number them. */
+  references: z.array(referenceSchema).default([]),
   /** Section index -> problems the next targeted fix must resolve. */
   fixes: z.record(z.string(), z.array(z.string())).default({}),
   /** Notes for the owner collected along the way (shown as "확인해 보세요"). */
@@ -86,10 +103,15 @@ function cleanBlocks(blocks: BlogBlock[]): BlogBlock[] {
   return blocks.filter((block) => block.type !== "info" && block.type !== "divider");
 }
 
-function planInput(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined) {
+function promptReferences(references: JobState["references"]): BlogReference[] {
+  return references.map(({ number, label, summary, role }) => ({ number, label, summary, role }));
+}
+
+function planInput(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined, references: JobState["references"] = []) {
   return {
     business: ctx.business,
     config,
+    references: promptReferences(references),
     calendar: ctx.calendarItem ? { goal: ctx.calendarItem.goal, summary: ctx.calendarItem.summary, cta: ctx.calendarItem.cta } : undefined,
   };
 }
@@ -180,14 +202,71 @@ async function ownedImagesFor(ctx: AutomationRunContext): Promise<Array<{ label:
 }
 
 
-function factsOf(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined) {
-  return buildBlogFacts(ctx.business, config, planInput(ctx, config).calendar);
+function factsOf(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined, references: JobState["references"] = []) {
+  return buildBlogFacts(ctx.business, config, planInput(ctx, config).calendar, promptReferences(references));
+}
+
+/**
+ * The owner's uploaded photos, looked at once by the vision model (a failed look keeps the photos with the owner's own
+ * labels). Only photos whose file belongs to this automation are used.
+ */
+async function loadReferences(ctx: AutomationRunContext): Promise<JobState["references"]> {
+  const uploads = parseShortsSettings(ctx.config).assets
+    .filter((asset): asset is ShortsAsset => asset.kind === "image" && asset.origin === "upload")
+    .filter((asset) => asset.source.startsWith(`${ctx.automation.user_id}/${ctx.automation.id}/`))
+    .slice(0, 10);
+  if (uploads.length === 0) return [];
+  let described = uploads;
+  try {
+    described = await withImageAnalysis({ runId: ctx.runId, userId: ctx.automation.user_id, automationId: ctx.automation.id }, uploads, "blog.photos");
+  } catch (error) {
+    // A spent budget stops the run like any other paid step; any other failure just means the photos are used by their labels.
+    if (isBudgetError(error)) throw error;
+    logger.warn("blog_photo_analysis_failed", { runId: ctx.runId, message: error instanceof Error ? error.message : String(error) });
+  }
+  return summarizeUsedReferences(described).flatMap((reference) =>
+    reference.kind === "image" && reference.origin === "upload" ? [{ ...reference, kind: "image" as const, origin: "upload" as const }] : []);
+}
+
+/** The plan said which photo goes in which section; where the writer left the ref out, the plan's choice is filled in. */
+export function applyPlannedPhotoRefs(sections: BlogSection[], plan: BlogPlan): BlogSection[] {
+  const taken = new Set(sections.flatMap((section) => section.blocks.flatMap((block) => (block.type === "photo" && block.ref ? [block.ref] : []))));
+  return sections.map((section, index) => {
+    const planned = plan.sections[index - 1]?.photoRef; // section 0 is the intro; body sections follow the plan in order
+    if (!planned || taken.has(planned)) return section;
+    let done = false;
+    const blocks = section.blocks.map((block) => {
+      if (done || block.type !== "photo" || block.ref !== undefined) return block;
+      done = true;
+      taken.add(planned);
+      return { ...block, ref: planned };
+    });
+    return { ...section, blocks };
+  });
+}
+
+/** Drops photo refs that point at a photo the owner does not have, and a second use of the same photo. */
+export function normalizePhotoRefs(sections: BlogSection[], photoCount: number): BlogSection[] {
+  const used = new Set<number>();
+  return sections.map((section) => ({
+    ...section,
+    blocks: section.blocks.map((block) => {
+      if (block.type !== "photo" || block.ref === undefined) return block;
+      if (block.ref > photoCount || used.has(block.ref)) {
+        const { ref, ...rest } = block;
+        void ref;
+        return rest;
+      }
+      used.add(block.ref);
+      return block;
+    }),
+  }));
 }
 
 /** The deterministic quality gate on the post as written so far: problems per section index. */
 function gate(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined, state: JobState): { remaining: string[]; fixes: Record<string, string[]> } {
   const post = assemble(ctx, config, state, false);
-  const issues = assessBlogPost({ post, keywords: qualityKeywords(ctx, config), facts: factsOf(ctx, config).text, promotionType: resolvePromotionType(ctx.business) });
+  const issues = assessBlogPost({ post, keywords: qualityKeywords(ctx, config), facts: factsOf(ctx, config, state.references).text, promotionType: resolvePromotionType(ctx.business) });
   const assigned = assignIssues(post, issues);
   // The sections with the most problems are rewritten; the rest of the issues stay as notes.
   const chosen = [...assigned.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, MAX_FIX_SECTIONS);
@@ -206,7 +285,7 @@ async function applyTargetedFix(ctx: AutomationRunContext, config: BlogAutomatio
   state.aiCalls += 1;
   try {
     const output = await generateStructured({
-      ...buildBlogFixPrompt({ ...planInput(ctx, config), plan: state.plan, post: state.sections, targets }),
+      ...buildBlogFixPrompt({ ...planInput(ctx, config, state.references), plan: state.plan, post: state.sections, targets }),
       schema: blogFixSchema,
       maxTokens: 12_000,
       role: "writer",
@@ -231,13 +310,17 @@ async function applyTargetedFix(ctx: AutomationRunContext, config: BlogAutomatio
 }
 
 async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | undefined, state: JobState): Promise<AutomationHandlerResult> {
+  state.sections = normalizePhotoRefs(state.sections, state.references.length);
+  const placed = new Set(state.sections.flatMap((section) => section.blocks.flatMap((block) => (block.type === "photo" && block.ref ? [block.ref] : []))));
+  const unplaced = state.references.filter((reference) => !placed.has(reference.number)).map((reference) => `${reference.number}번`);
+  if (unplaced.length > 0) state.notes.push(`올려주신 사진 중 ${unplaced.join(", ")}은 글의 사진 자리에 맞추지 못했어요. 어울리는 자리에 직접 넣어주세요.`);
   const post = assemble(ctx, config, state, true);
   const bodyHtml = renderBlogHtml(post, "generic");
   const text = postBodyText(post);
   const firstParagraph = state.sections[0]?.blocks.find((block) => block.type === "paragraph");
   const excerpt = stripInlineMarkup(firstParagraph && "text" in firstParagraph ? firstParagraph.text : text).replace(/\s+/g, " ").slice(0, 140);
   const photoSlots = post.sections.flatMap((section) => section.blocks).filter((block) => block.type === "photo").map((block) => ("slot" in block ? block.slot : ""));
-  const facts = factsOf(ctx, config);
+  const facts = factsOf(ctx, config, state.references);
   const remaining = assessBlogPost({ post, keywords: qualityKeywords(ctx, config), facts: facts.text, promotionType: resolvePromotionType(ctx.business) }).map((issue) => issue.message);
   const notes = [...new Set([...state.notes, ...remaining])];
   const markup = postToMarkup(post);
@@ -263,6 +346,7 @@ async function finish(ctx: AutomationRunContext, config: BlogAutomationConfig | 
       keywords: [...new Set([state.plan.keywords.primary, ...qualityKeywords(ctx, config)])].slice(0, 8),
       seoKeywords: post.hashtags.slice(0, 8),
       publishingGuide: guide,
+      references: state.references,
       callToAction: state.plan.closing.cta,
       imageSuggestion: photoSlots.join(" / "),
       stats: { chars: countCharsNoSpaces(text), sections: post.sections.length, photos: photoSlots.length },
@@ -296,17 +380,21 @@ export const blogAutomationHandler: AutomationHandler = {
   metered: () => (serverEnv.AI_PROVIDER === "mock" ? null : "BLOG"),
 
   preflight: () =>
-    serverEnv.AI_PROVIDER === "mock" || serverEnv.AI_PROVIDER === "anthropic"
-      ? null
-      : "블로그 글 만들기는 Claude(Anthropic) 설정이 필요해요. 관리자에게 문의해주세요.",
+    isMockAiBlocked()
+      ? "AI 서비스가 아직 연결되지 않아 지금은 블로그 글을 만들 수 없어요. 이용권은 차감되지 않았어요. 관리자에게 문의해주세요."
+      : serverEnv.AI_PROVIDER === "mock" || serverEnv.AI_PROVIDER === "anthropic"
+        ? null
+        : "블로그 글 만들기는 Claude(Anthropic) 설정이 필요해요. 관리자에게 문의해주세요.",
 
   async run(ctx: AutomationRunContext): Promise<AutomationHandlerOutcome> {
     const parsed = blogSetupSchema.safeParse(ctx.config);
     const config = parsed.success ? (ctx.config as unknown as BlogAutomationConfig) : undefined;
 
+    // Photos the owner uploaded are looked at first, so the plan can place them (one extra vision call, only when there are photos).
+    const references = await loadReferences(ctx);
     let aiCalls = 1;
     const request = (rejectedTopic?: string) => ({
-      ...buildBlogPlanPrompt({ ...planInput(ctx, config), recentTopics: ctx.recentTopics, rejectedTopic, fixedTopic: ctx.calendarItem?.topic }),
+      ...buildBlogPlanPrompt({ ...planInput(ctx, config, references), recentTopics: ctx.recentTopics, rejectedTopic, fixedTopic: ctx.calendarItem?.topic }),
       schema: blogPlanSchema,
       maxTokens: 8_000,
       role: "planner" as const,
@@ -319,7 +407,7 @@ export const blogAutomationHandler: AutomationHandler = {
       aiCalls += 1;
     }
     const topic = ctx.calendarItem ? ctx.calendarItem.topic : plan.topic;
-    const state: JobState = { v: 2, stage: "DRAFT", topic, plan, title: plan.title, sections: [], fixes: {}, notes: [], factCheck: { ran: false, flagged: 0, fixed: false }, aiCalls, startedAt: new Date().toISOString() };
+    const state: JobState = { v: 2, stage: "DRAFT", topic, plan: { ...plan, sections: plan.sections.map((section) => ({ ...section, photoRef: section.photoRef !== null && section.photoRef <= references.length ? section.photoRef : null })) }, references, title: plan.title, sections: [], fixes: {}, notes: [], factCheck: { ran: false, flagged: 0, fixed: false }, aiCalls, startedAt: new Date().toISOString() };
     return deferred(state);
   },
 
@@ -337,7 +425,7 @@ export const blogAutomationHandler: AutomationHandler = {
       case "DRAFT": {
         // The only step whose failure fails the run: without a draft there is no post.
         const draft = await generateStructured({
-          ...buildBlogDraftPrompt({ ...planInput(ctx, config), plan: state.plan }),
+          ...buildBlogDraftPrompt({ ...planInput(ctx, config, state.references), plan: state.plan }),
           schema: blogDraftSchema,
           maxTokens: 16_000,
           role: "writer",
@@ -345,7 +433,13 @@ export const blogAutomationHandler: AutomationHandler = {
         });
         state.aiCalls += 1;
         state.title = draft.title;
-        state.sections = draft.sections.map((section) => ({ heading: section.heading, blocks: cleanBlocks(section.blocks) })).filter((section) => section.blocks.length > 0);
+        state.sections = normalizePhotoRefs(
+          applyPlannedPhotoRefs(
+            draft.sections.map((section) => ({ heading: section.heading, blocks: cleanBlocks(section.blocks) })).filter((section) => section.blocks.length > 0),
+            state.plan,
+          ),
+          state.references.length,
+        );
         if (state.sections.length < 7) throw new Error("AI가 글을 끝까지 쓰지 못했어요. 다시 시도해주세요.");
         const checked = gate(ctx, config, state);
         state.fixes = checked.fixes;
@@ -363,7 +457,7 @@ export const blogAutomationHandler: AutomationHandler = {
       case "REVIEW": {
         try {
           const review = await generateStructured({
-            ...buildBlogReviewPrompt({ plan: state.plan, post: assemble(ctx, config, state, false), facts: factsOf(ctx, config).text }),
+            ...buildBlogReviewPrompt({ plan: state.plan, post: assemble(ctx, config, state, false), facts: factsOf(ctx, config, state.references).text }),
             schema: blogReviewSchema,
             maxTokens: 8_000,
             role: "reviewer",

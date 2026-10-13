@@ -73,9 +73,9 @@ describe("buildGrowthReport", () => {
     expect(report.topTopics).toEqual([{ topic: "소금빵", count: 2 }, { topic: "원두", count: 1 }]);
   });
 
-  it("lists external performance metrics as UNAVAILABLE instead of estimating them", () => {
+  it("never carries a view, follower or conversion number: only this service's own records are reported", () => {
     const report = buildGrowthReport({ now: NOW, days: 30, content: [], runs: [], calendar: [] });
-    expect(report.unavailable.map((entry) => entry.key)).toEqual(expect.arrayContaining(["views", "engagement", "followers", "conversion"]));
+    expect(Object.keys(report)).not.toEqual(expect.arrayContaining(["unavailable", "views", "followers", "conversion"]));
     expect(JSON.stringify(report)).not.toMatch(/조회수 \d|전환율 \d|팔로워 \d/);
   });
 });

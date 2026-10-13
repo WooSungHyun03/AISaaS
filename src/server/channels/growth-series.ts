@@ -76,6 +76,8 @@ export interface GrowthSeriesPoint {
   date: string;
   /** The most recent known value as of this date (latestBefore) — null if nothing was collected yet by then. */
   value: number | null;
+  /** True when a snapshot was really taken on this day; false means the value is carried over from an earlier day. */
+  measured?: boolean;
 }
 
 export interface GrowthMetricSeries {
@@ -132,9 +134,71 @@ export interface GrowthSeriesResult {
 
 type SnapshotRow = { channel_id: string; metric: string; value: number; recorded_at: string; source: string };
 
+/** PostgREST returns at most 1,000 rows per request; a longer window than that (90 days x several metrics) must be read page by page or the oldest points silently vanish. */
+const SNAPSHOT_PAGE_SIZE = 1_000;
+/** Safety stop: 50 pages is 50,000 snapshots, far more than any business collects in the longest window. */
+const MAX_SNAPSHOT_PAGES = 50;
+
+type SnapshotClient = Awaited<ReturnType<typeof createClient>>;
+
+/** `numeric` columns can come back as strings; a value that is not a finite number is dropped, never charted as 0. */
+function toSnapshotRow(raw: { channel_id: string; metric: string; value: unknown; recorded_at: string; source: string }): SnapshotRow | null {
+  const value = typeof raw.value === "number" ? raw.value : typeof raw.value === "string" && raw.value.trim() !== "" ? Number(raw.value) : NaN;
+  return Number.isFinite(value) ? { channel_id: raw.channel_id, metric: raw.metric, value, recorded_at: raw.recorded_at, source: raw.source } : null;
+}
+
+/**
+ * Every snapshot of these channels from `since` on (oldest first), plus the single latest one BEFORE `since` for each
+ * metric: the comparison "value before the period" must still exist when the channel was last collected a while ago.
+ */
+async function fetchSnapshots(supabase: SnapshotClient, channelIds: string[], since: string): Promise<SnapshotRow[]> {
+  const rows: SnapshotRow[] = [];
+  for (let page = 0; page < MAX_SNAPSHOT_PAGES; page++) {
+    const { data, error } = await supabase
+      .from("marketing_metric_snapshots")
+      .select("channel_id, metric, value, recorded_at, source")
+      .in("channel_id", channelIds)
+      .gte("recorded_at", since)
+      .order("recorded_at", { ascending: true })
+      .order("channel_id", { ascending: true })
+      .range(page * SNAPSHOT_PAGE_SIZE, (page + 1) * SNAPSHOT_PAGE_SIZE - 1);
+    if (error) throw new ChannelsError("DATABASE_ERROR", "채널 성장 지표를 불러오지 못했습니다.", { cause: error });
+    const batch = (data ?? []) as Array<Parameters<typeof toSnapshotRow>[0]>;
+    for (const raw of batch) {
+      const row = toSnapshotRow(raw);
+      if (row) rows.push(row);
+    }
+    if (batch.length < SNAPSHOT_PAGE_SIZE) break;
+  }
+
+  const { data: older, error: olderError } = await supabase
+    .from("marketing_metric_snapshots")
+    .select("channel_id, metric, value, recorded_at, source")
+    .in("channel_id", channelIds)
+    .lt("recorded_at", since)
+    .order("recorded_at", { ascending: false })
+    .limit(SNAPSHOT_PAGE_SIZE);
+  if (olderError) throw new ChannelsError("DATABASE_ERROR", "채널 성장 지표를 불러오지 못했습니다.", { cause: olderError });
+  const have = new Set(rows.map((row) => `${row.channel_id}:${row.metric}:${row.recorded_at}`));
+  const seen = new Set<string>();
+  for (const raw of (older ?? []) as Array<Parameters<typeof toSnapshotRow>[0]>) {
+    const key = `${raw.channel_id}:${raw.metric}`;
+    if (seen.has(key) || have.has(`${key}:${raw.recorded_at}`)) continue;
+    seen.add(key);
+    const row = toSnapshotRow(raw);
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
 /** KST (UTC+9) calendar date for an instant. Exported for reuse by growth-narrative.ts's "already generated today" cache check. */
 export function kstDate(timeMs: number): string {
   return new Date(timeMs + 9 * 3_600_000).toISOString().slice(0, 10);
+}
+
+/** The last millisecond of a KST calendar day (YYYY-MM-DD), as a UTC instant. */
+export function endOfKstDayMs(date: string): number {
+  return Date.parse(`${date}T00:00:00.000Z`) + DAY_MS - 1 - 9 * 3_600_000;
 }
 
 function buildMetricSeries(metric: string, rows: Array<{ value: number; recorded_at: string; source: string }>, nowMs: number, days: number, metricSource?: MetricSource): GrowthMetricSeries {
@@ -145,10 +209,13 @@ function buildMetricSeries(metric: string, rows: Array<{ value: number; recorded
   const previous = latestBefore(rows, currentPeriodStart);
   const absoluteDelta = current !== null && previous !== null ? current - previous : null;
 
+  // One point per KST calendar day: the value as it stood at the END of that day (today: as of now), so a day
+  // with a snapshot shows that snapshot and a quiet day keeps the last known value.
+  const measuredDays = new Set(rows.map((row) => kstDate(Date.parse(row.recorded_at))));
   const points: GrowthSeriesPoint[] = [];
   for (let offset = days - 1; offset >= 0; offset--) {
-    const boundary = nowMs - offset * DAY_MS;
-    points.push({ date: kstDate(boundary), value: latestBefore(rows, boundary) });
+    const date = kstDate(nowMs - offset * DAY_MS);
+    points.push({ date, value: latestBefore(rows, Math.min(nowMs, endOfKstDayMs(date))), measured: measuredDays.has(date) });
   }
 
   return {
@@ -187,7 +254,7 @@ function buildFlowSeries(metric: string, rows: Array<{ value: number; recorded_a
   const points: GrowthSeriesPoint[] = [];
   for (let offset = days - 1; offset >= 0; offset--) {
     const date = kstDate(endMs - offset * DAY_MS);
-    points.push({ date, value: byDate.get(date) ?? null });
+    points.push({ date, value: byDate.get(date) ?? null, measured: byDate.has(date) });
   }
 
   return {
@@ -277,14 +344,9 @@ export async function getChannelGrowthSeries(businessId: string, options: { days
   }
 
   const since = new Date(nowMs - (days * 2 + ANALYTICS_LAG_DAYS + 1) * DAY_MS).toISOString();
-  const { data: snapshotRows, error: snapshotsError } = await supabase
-    .from("marketing_metric_snapshots")
-    .select("channel_id, metric, value, recorded_at, source")
-    .in("channel_id", channels.map((channel) => channel.id))
-    .gte("recorded_at", since);
-  if (snapshotsError) throw new ChannelsError("DATABASE_ERROR", "채널 성장 지표를 불러오지 못했습니다.", { cause: snapshotsError });
+  const channelIds = channels.map((channel) => channel.id);
+  const snapshots = await fetchSnapshots(supabase, channelIds, since);
 
-  const snapshots = (snapshotRows ?? []) as SnapshotRow[];
   const byChannelMetric = new Map<string, SnapshotRow[]>();
   for (const row of snapshots) {
     const key = `${row.channel_id}:${row.metric}`;

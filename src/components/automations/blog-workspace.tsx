@@ -68,6 +68,7 @@ export function BlogWorkspace({
   notes,
   guide,
   guideContext,
+  references = [],
 }: {
   contentId: string;
   title: string;
@@ -78,6 +79,8 @@ export function BlogWorkspace({
   /** Style, photo notes and SEO stored with the run; null for posts made before the guide existed (built from rules then). */
   guide: BlogPublishingGuide | null;
   guideContext: BlogGuideContext;
+  /** The photos the owner uploaded for this post (numbered as in the `[사진 n]` lines), with a preview where the file still exists. */
+  references?: Array<{ number: number; label: string; summary: string; previewUrl: string | null }>;
 }) {
   const [saved, setSaved] = useState({ title, markup, editedAt });
   const [target, setTarget] = useState<Target>(platform);
@@ -247,7 +250,19 @@ export function BlogWorkspace({
             <ol className="space-y-3">
               {placements.map((item) => (
                 <li key={item.number} className="rounded-2xl border bg-card p-5">
-                  <div className="flex flex-wrap items-center gap-2"><Badge variant="brand">이미지 {item.number}</Badge><span className="text-sm font-bold">{item.type}</span><Badge variant="secondary">권장 비율 {item.ratio}</Badge>{item.ownedImage ? <Badge variant="success">올려둔 ‘{item.ownedImage}’ 활용</Badge> : <Badge variant="outline">직접 촬영 필요</Badge>}</div>
+                  <div className="flex flex-wrap items-center gap-2"><Badge variant="brand">이미지 {item.number}</Badge><span className="text-sm font-bold">{item.type}</span><Badge variant="secondary">권장 비율 {item.ratio}</Badge>{item.reference ? <Badge variant="success">올려주신 {item.reference}번 사진 활용</Badge> : item.ownedImage ? <Badge variant="success">올려둔 ‘{item.ownedImage}’ 활용</Badge> : <Badge variant="outline">직접 촬영 필요</Badge>}</div>
+                  {item.reference ? (() => {
+                    const photo = references.find((reference) => reference.number === item.reference);
+                    return photo ? (
+                      <div className="mt-3 flex items-center gap-3 rounded-xl bg-muted/50 p-2.5">
+                        {photo.previewUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- signed Storage URL
+                          <img src={photo.previewUrl} alt={photo.label || photo.summary || `참고 사진 ${photo.number}`} className="size-16 shrink-0 rounded-lg object-cover" loading="lazy" />
+                        ) : null}
+                        <p className="min-w-0 text-[13px] leading-5 text-muted-foreground"><strong className="text-foreground">{photo.number}번 · {photo.label || photo.summary || "사진"}</strong>{photo.summary && photo.summary !== photo.label ? <><br />AI가 본 모습: {photo.summary}</> : null}</p>
+                      </div>
+                    ) : null;
+                  })() : null}
                   <dl className="mt-3 grid gap-x-6 gap-y-2 text-sm leading-6 sm:grid-cols-[7rem_1fr]">
                     <dt className="font-semibold text-muted-foreground">넣을 위치</dt><dd>{item.sectionLabel} · {item.afterLabel}{item.afterExcerpt ? <span className="text-muted-foreground"> (“{item.afterExcerpt}…” 다음)</span> : null}</dd>
                     <dt className="font-semibold text-muted-foreground">어떤 이미지</dt><dd>{item.description}</dd>

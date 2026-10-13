@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import type { ConnectionStatus, IntegrationProvider, Json } from "@/types/domain";
 import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/youtube-scopes";
+import type { IntegrationConfigStatus, OAuthProvider } from "@/server/connectors/config-status";
 
 export interface SafeConnection {
   id: string;
@@ -73,13 +74,20 @@ function DisconnectButton({ businessId, provider }: { businessId: string; provid
   />;
 }
 
-function IntegrationRow({ icon, title, description, connection, children }: { icon: ReactNode; title: string; description: string; connection?: SafeConnection; children: ReactNode }) {
+/** Without the provider's OAuth credentials the button is honestly disabled instead of bouncing the user back with an error. */
+function ConnectButton({ configured, href, connected, label }: { configured: boolean; href: string; connected: boolean; label: string }) {
+  if (!configured) return <Button type="button" size="sm" variant="outline" disabled aria-disabled="true">연동 준비 중</Button>;
+  return <Button asChild size="sm" variant={connected ? "outline" : "default"}><a href={href}>{connected ? <RefreshCw aria-hidden="true" /> : null}{connected ? "다시 연결" : label}</a></Button>;
+}
+
+function IntegrationRow({ icon, title, description, connection, setup, children }: { icon: ReactNode; title: string; description: string; connection?: SafeConnection; setup?: ReactNode; children: ReactNode }) {
   return <li className="grid gap-4 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] lg:items-center lg:gap-6">
     <div className="flex items-start gap-4">
       <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-primary">{icon}</span>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2"><h3 className="font-bold">{title}</h3><StatusBadge connection={connection} /></div>
         <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+        {setup}
       </div>
     </div>
     <div className="min-w-0 text-sm">
@@ -89,7 +97,18 @@ function IntegrationRow({ icon, title, description, connection, children }: { ic
   </li>;
 }
 
-export function IntegrationSettings({ businessId, connections }: { businessId: string; connections: SafeConnection[] }) {
+/** Shown to admins only: which variables and console settings are still missing for this provider. */
+function SetupDetails({ provider, status }: { provider: OAuthProvider; status: IntegrationConfigStatus }) {
+  const where = provider === "youtube" ? "Google Cloud Console → 사용자 인증 정보 → OAuth 클라이언트(웹 애플리케이션)의 ‘승인된 리디렉션 URI’" : "Meta 개발자 앱 → Instagram API(Instagram 로그인) → 비즈니스 로그인 설정의 ‘OAuth 리디렉션 URL’";
+  return <div className="mt-3 rounded-lg border border-dashed bg-muted/40 px-3.5 py-3 text-[13px] leading-6 text-muted-foreground">
+    <p className="font-semibold text-foreground">관리자용 설정 안내</p>
+    <p>비어 있는 환경변수: <code>{status.missing.join(", ")}</code> (Vercel → Settings → Environment Variables에 넣고 다시 배포)</p>
+    <p>{where}에 <code className="break-all">{status.redirectUri}</code> 를 등록해요.</p>
+    <p>요청 권한: <code className="break-all">{status.scopes.join(", ")}</code></p>
+  </div>;
+}
+
+export function IntegrationSettings({ businessId, connections, configStatus, showSetupDetails = false }: { businessId: string; connections: SafeConnection[]; configStatus: Record<OAuthProvider, IntegrationConfigStatus>; showSetupDetails?: boolean }) {
   const get = (provider: IntegrationProvider) => connections.find((connection) => connection.provider === provider && connection.status !== "DISCONNECTED");
   const instagram = get("instagram");
   const youtube = get("youtube");
@@ -97,12 +116,12 @@ export function IntegrationSettings({ businessId, connections }: { businessId: s
 
   // Only what the product uses today: YouTube (Shorts posting, growth numbers) and Instagram (Reels).
   return <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
-    <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description={youtubeNeedsAnalyticsConsent ? "숏폼을 내 채널에 비공개로 올려요. 조회수·시청 시간·구독자 증감을 성장 리포트에 보려면 ‘다시 연결’에서 Analytics 권한도 허용해주세요." : "숏폼을 내 채널에 비공개로 올리고, 성장 리포트에 조회수·시청 시간·구독자 증감을 보여줘요."} connection={youtube}>
-      <Button asChild size="sm" variant={youtube ? "outline" : "default"}><a href={`/api/integrations/youtube/connect?businessId=${encodeURIComponent(businessId)}`}>{youtube ? <RefreshCw aria-hidden="true" /> : null}{youtube ? "다시 연결" : "YouTube 연결"}</a></Button>
+    <IntegrationRow icon={<Video className="size-5" aria-hidden="true" />} title="YouTube" description={youtubeNeedsAnalyticsConsent ? "숏폼을 내 채널에 비공개로 올려요. 조회수·시청 시간·구독자 증감을 성장 리포트에 보려면 ‘다시 연결’에서 Analytics 권한도 허용해주세요." : "숏폼을 내 채널에 비공개로 올리고, 성장 리포트에 조회수·시청 시간·구독자 증감을 보여줘요."} connection={youtube} setup={showSetupDetails && !configStatus.youtube.configured ? <SetupDetails provider="youtube" status={configStatus.youtube} /> : undefined}>
+      <ConnectButton configured={configStatus.youtube.configured} href={`/api/integrations/youtube/connect?businessId=${encodeURIComponent(businessId)}`} connected={Boolean(youtube)} label="YouTube 연결" />
       {youtube && <DisconnectButton businessId={businessId} provider="youtube" />}
     </IntegrationRow>
-    <IntegrationRow icon={<Camera className="size-5" aria-hidden="true" />} title="인스타그램" description="만든 숏폼을 인스타그램 릴스로 올릴 때 연결해요. 비즈니스·크리에이터 계정이 필요해요." connection={instagram}>
-      <Button asChild size="sm" variant={instagram ? "outline" : "default"}><a href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`}>{instagram ? <RefreshCw aria-hidden="true" /> : null}{instagram ? "다시 연결" : "인스타그램 연결"}</a></Button>
+    <IntegrationRow icon={<Camera className="size-5" aria-hidden="true" />} title="인스타그램" description="만든 숏폼을 인스타그램 릴스로 올릴 때 연결해요. 비즈니스·크리에이터 계정이 필요해요." connection={instagram} setup={showSetupDetails && !configStatus.instagram.configured ? <SetupDetails provider="instagram" status={configStatus.instagram} /> : undefined}>
+      <ConnectButton configured={configStatus.instagram.configured} href={`/api/integrations/instagram/connect?businessId=${encodeURIComponent(businessId)}`} connected={Boolean(instagram)} label="인스타그램 연결" />
       {instagram && <DisconnectButton businessId={businessId} provider="instagram" />}
     </IntegrationRow>
   </ul>;

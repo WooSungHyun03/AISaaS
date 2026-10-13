@@ -15,6 +15,8 @@ Production uses paid services, all selected by environment variables. Secrets ar
    Set both **together** — `anthropic` without a key makes every generation fail with "AI 서비스 연결 정보가 올바르지 않습니다".
 3. Redeploy (env changes apply to new deployments).
 
+**The mock AI never serves customers.** `AI_PROVIDER=mock` (the local default) answers with canned text and a `[MOCK AI RESPONSE]` placeholder for anything unknown. In a production build (`NODE_ENV=production`) the mock is blocked: generation fails with "AI 서비스가 아직 연결되지 않아…" and the credit is returned, unless `ALLOW_MOCK_AI=true` is set on purpose (the demo Docker image sets it). Free-form AI text on screens (e.g. the growth report's channel summary) is checked for the placeholder and falls back to a summary built only from the measured numbers, so a mock string can never be shown.
+
 Models per pipeline step (`src/server/ai/models.ts`; change one without a deploy with `AI_MODEL_PLANNER` / `_WRITER` / `_REVIEWER` / `_VISION`):
 
 | step | default model | $/MTok in / out |

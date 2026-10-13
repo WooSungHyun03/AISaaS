@@ -40,7 +40,7 @@ Each step can be a single long model call, so a blog run is a **deferred run**: 
 ## Limits
 
 - Fonts cannot be chosen: Naver's editor ignores pasted font families. Size, bold, colour and highlight survive paste; if a style is dropped, the plain text and photo spots are still correct.
-- The AI never sees the owner's photos; it writes photo *spots* (what to shoot and where). The owner puts real photos in.
+- The AI writes photo *spots* (what to shoot and where); it never creates images. If the owner uploaded reference photos (see below) it also reads them and says which photo belongs in which spot. The owner still puts the photos into the editor.
 - Real posts get better with real details: fill in **꼭 넣고 싶은 내용** (signature item, story, event, parking) — that is the only source of specifics.
 
 
@@ -56,3 +56,15 @@ Every post carries a guide made **in the same run** (one Sonnet call, no extra c
 ## Shorts posting text — `src/server/shorts/publishing-metadata.ts`
 
 Written from the planned script (after the plan, same run, no extra credit) and stored in `output.publishing`; the owner's edits live in `content_history.publishing` (migration 0072, written by a server action like the blog edit). A title, alternative title or description must share real wording with the video's script (bigram overlap) and may not contain unprovable or sensational words, otherwise the video's own hook is used. YouTube gets title / description (with `#Shorts`, ≤ 5 hashtags) / tags (API field); Instagram gets one caption (first line, text, CTA, ≤ 8 hashtags). "지금 게시" and scheduled posts send the edited text.
+
+
+## Reference photos — `src/components/automations/reference-photos.tsx`, `src/server/shorts/describe-images.ts`
+
+The blog page has a "글에 쓸 참고 사진" card per blog automation (same component and Server Actions as the Shorts materials, `src/app/(app)/shorts/actions.ts`):
+
+- Up to 10 photos (JPG/PNG/WEBP, 10 MB each), drag & drop or file picker, a preview and an optional description per photo *before* anything is sent, remove one / add more, per-file status and errors, "이전에 올린 사진 쓰기" (copies a photo uploaded for another automation of the same business; the copy is independent).
+- Browser → Storage goes straight to the private `shorts-references` bucket through a one-time signed upload URL; the server then checks the owner, the path prefix `<user>/<automation>/assets/`, the file's real bytes and the limits (`registerShortsAsset`). The bucket has no RLS policy for end users: only the service role (and the signed URLs it hands out) can read or write. Previews are 30-minute signed URLs.
+- The photos are stored in the blog automation's `config.assets` (the settings form keeps them when it saves).
+- **Run**: before planning, one vision call (`vision` role, Sonnet, `blog.photos`) describes the photos that have no description yet and remembers the answer (`withImageAnalysis`, shared with Shorts). The description goes into the FACTS ("사장님이 올린 사진 — 사진 1번 [product]: …") so the writer may say what is visible and nothing more, and the fact check accepts it. If the look fails the photos are used with the owner's labels.
+- **Placement**: the plan gives each section's photo spot an optional `photoRef`; the writer's photo blocks carry `ref` (markup `[사진 2] 어떤 사진 | 캡션`). A ref to a photo that does not exist or a second use of one photo is dropped; where the writer left the ref out the plan's choice is filled in; photos that found no spot are listed in the quality notes. The image guide tab shows the placed photo next to its spot; the HTML placeholder says "올려주신 참고 사진 N번".
+- **History**: `output.references` (number, label, role, what the AI saw, private path) is shown as "사용한 참고 자료" on the run page, with a preview while the file still exists. Shorts runs record the same list.

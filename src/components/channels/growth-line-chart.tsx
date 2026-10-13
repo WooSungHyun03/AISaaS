@@ -1,3 +1,6 @@
+"use client";
+
+import { useId, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
 import type { GrowthSeriesPoint } from "@/server/channels/growth-series";
 
@@ -35,34 +38,136 @@ export function buildLinePath(scaled: ChartPoint[]): string {
   return scaled.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(" ");
 }
 
-const WIDTH = 300;
-const HEIGHT = 96;
+/** "2026-10-09" -> "10/9": what fits under a small chart. */
+export function shortDate(date: string): string {
+  const [, month, day] = date.split("-");
+  return month && day ? `${Number(month)}/${Number(day)}` : date;
+}
+
+/** Numbers as a Korean owner reads them: 1,234 / 1.2만, never an unlabelled raw float. */
+export function formatMetricValue(value: number): string {
+  if (Math.abs(value) >= 100_000) return `${(Math.round(value / 1_000) / 10).toLocaleString("ko-KR")}만`;
+  return (Math.round(value * 10) / 10).toLocaleString("ko-KR");
+}
+
+const WIDTH = 320;
+const HEIGHT = 150;
+const PLOT = { left: 44, right: 10, top: 12, bottom: 24 };
+
+/** Chart geometry for one metric: the plot box, the scaled points and where the value labels go. Pure, so it is tested without a browser. */
+export function buildChartModel(points: GrowthSeriesPoint[]) {
+  const plotWidth = WIDTH - PLOT.left - PLOT.right;
+  const plotHeight = HEIGHT - PLOT.top - PLOT.bottom;
+  const defined = points.filter((point): point is GrowthSeriesPoint & { value: number } => point.value !== null);
+  if (defined.length === 0) return null;
+  const values = defined.map((point) => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const scaled = scaleGrowthPoints(points, { width: plotWidth, height: plotHeight, paddingY: 6 }).map((point) => ({ x: point.x + PLOT.left, y: point.y + PLOT.top }));
+  const indexes = points.map((point, index) => (point.value === null ? -1 : index)).filter((index) => index >= 0);
+  const byIndex = new Map(indexes.map((index, position) => [index, scaled[position]]));
+  return { plotWidth, plotHeight, min, max, flat: min === max, scaled, byIndex, indexes };
+}
 
 /**
- * Dependency-free, responsive (viewBox + `preserveAspectRatio="none"` lets
- * CSS stretch it, no JS measurement/ResizeObserver needed) SVG line chart
- * for one metric's growth-series points. Accessible via both an `aria-label`
- * summary on the `<svg>` itself and a redundant visually-hidden `<p>` (some
- * screen readers handle SVG labelling inconsistently — same belt-and-braces
- * pattern as the weekly bar chart on the old growth-report page).
+ * A dependency-free SVG line chart for one metric of a channel: a labelled value axis (low / middle / high), dates
+ * under the first, middle and last day, dots on the days a snapshot was really taken, and a tooltip that follows the
+ * pointer or the arrow keys. The drawing keeps its aspect ratio (no stretched dots) and scales with its container,
+ * so it is the same chart on a phone and on a desktop.
  */
 export function GrowthLineChart({ points, label, unit = "", className }: { points: GrowthSeriesPoint[]; label: string; unit?: string; className?: string }) {
-  const defined = points.filter((point): point is { date: string; value: number } => point.value !== null);
+  const titleId = useId();
+  const [active, setActive] = useState<number | null>(null);
+  const model = buildChartModel(points);
 
-  if (defined.length === 0) {
-    return <p className={cn("flex h-24 items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground", className)}>데이터 없음</p>;
+  if (!model) {
+    return <p className={cn("flex h-28 items-center justify-center rounded-lg bg-muted px-3 text-center text-sm text-muted-foreground", className)}>아직 그래프로 보여드릴 데이터가 없어요</p>;
   }
 
-  const scaled = scaleGrowthPoints(points, { width: WIDTH, height: HEIGHT });
-  const summary = `${label} 추이: ${defined.map((point) => `${point.date} ${point.value}${unit}`).join(", ")}`;
+  const { scaled, byIndex, indexes, min, max, flat } = model;
+  const defined = points.filter((point) => point.value !== null);
+  const summary = `${label} 추이: ${defined.map((point) => `${point.date} ${formatMetricValue(point.value!)}${unit}`).join(", ")}`;
   const last = scaled[scaled.length - 1];
+  const middleValue = (min + max) / 2;
+  const yFor = (value: number) => (flat ? PLOT.top + model.plotHeight / 2 : PLOT.top + 6 + (1 - (value - min) / (max - min)) * (model.plotHeight - 12));
+  const activePoint = active !== null ? points[active] : null;
+  const activeXY = active !== null ? byIndex.get(active) : undefined;
+
+  const nearestIndex = (clientX: number, rect: DOMRect): number => {
+    const x = ((clientX - rect.left) / rect.width) * WIDTH;
+    let best = indexes[0];
+    let bestDistance = Infinity;
+    for (const index of indexes) {
+      const point = byIndex.get(index)!;
+      const distance = Math.abs(point.x - x);
+      if (distance < bestDistance) { best = index; bestDistance = distance; }
+    }
+    return best;
+  };
+  const onPointer = (event: PointerEvent<SVGSVGElement>) => setActive(nearestIndex(event.clientX, event.currentTarget.getBoundingClientRect()));
+  const onKey = (event: KeyboardEvent<SVGSVGElement>) => {
+    if (event.key === "Escape") return setActive(null);
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
+    event.preventDefault();
+    const position = active === null ? indexes.length - 1 : indexes.indexOf(active);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? indexes.length - 1 : Math.min(indexes.length - 1, Math.max(0, position + (event.key === "ArrowRight" ? 1 : -1)));
+    setActive(indexes[next]);
+  };
+
+  const midIndex = Math.floor((points.length - 1) / 2);
+  const xLabels = [{ index: 0, anchor: "start" as const }, { index: midIndex, anchor: "middle" as const }, { index: points.length - 1, anchor: "end" as const }];
+  const xFor = (index: number) => PLOT.left + (index / Math.max(points.length - 1, 1)) * model.plotWidth;
+  const ticks = flat ? [{ value: min, y: yFor(min) }] : [{ value: max, y: yFor(max) }, { value: middleValue, y: yFor(middleValue) }, { value: min, y: yFor(min) }];
 
   return (
-    <div className={className}>
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" className="h-24 w-full" role="img" aria-label={summary}>
-        {scaled.length > 1 ? <path d={buildLinePath(scaled)} fill="none" stroke="var(--primary)" strokeWidth={2} vectorEffect="non-scaling-stroke" /> : null}
-        <circle cx={last.x} cy={last.y} r={3} fill="var(--primary)" />
+    <div className={cn("relative", className)}>
+      <svg
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        className="h-auto w-full touch-pan-y select-none"
+        role="img"
+        aria-labelledby={titleId}
+        tabIndex={0}
+        onPointerMove={onPointer}
+        onPointerDown={onPointer}
+        onPointerLeave={() => setActive(null)}
+        onKeyDown={onKey}
+        onFocus={() => setActive((current) => current ?? indexes[indexes.length - 1])}
+        onBlur={() => setActive(null)}
+      >
+        <title id={titleId}>{summary}</title>
+        {ticks.map((tick) => (
+          <g key={tick.y}>
+            <line x1={PLOT.left} x2={WIDTH - PLOT.right} y1={tick.y} y2={tick.y} stroke="var(--border)" strokeWidth={1} strokeDasharray="3 3" />
+            <text x={PLOT.left - 6} y={tick.y + 3.5} textAnchor="end" fontSize={10} fill="var(--muted-foreground)">{formatMetricValue(tick.value)}</text>
+          </g>
+        ))}
+        {xLabels.map(({ index, anchor }) => (
+          <text key={index} x={xFor(index)} y={HEIGHT - 6} textAnchor={anchor} fontSize={10} fill="var(--muted-foreground)">{shortDate(points[index].date)}</text>
+        ))}
+        {scaled.length > 1 ? <path d={buildLinePath(scaled)} fill="none" stroke="var(--primary)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" /> : null}
+        {indexes.map((index) => {
+          const point = byIndex.get(index)!;
+          return points[index].measured === false ? null : <circle key={index} cx={point.x} cy={point.y} r={indexes.length > 40 ? 1.6 : 2.6} fill="var(--primary)" />;
+        })}
+        <circle cx={last.x} cy={last.y} r={4} fill="var(--primary)" stroke="var(--card)" strokeWidth={1.5} />
+        {activeXY ? (
+          <g pointerEvents="none">
+            <line x1={activeXY.x} x2={activeXY.x} y1={PLOT.top} y2={HEIGHT - PLOT.bottom} stroke="var(--primary)" strokeWidth={1} opacity={0.4} />
+            <circle cx={activeXY.x} cy={activeXY.y} r={5} fill="var(--card)" stroke="var(--primary)" strokeWidth={2} />
+          </g>
+        ) : null}
       </svg>
+      {activePoint && activeXY ? (
+        <div
+          role="status"
+          className="pointer-events-none absolute -top-1 z-10 -translate-y-full whitespace-nowrap rounded-lg border bg-popover px-2.5 py-1.5 text-xs shadow-md"
+          style={{ left: `${Math.min(Math.max((activeXY.x / WIDTH) * 100, 14), 86)}%`, transform: "translate(-50%, -100%)" }}
+        >
+          <p className="font-semibold">{shortDate(activePoint.date)}</p>
+          <p className="tabular">{label} {formatMetricValue(activePoint.value!)}{unit}</p>
+          {activePoint.measured === false ? <p className="text-muted-foreground">이날은 측정이 없어 이전 값이에요</p> : null}
+        </div>
+      ) : null}
       <p className="sr-only">{summary}</p>
     </div>
   );

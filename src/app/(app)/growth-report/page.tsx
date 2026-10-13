@@ -26,7 +26,7 @@ function publishedCount(output: unknown): number {
 }
 
 function SourceBadge({ source }: { source: MetricSource }) {
-  return <Badge variant={source === "UNAVAILABLE" ? "secondary" : source === "ESTIMATED" ? "warning" : "outline"}>{SOURCE_LABEL[source]}</Badge>;
+  return <Badge variant={source === "ESTIMATED" ? "warning" : "outline"}>{SOURCE_LABEL[source]}</Badge>;
 }
 
 function Delta({ comparison, unit = "건", days }: { comparison: Comparison; unit?: string; days: number }) {
@@ -68,7 +68,7 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
   const heading = (
     <PageHeader
       title="성장 리포트"
-      description="채널별 구독자·게시 활동이 어떻게 변하고 있는지 먼저 보여드리고, 아래에 서비스 내부 제작·캘린더 기록도 함께 보여드려요. 조회수 같은 외부 성과는 확인할 수 있을 때만 보여드려요."
+      description="연결한 채널의 구독자·게시 활동이 어떻게 변하고 있는지 먼저 보여드리고, 아래에 서비스 안의 제작·캘린더 기록도 함께 보여드려요."
     />
   );
   if (!business) {
@@ -264,19 +264,6 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
           ) : null}
         </>
       )}
-
-      <section aria-labelledby="external-title" className="space-y-3">
-        <h2 id="external-title" className="flex items-center gap-2 text-lg font-extrabold tracking-[-0.03em]">외부 성과 지표 <SourceBadge source="UNAVAILABLE" /></h2>
-        <p className="text-[15px] leading-7 text-muted-foreground">아래 값은 지금 가져올 수 없어서 비워 뒀어요. 대신 추정한 숫자를 보여드리지 않아요.</p>
-        <ul className="divide-y overflow-hidden rounded-2xl border bg-card">
-          {report.unavailable.map((entry) => (
-            <li key={entry.key} className="grid gap-1 px-5 py-3.5 sm:grid-cols-[10rem_1fr] sm:gap-4">
-              <span className="font-semibold">{entry.label}</span>
-              <span className="text-sm leading-6 text-muted-foreground">{entry.reason}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
       </section>
     </div>
   );

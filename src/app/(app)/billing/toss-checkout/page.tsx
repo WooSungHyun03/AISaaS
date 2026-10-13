@@ -3,6 +3,7 @@ import { FormMessage } from "@/components/ui/form-message";
 import { TossCheckoutButton } from "@/components/billing/toss-checkout-button";
 import { createClient } from "@/lib/supabase/server";
 import { clientEnv } from "@/lib/env/client";
+import { tossClientKey } from "@/server/billing/toss-keys";
 import { getCheckoutSession } from "@/server/billing/checkout-sessions";
 import { getProductConfig, isProductId } from "@/server/billing/products";
 import { getProductOrderByCheckoutSession } from "@/server/billing/orders";
@@ -20,10 +21,10 @@ export default async function TossCheckoutPage({ searchParams }: PageProps<"/bil
   if (checkout.status === "SUCCEEDED") redirect(`/billing/success?session=${checkout.id}`);
   if (checkout.status === "CANCELED") redirect("/billing/fail?code=PAY_PROCESS_CANCELED");
 
-  const clientKey = clientEnv.NEXT_PUBLIC_TOSS_CLIENT_KEY;
-  if (!clientKey || !clientKey.startsWith("test_")) {
-    redirect("/billing/fail?code=MISSING_API_KEY&message=Toss%20test%20client%20key%20is%20not%20configured");
-  }
+  // The key may be stored as NEXT_PUBLIC_TOSS_CLIENT_KEY or TOSS_CLIENT_KEY; either way the checkout needs a test key.
+  const clientKey = tossClientKey();
+  if (!clientKey) redirect("/billing/fail?code=BILLING_CLIENT_KEY_MISSING");
+  if (!clientKey.startsWith("test_")) redirect("/billing/fail?code=BILLING_KEYS_NOT_TEST");
 
   if (!isProductId(checkout.product_id)) redirect("/billing");
   const product = getProductConfig(checkout.product_id);

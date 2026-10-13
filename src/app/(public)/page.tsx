@@ -12,12 +12,6 @@ const FEATURES = [
   { title: "AI 숏폼 제작", description: "참고 이미지로 대본과 장면을 짜고 세로형 숏폼 영상을 만들어드려요. 올리기 전에 미리 볼 수 있어요.", icon: Video, href: "/shorts", cta: "영상 만들러 가기", free: false },
 ];
 
-const STEPS = [
-  { title: "가입하고 가게를 알려주세요", description: "업체명과 업종, 홍보하려는 대상을 적어요. 홈페이지가 없어도 괜찮아요." },
-  { title: "무료 진단으로 현재 상태를 확인해요", description: "마케팅 점수와 먼저 해볼 일을 확인하고, 캘린더에 올릴 날을 정해요." },
-  { title: "블로그 글과 숏폼을 만들어요", description: "이용권으로 필요한 만큼 콘텐츠를 만들고, 확인한 뒤 활용하세요." },
-];
-
 const FAQS = [
   {
     q: "Easy Marketing으로 어떤 일을 할 수 있나요?",
@@ -118,22 +112,6 @@ export default function LandingPage() {
               </li>
             ))}
           </ul>
-        </div>
-      </section>
-
-      {/* 이용 방법 */}
-      <section id="how" className="scroll-mt-20" aria-labelledby="how-title">
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:py-20">
-          <h2 id="how-title" className="max-w-xl text-3xl font-extrabold tracking-[-0.04em] sm:text-4xl">이렇게 시작해요</h2>
-          <ol className="mt-10 grid gap-x-8 gap-y-10 sm:grid-cols-3">
-            {STEPS.map((step, index) => (
-              <li key={step.title}>
-                <span className="flex size-9 items-center justify-center rounded-full bg-ink text-sm font-bold text-white">{index + 1}</span>
-                <h3 className="mt-5 text-lg font-bold">{step.title}</h3>
-                <p className="mt-2 text-[15px] leading-7 text-muted-foreground">{step.description}</p>
-              </li>
-            ))}
-          </ol>
         </div>
       </section>
 

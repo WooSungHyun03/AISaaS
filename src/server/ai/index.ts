@@ -1,5 +1,6 @@
 import "server-only";
 import { serverEnv } from "@/lib/env/server";
+import { AIProviderError } from "./errors";
 import type { AIProvider } from "./provider";
 import { MockAIProvider } from "./providers/mock";
 import { OpenAIProvider } from "./providers/openai";
@@ -8,9 +9,23 @@ import { AnthropicProvider } from "./providers/anthropic";
 
 let cachedProvider: AIProvider | undefined;
 
+/** The mock provider is for development, tests and demo images: a production deployment must not serve its placeholders. */
+export function isMockAiBlocked(): boolean {
+  return serverEnv.AI_PROVIDER === "mock" && process.env.NODE_ENV === "production" && serverEnv.ALLOW_MOCK_AI !== "true";
+}
+
+/** Stands in for the mock provider in production: every call fails with a clear, retryable-by-configuration error. */
+class AiNotConnectedProvider implements AIProvider {
+  readonly name = "not-connected";
+  async generateText(): Promise<never> {
+    throw new AIProviderError("MISSING_API_KEY", "ai", "AI service is not connected: AI_PROVIDER is still \"mock\" in production. Set AI_PROVIDER=anthropic and ANTHROPIC_API_KEY.");
+  }
+}
+
 /** Picks the active AIProvider based on AI_PROVIDER. Cached per process. */
 export function getAIProvider(): AIProvider {
   if (cachedProvider) return cachedProvider;
+  if (isMockAiBlocked()) return new AiNotConnectedProvider();
 
   switch (serverEnv.AI_PROVIDER) {
     case "openai":

@@ -9,6 +9,10 @@ import { isMissingSchemaError } from "@/server/shared/db-errors";
 
 export type CheckoutStartFailureCode =
   | "BILLING_NOT_CONFIGURED"
+  | "BILLING_CLIENT_KEY_MISSING"
+  | "BILLING_SECRET_KEY_MISSING"
+  | "BILLING_KEYS_NOT_TEST"
+  | "BILLING_PROVIDER_MOCK"
   | "BILLING_SCHEMA_OUTDATED"
   | "BILLING_DB_ERROR"
   | "CHECKOUT_START_FAILED";
@@ -29,6 +33,12 @@ export function classifyCheckoutStartError(error: unknown): CheckoutStartFailure
   const message = error instanceof Error ? error.message : typeof error === "object" && error !== null && typeof (error as { message?: unknown }).message === "string" ? (error as { message: string }).message : "";
 
   if (isMissingSchemaError(error)) return { code: "BILLING_SCHEMA_OUTDATED", detail: dbCode ?? "schema" };
+  // Each missing or wrong key has its own code, so support is told which one to fix instead of "not configured".
+  const problem = typeof error === "object" && error !== null ? (error as { problem?: unknown }).problem : undefined;
+  if (problem === "CLIENT_KEY_MISSING") return { code: "BILLING_CLIENT_KEY_MISSING", detail: "client_key" };
+  if (problem === "SECRET_KEY_MISSING") return { code: "BILLING_SECRET_KEY_MISSING", detail: "secret_key" };
+  if (problem === "KEYS_NOT_TEST") return { code: "BILLING_KEYS_NOT_TEST", detail: "key_mode" };
+  if (/모의 결제는 운영 환경/.test(message)) return { code: "BILLING_PROVIDER_MOCK", detail: "mock_in_production" };
   if (CONFIGURATION_MESSAGE.test(message)) return { code: "BILLING_NOT_CONFIGURED", detail: error instanceof Error ? error.name : "ConfigError" };
   if (dbCode) return { code: "BILLING_DB_ERROR", detail: dbCode };
   return { code: "CHECKOUT_START_FAILED", detail: error instanceof Error ? error.name : "UnknownError" };

@@ -10,39 +10,26 @@ import {
   registerShortsAsset,
   removeShortsAsset,
   saveShortsSettings,
-  setAssetRole,
 } from "@/app/(app)/shorts/actions";
+import { ReferencePhotos } from "@/components/automations/reference-photos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import {
   ASSET_LABEL_MAX_LENGTH,
   ASSET_LIMITS,
-  ASSET_ROLES,
   SHORTS_BRIEF_MAX_LENGTH,
   SHORTS_DURATION,
   SHORTS_ASSET_KINDS,
   VOICE_MODES,
+  type AssetView,
   type ShortsAssetKind,
-  type ShortsAssetRole,
   type VoiceMode,
 } from "@/types/shorts-reference";
 
-export interface AssetView {
-  id: string;
-  kind: ShortsAssetKind;
-  origin: "upload" | "mascot";
-  label: string;
-  role: ShortsAssetRole | null;
-  /** What the AI saw in a photo. */
-  summary: string;
-  durationSec: number | null;
-  /** Signed URL for uploads, `/shorts-mascot/...` for the mascot. Null when it could not be created. */
-  previewUrl: string | null;
-}
+export type { AssetView };
 
 const MIME_BY_EXTENSION: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", mp4: "video/mp4", mov: "video/quicktime", mp3: "audio/mpeg", wav: "audio/wav", svg: "image/svg+xml" };
 
@@ -60,8 +47,7 @@ const ACCEPT: Record<ShortsAssetKind, string> = {
 
 const KIND_ICON = { image: ImagePlus, video: Film, audio: AudioLines, logo: Stamp } as const;
 
-const KIND_HELP: Record<ShortsAssetKind, string> = {
-  image: "광고에 나올 상품·메뉴·매장·사람 사진이에요. AI가 이 사진 속 모습을 그대로 살려 영상을 만들어요.",
+const KIND_HELP: Record<Exclude<ShortsAssetKind, "image">, string> = {
   video: "움직임이나 분위기를 참고할 짧은 영상이에요. 길이만큼 제작 비용이 더 들어서, 꼭 필요할 때만 올려주세요.",
   audio: "배경음악 분위기를 참고할 음원이에요.",
   logo: "영상 위에 올리는 로고예요. 영상 속 상품에는 섞이지 않아요.",
@@ -145,7 +131,7 @@ export function ShortsAssetsCard({
     }
   };
 
-  const section = (kind: ShortsAssetKind) => {
+  const section = (kind: Exclude<ShortsAssetKind, "image">) => {
     const limits = ASSET_LIMITS[kind];
     const items = assets.filter((asset) => asset.kind === kind);
     const full = items.length >= limits.max;
@@ -198,21 +184,6 @@ export function ShortsAssetsCard({
                   </div>
                 )}
                 {kind !== "audio" ? <p className="truncate px-2.5 pt-2 text-xs font-semibold" title={asset.summary || asset.label}>{index + 1}. {asset.label || asset.summary || SHORTS_ASSET_KINDS[kind]}{asset.durationSec ? ` · ${asset.durationSec}초` : ""}</p> : null}
-                {kind === "image" ? (
-                  asset.origin === "mascot" ? (
-                    <p className="px-2.5 pb-2 text-[11px] text-muted-foreground">{ASSET_ROLES.character}</p>
-                  ) : (
-                    <div className="px-1.5 pb-1.5 pt-0.5">
-                      <NativeSelect aria-label={`사진 ${index + 1} 쓰임새`} value={asset.role ?? ""} disabled={busy} className="h-8 text-xs" onChange={(event) => {
-                        const next = event.target.value;
-                        if (next in ASSET_ROLES) startTransition(async () => finish((await setAssetRole(automationId, asset.id, next)).error, "사진의 쓰임새를 바꿨어요."));
-                      }}>
-                        <option value="" disabled>AI가 구분해요</option>
-                        {(Object.keys(ASSET_ROLES) as ShortsAssetRole[]).map((key) => <option key={key} value={key}>{ASSET_ROLES[key]}</option>)}
-                      </NativeSelect>
-                    </div>
-                  )
-                ) : null}
                 <button
                   type="button"
                   disabled={busy}
@@ -247,7 +218,17 @@ export function ShortsAssetsCard({
         <Input id="asset-label" value={label} maxLength={ASSET_LABEL_MAX_LENGTH} disabled={busy} onChange={(event) => setLabel(event.target.value)} placeholder="예: 시그니처 소금빵 / 매장 입구 / 포장 라벨" />
       </div>
 
-      <div className="mt-4 grid gap-4">{(["image", "video", "audio", "logo"] as const).map(section)}</div>
+      <div className="mt-4 grid gap-4">
+        <ReferencePhotos
+          automationId={automationId}
+          assets={assets}
+          disabled={busy}
+          showRole
+          heading="사진"
+          description="광고에 나올 상품·메뉴·매장·사람 사진이에요. AI가 이 사진 속 모습을 그대로 살려 영상을 만들어요."
+        />
+        {(["video", "audio", "logo"] as const).map(section)}
+      </div>
 
       <div className="mt-6 space-y-5 border-t pt-5">
         <div className="space-y-2">

@@ -15,6 +15,9 @@ export function mockBlogPlan(prompt: string, system = ""): string {
   const topic = fixed ?? "단골 손님이 가장 자주 묻는 질문 정리";
   const business = field(system, "상호") ?? "우리 가게";
   const keywords = (field(system, "이번 글의 핵심 키워드") ?? field(system, "업체 키워드") ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+  // The owner's uploaded photos ("사진 N번 …" lines in the facts) are handed out in order to the sections that have a photo spot.
+  const uploaded = new Set([...system.matchAll(/사진 (\d+)번/g)].map((match) => Number(match[1]))).size;
+  let handedOut = 0;
   return JSON.stringify({
     topic,
     title: `${keywords[0] ?? topic}, ${business} 이야기`.slice(0, 60),
@@ -28,6 +31,7 @@ export function mockBlogPlan(prompt: string, system = ""): string {
       purpose: `독자가 ${index + 1}번째로 궁금해하는 점에 답하기`,
       points: ["제공된 사실에 근거한 설명", "독자의 상황에 맞춘 팁"],
       photo: index % 3 === 2 ? null : `${business}의 ${heading.replace(/^\S+\s/, "")}을 보여주는 사진`,
+      photoRef: index % 3 !== 2 && handedOut < uploaded ? (handedOut += 1) : null,
       extra: index === 0 ? "quote" : index === 1 ? "callout" : index === 3 ? "list" : "none",
     })),
     closing: { takeaway: "편하게 들러서 직접 확인해 보세요", cta: "궁금한 점은 가게로 편하게 문의해 주세요" },

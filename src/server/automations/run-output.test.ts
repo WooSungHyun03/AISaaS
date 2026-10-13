@@ -56,6 +56,7 @@ describe("toSafeAutomationRunOutput", () => {
       qa: null,
       voiceFallback: false,
       sampleVideo: false,
+      references: [],
       publicationResults: {},
     }));
     expect(JSON.stringify(result)).not.toContain("secret");
@@ -113,5 +114,18 @@ describe("toSafeAutomationRunOutput", () => {
     });
     expect(JSON.stringify(result)).not.toContain("visualPrompt");
     expect(JSON.stringify(result)).not.toContain("never");
+  });
+
+  it("keeps only well-formed references and never a URL or a path outside the allowlist fields", () => {
+    const result = toSafeAutomationRunOutput({
+      title: "글",
+      references: [
+        { number: 1, id: "a1", kind: "image", origin: "upload", label: "소금빵", role: "product", summary: "갓 구운 소금빵", path: "u/a/assets/a1.jpg", signedUrl: "https://secret.example/x?token=1" },
+        { number: 2, id: "bad", kind: "weird" },
+        "nonsense",
+      ],
+    } as never);
+    expect(result?.references).toEqual([{ number: 1, id: "a1", kind: "image", origin: "upload", label: "소금빵", role: "product", summary: "갓 구운 소금빵", path: "u/a/assets/a1.jpg" }]);
+    expect(JSON.stringify(result)).not.toContain("secret.example");
   });
 });

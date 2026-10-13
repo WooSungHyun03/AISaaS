@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Json } from "@/types/domain";
 import { blogPublishingGuideSchema, type BlogPublishingGuide } from "@/server/blog/publishing-guide";
+import { ASSET_LIMITS, ASSET_ROLES, type ShortsAssetKind, type ShortsAssetRole, type UsedReference } from "@/types/shorts-reference";
 import { shortsPublishingSchema, type ShortsPublishing } from "@/server/shorts/publishing-metadata";
 
 export interface SafeShortsQa {
@@ -47,6 +48,8 @@ export interface SafeAutomationRunOutput {
   voiceFallback: boolean;
   /** The video is a test placeholder (no real renderer connected): not a finished Short, cannot be posted. */
   sampleVideo: boolean;
+  /** The owner's photos / clips the run worked from (blog photos, Shorts references): shown in the history so it is clear what was used. */
+  references: UsedReference[];
   publicationResults: Partial<Record<"instagram" | "youtube", {
     externalId: string | null;
     externalUrl: string | null;
@@ -116,6 +119,26 @@ function safeShortsQa(value: Json | undefined): SafeShortsQa | null {
   }
   const notes = Array.isArray(record.notes) ? record.notes.filter((item): item is string => typeof item === "string").slice(0, 8).map((item) => item.slice(0, 300)) : [];
   return { status: record.status, summary: safeText(record.summary, 300), aiChecked: record.aiChecked === true, findings, notes };
+}
+
+function safeReferences(value: Json | undefined): UsedReference[] {
+  if (!Array.isArray(value)) return [];
+  const out: UsedReference[] = [];
+  for (const entry of value.slice(0, 20)) {
+    const item = asRecord(entry);
+    if (!item || typeof item.number !== "number" || typeof item.id !== "string" || typeof item.kind !== "string" || !(item.kind in ASSET_LIMITS)) continue;
+    out.push({
+      number: Math.max(1, Math.min(99, Math.round(item.number))),
+      id: item.id.slice(0, 64),
+      kind: item.kind as ShortsAssetKind,
+      origin: item.origin === "mascot" ? "mascot" : "upload",
+      label: safeText(item.label, 60) ?? "",
+      role: typeof item.role === "string" && item.role in ASSET_ROLES ? (item.role as ShortsAssetRole) : null,
+      summary: safeText(item.summary, 200) ?? "",
+      path: typeof item.path === "string" ? item.path.slice(0, 300) : null,
+    });
+  }
+  return out;
 }
 
 function safePublicationResults(value: Json | undefined): SafeAutomationRunOutput["publicationResults"] {
@@ -196,6 +219,7 @@ export function toSafeAutomationRunOutput(value: Json): SafeAutomationRunOutput 
     qa: safeShortsQa(output.qa),
     voiceFallback: output.voiceFallback === true,
     sampleVideo: output.sampleVideo === true,
+    references: safeReferences(output.references),
     publicationResults: safePublicationResults(output.publicationResults),
   };
 

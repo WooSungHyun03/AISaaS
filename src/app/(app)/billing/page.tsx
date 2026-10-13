@@ -14,7 +14,7 @@ import { startProductOrder } from "./actions";
 
 const KIND_COPY: Record<CreditKind, { title: string; description: string }> = {
   BLOG: { title: "블로그 포스팅", description: "네이버 블로그에 옮겨 쓸 수 있는 포스팅을 생성해요." },
-  SHORTS: { title: "숏폼 제작", description: "세로형 캐릭터 숏폼 영상을 만들어요." },
+  SHORTS: { title: "숏폼 제작", description: "상품·매장 사진으로 세로형 광고 영상을 만들어요." },
 };
 
 const ORDER_STATUS = {

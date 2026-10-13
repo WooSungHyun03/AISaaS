@@ -79,6 +79,22 @@ export async function exchangeInstagramCode(params: {
   return { accessToken: longToken.access_token, userId: shortToken.user_id, expiresIn: longToken.expires_in };
 }
 
+/**
+ * Gives a long-lived token (60 days) another 60 days. Instagram only refreshes a token that is at least 24 hours old
+ * and not yet expired: https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login
+ */
+export async function refreshInstagramLongToken(accessToken: string): Promise<{ accessToken: string; expiresIn?: number }> {
+  const url = new URL("https://graph.instagram.com/refresh_access_token");
+  url.searchParams.set("grant_type", "ig_refresh_token");
+  const refreshed = await fetchJson<{ access_token?: string; expires_in?: number }>(
+    url,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    "Instagram 토큰을 갱신하지 못했습니다.",
+  );
+  if (!refreshed.access_token) throw new ConnectorError("instagram", "UPSTREAM_SERVER_ERROR", "Instagram 토큰 갱신 응답이 올바르지 않습니다.");
+  return { accessToken: refreshed.access_token, expiresIn: refreshed.expires_in };
+}
+
 export async function getInstagramProfile(accessToken: string): Promise<InstagramProfile> {
   const url = new URL("https://graph.instagram.com/me");
   url.searchParams.set("fields", "user_id,username,account_type");

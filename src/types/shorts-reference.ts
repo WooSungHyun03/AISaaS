@@ -78,6 +78,8 @@ export const shortsAssetSchema = z.object({
   role: z.enum(["product", "place", "person", "character", "exact", "other"]).optional(),
   /** One Korean sentence about what the image shows, written by the AI when the video is made. */
   summary: z.string().trim().max(200).optional(),
+  /** Storage path of the file this one was copied from when the owner reused a photo from another automation. */
+  copiedFrom: z.string().max(300).optional(),
 });
 export type ShortsAsset = z.infer<typeof shortsAssetSchema>;
 
@@ -151,4 +153,60 @@ export function describeAssetForPrompt(asset: ShortsAsset): string {
   }
   const text = [asset.summary, asset.label && asset.label !== asset.summary ? `(사장님 설명: ${asset.label})` : ""].filter(Boolean).join(" ");
   return `[${asset.role ?? "other"}] ${text || "사용자가 올린 참고 이미지"}`;
+}
+
+/** One reference as recorded in a run's output: enough to show "what was used" later, even if the file was deleted since. */
+export interface UsedReference {
+  number: number;
+  id: string;
+  kind: ShortsAssetKind;
+  origin: "upload" | "mascot";
+  label: string;
+  role: ShortsAssetRole | null;
+  summary: string;
+  /** Private Storage path (never a URL); the history page signs it on demand. Null for mascot poses. */
+  path: string | null;
+}
+
+/** The files a run actually worked from, numbered the way the prompts number them (per kind, 1-based). */
+export function summarizeUsedReferences(assets: ShortsAsset[]): UsedReference[] {
+  const counters: Record<ShortsAssetKind, number> = { image: 0, video: 0, audio: 0, logo: 0 };
+  return assets.map((asset) => {
+    counters[asset.kind] += 1;
+    return {
+      number: counters[asset.kind],
+      id: asset.id,
+      kind: asset.kind,
+      origin: asset.origin,
+      label: asset.label,
+      role: asset.role ?? null,
+      summary: asset.summary ?? "",
+      path: asset.origin === "upload" ? asset.source : null,
+    };
+  });
+}
+
+/** What the materials screens show for one file (the server fills `previewUrl`). */
+export interface AssetView {
+  id: string;
+  kind: ShortsAssetKind;
+  origin: "upload" | "mascot";
+  label: string;
+  role: ShortsAssetRole | null;
+  /** What the AI saw in a photo. */
+  summary: string;
+  durationSec: number | null;
+  /** Signed URL for uploads, `/shorts-mascot/...` for the mascot. Null when it could not be created. */
+  previewUrl: string | null;
+}
+
+/** What is wrong with a photo before it is sent (checked in the browser and worded for the owner), or null when it can go. */
+export function checkPhotoFile(file: { name: string; size: number; type: string }): string | null {
+  const image = ASSET_LIMITS.image;
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (extension === "heic" || extension === "heif") return "HEIC 사진은 올릴 수 없어요. JPG나 PNG로 저장해서 올려주세요.";
+  if (!(image.extensions as readonly string[]).includes(extension) || (file.type && !(image.mimes as readonly string[]).includes(file.type))) return `${image.label} 파일만 올릴 수 있어요.`;
+  if (file.size <= 0) return "빈 파일이에요.";
+  if (file.size > image.maxBytes) return `파일이 너무 커요. (${Math.round(image.maxBytes / 1024 / 1024)}MB 이하)`;
+  return null;
 }

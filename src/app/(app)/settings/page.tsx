@@ -8,6 +8,8 @@ import { ProfileForm } from "@/components/settings/profile-form";
 import { PasswordForm } from "@/components/settings/password-form";
 import { DeleteAccountForm } from "@/components/settings/delete-account-form";
 import { EmptyState } from "@/components/ui/page-state";
+import { isAdminUser } from "@/server/admin/access";
+import { getIntegrationConfigStatus } from "@/server/connectors/config-status";
 
 export const metadata = { title: "설정" };
 
@@ -17,7 +19,7 @@ const INSTAGRAM_MESSAGE: Record<string, { variant: "success" | "info" | "error";
   professional_required: { variant: "info", text: "비즈니스 또는 크리에이터 계정만 연결할 수 있어요." },
   state_error: { variant: "error", text: "연결 요청이 만료됐거나 확인할 수 없어요. 다시 시도해주세요." },
   invalid_business: { variant: "error", text: "연결할 사업체를 확인할 수 없어요." },
-  not_configured: { variant: "info", text: "인스타그램 연동 설정이 아직 끝나지 않았어요. 관리자에게 Meta 앱 설정을 요청해주세요." },
+  not_configured: { variant: "info", text: "인스타그램 연동 설정이 아직 끝나지 않았어요. 지금은 연결할 수 없어요. 운영팀이 Meta 앱 설정을 마치면 이용할 수 있어요." },
   error: { variant: "error", text: "인스타그램 계정을 연결하지 못했어요. 잠시 후 다시 시도해주세요." },
 };
 
@@ -27,7 +29,7 @@ const YOUTUBE_MESSAGE: Record<string, { variant: "success" | "info" | "error"; t
   denied: { variant: "info", text: "YouTube 연결을 취소했어요. 권한을 확인하고 다시 시도할 수 있어요." },
   state_error: { variant: "error", text: "YouTube 연결 요청이 만료됐거나 확인할 수 없어요. 다시 시도해주세요." },
   invalid_business: { variant: "error", text: "연결할 사업체를 확인할 수 없어요." },
-  not_configured: { variant: "info", text: "YouTube 연동 설정이 아직 끝나지 않았어요. 관리자에게 Google OAuth 설정을 요청해주세요." },
+  not_configured: { variant: "info", text: "YouTube 연동 설정이 아직 끝나지 않았어요. 지금은 연결할 수 없어요. 운영팀이 Google OAuth 설정을 마치면 이용할 수 있어요." },
   error: { variant: "error", text: "YouTube 채널을 연결하지 못했어요. 채널과 권한을 확인해주세요." },
 };
 
@@ -51,6 +53,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       .eq("user_id", user.id).eq("business_id", selectedBusiness.id)
     : { data: [], error: null };
   if (connectionError) throw new Error("외부 서비스 연결 정보를 불러오지 못했습니다.");
+  const configStatus = getIntegrationConfigStatus();
+  const showSetupDetails = await isAdminUser(user.id).catch(() => false);
   const instagramMessage = query.instagram ? INSTAGRAM_MESSAGE[query.instagram] : undefined;
   const youtubeMessage = query.youtube ? YOUTUBE_MESSAGE[query.youtube] : undefined;
 
@@ -67,7 +71,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           {(businesses ?? []).length > 1 && <nav className="flex flex-wrap gap-2" aria-label="연결을 관리할 사업체">
             {(businesses ?? []).map((business) => <Button key={business.id} asChild size="sm" variant={business.id === selectedBusiness?.id ? "default" : "outline"} className="h-9 rounded-full px-4"><Link href={`/settings?business=${business.id}`} aria-current={business.id === selectedBusiness?.id ? "page" : undefined}>{business.name}</Link></Button>)}
           </nav>}
-          <IntegrationSettings key={selectedBusiness!.id} businessId={selectedBusiness!.id} connections={(connections ?? []) as SafeConnection[]} />
+          <IntegrationSettings key={selectedBusiness!.id} businessId={selectedBusiness!.id} connections={(connections ?? []) as SafeConnection[]} configStatus={configStatus} showSetupDetails={showSetupDetails} />
         </>}
       </section>
 

@@ -56,7 +56,7 @@ export function analysisSummary(item: ImageAnalysis["images"][number]): string {
 }
 
 /** Fills `role` (only where the owner did not set one) and `summary` for the given photos. Throws when the model cannot answer. */
-export async function analyzeImages(images: Array<{ asset: ShortsAsset; vision: AIImageInput }>): Promise<ShortsAsset[]> {
+export async function analyzeImages(images: Array<{ asset: ShortsAsset; vision: AIImageInput }>, purpose = "video.analyze"): Promise<ShortsAsset[]> {
   if (images.length === 0) return [];
   const result = await generateStructured({
     ...buildImageAnalysisPrompt(images.map((item) => item.asset.label)),
@@ -65,7 +65,7 @@ export async function analyzeImages(images: Array<{ asset: ShortsAsset; vision: 
     images: images.map((item) => item.vision),
     role: "vision",
     effort: "low",
-    purpose: "video.analyze",
+    purpose,
   });
   return images.map((item, position) => {
     const found = result.images.find((entry) => entry.index === position + 1);

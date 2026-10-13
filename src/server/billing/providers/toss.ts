@@ -1,9 +1,8 @@
 import "server-only";
 
-import { clientEnv } from "@/lib/env/client";
-import { requireEnv } from "@/lib/env/server";
 import { logger } from "@/lib/logger";
 import { getPlanConfig } from "../plans";
+import { resolveTossTestKeys } from "../toss-keys";
 import type {
   BillingProvider,
   CancelSubscriptionParams,
@@ -32,15 +31,7 @@ import {
 } from "../checkout-sessions";
 import { TossApiClient, TossApiError } from "./toss-api";
 
-function getTestKeys() {
-  const clientKey = clientEnv.NEXT_PUBLIC_TOSS_CLIENT_KEY;
-  const secretKey = requireEnv("TOSS_SECRET_KEY");
-  if (!clientKey) throw new Error("Missing required environment variable: NEXT_PUBLIC_TOSS_CLIENT_KEY.");
-  if (!clientKey.startsWith("test_") || !secretKey.startsWith("test_")) {
-    throw new Error("Toss billing currently accepts test keys only. Configure test client and secret keys.");
-  }
-  return { clientKey, secretKey };
-}
+const getTestKeys = resolveTossTestKeys;
 
 function errorDetails(error: unknown) {
   if (error instanceof TossApiError || error instanceof BillingCheckoutError) {

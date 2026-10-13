@@ -8,14 +8,14 @@ const { getChannelGrowthSeries, ALLOWED_GROWTH_METRICS } = await import("./growt
 
 function listQuery<T>(rows: T[]) {
   const builder: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "gte", "in", "order"]) builder[method] = vi.fn(() => builder);
+  for (const method of ["select", "eq", "gte", "lt", "in", "order", "range", "limit"]) builder[method] = vi.fn(() => builder);
   builder.then = (resolve: (value: { data: T[]; error: null }) => unknown) => resolve({ data: rows, error: null });
   return builder;
 }
 
 function errorQuery(error: unknown) {
   const builder: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "gte", "in", "order"]) builder[method] = vi.fn(() => builder);
+  for (const method of ["select", "eq", "gte", "lt", "in", "order", "range", "limit"]) builder[method] = vi.fn(() => builder);
   builder.then = (resolve: (value: { data: null; error: unknown }) => unknown) => resolve({ data: null, error });
   return builder;
 }
@@ -23,7 +23,7 @@ function errorQuery(error: unknown) {
 /** businesses lookup uses .maybeSingle(), not the array-returning .then() chain the other tables use. */
 function singleQuery<T>(row: T | null) {
   const builder: Record<string, unknown> = {};
-  for (const method of ["select", "eq", "gte", "in", "order"]) builder[method] = vi.fn(() => builder);
+  for (const method of ["select", "eq", "gte", "lt", "in", "order", "range", "limit"]) builder[method] = vi.fn(() => builder);
   builder.maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null });
   return builder;
 }
@@ -359,5 +359,94 @@ describe("getChannelGrowthSeries", () => {
       expect(result.channels[0].metrics.map((m) => m.metric)).toEqual(["postCount"]);
       expect(getConnectionMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+/** A snapshots table that honours .range() like PostgREST (at most `max` rows per request) and .lt()/.gte() on recorded_at. */
+function realisticSnapshots(rows: Array<ReturnType<typeof snapshot>>, max = 1_000) {
+  const state = { gte: "", lt: "", from: 0, to: Number.MAX_SAFE_INTEGER, limit: Number.MAX_SAFE_INTEGER, desc: false, calls: 0 };
+  const builder: Record<string, unknown> = {};
+  for (const method of ["select", "in", "eq"]) builder[method] = vi.fn(() => builder);
+  builder.gte = vi.fn((_: string, value: string) => { state.gte = value; return builder; });
+  builder.lt = vi.fn((_: string, value: string) => { state.lt = value; return builder; });
+  builder.order = vi.fn((column: string, options?: { ascending?: boolean }) => { if (column === "recorded_at") state.desc = options?.ascending === false; return builder; });
+  builder.range = vi.fn((from: number, to: number) => { state.from = from; state.to = to; return builder; });
+  builder.limit = vi.fn((value: number) => { state.limit = value; return builder; });
+  builder.then = (resolve: (value: { data: unknown[]; error: null }) => unknown) => {
+    state.calls += 1;
+    let list = rows.filter((row) => (!state.gte || row.recorded_at >= state.gte) && (!state.lt || row.recorded_at < state.lt));
+    list = [...list].sort((a, b) => (state.desc ? b.recorded_at.localeCompare(a.recorded_at) : a.recorded_at.localeCompare(b.recorded_at)));
+    const sliced = list.slice(state.from, Math.min(state.to + 1, state.from + Math.min(max, state.limit)));
+    state.from = 0; state.to = Number.MAX_SAFE_INTEGER; state.gte = ""; state.lt = "";
+    return resolve({ data: sliced, error: null });
+  };
+  return { builder, state };
+}
+
+describe("getChannelGrowthSeries — the chart data", () => {
+  const youtube = [{ id: "c1", platform: "youtube", external_id: "@my", url: "https://youtube.com/@my" }];
+
+  it("reads every snapshot of a long window page by page instead of silently stopping at 1,000 rows", async () => {
+    // 90 days x 2 metrics x 8 collections a day = 1,440 snapshots: more than one PostgREST page.
+    const rows: Array<ReturnType<typeof snapshot>> = [];
+    for (let day = 0; day < 190; day++) {
+      for (let hour = 0; hour < 8; hour++) {
+        const at = NOW.getTime() - day * DAY_MS - hour * 3 * 3_600_000;
+        rows.push({ channel_id: "c1", metric: "subscriberCount", value: 1_000 + (190 - day), recorded_at: new Date(at).toISOString(), source: "live" });
+      }
+    }
+    const table = realisticSnapshots(rows);
+    createClientMock.mockResolvedValue(makeClient({ tracked_channels: listQuery(youtube), marketing_metric_snapshots: table.builder as never }));
+
+    const result = await getChannelGrowthSeries("business-1", { now: NOW, days: 90 });
+    const subscribers = result.channels[0].metrics.find((metric) => metric.metric === "subscriberCount")!;
+
+    expect(rows.length).toBeGreaterThan(1_000);
+    expect(subscribers.points).toHaveLength(90);
+    expect(subscribers.points.every((point) => point.value !== null)).toBe(true);
+    // The oldest day of the window must be there (the first page alone would have ended long before it).
+    expect(subscribers.points[0].value).toBeLessThan(subscribers.points[89].value!);
+    expect(subscribers.current).toBe(1_190);
+    expect(subscribers.previous).not.toBeNull();
+  });
+
+  it("uses the last value from before the comparison window when the channel was not collected inside it", async () => {
+    const rows = [snapshot("c1", "subscriberCount", 500, 100), snapshot("c1", "subscriberCount", 560, 3), snapshot("c1", "subscriberCount", 580, 1)];
+    const table = realisticSnapshots(rows);
+    createClientMock.mockResolvedValue(makeClient({ tracked_channels: listQuery(youtube), marketing_metric_snapshots: table.builder as never }));
+
+    const metric = (await getChannelGrowthSeries("business-1", { now: NOW, days: 7 })).channels[0].metrics.find((m) => m.metric === "subscriberCount")!;
+
+    expect(metric.current).toBe(580);
+    expect(metric.previous).toBe(500); // collected 100 days ago, the latest value before the period began
+    expect(metric.absoluteDelta).toBe(80);
+  });
+
+  it("accepts numbers that arrive as strings and drops values that are not numbers instead of charting them as 0", async () => {
+    const rows = [
+      { ...snapshot("c1", "subscriberCount", 0, 2), value: "1200" as unknown as number },
+      { ...snapshot("c1", "subscriberCount", 0, 1), value: "n/a" as unknown as number },
+      { ...snapshot("c1", "subscriberCount", 1300, 0) },
+    ];
+    createClientMock.mockResolvedValue(makeClient({ tracked_channels: listQuery(youtube), marketing_metric_snapshots: realisticSnapshots(rows).builder as never }));
+
+    const metric = (await getChannelGrowthSeries("business-1", { now: NOW, days: 7 })).channels[0].metrics.find((m) => m.metric === "subscriberCount")!;
+
+    expect(metric.current).toBe(1300);
+    expect(metric.points.map((point) => point.value).filter((value) => value !== null)).toEqual([1200, 1200, 1300]);
+    expect(metric.points.every((point) => point.value !== 0)).toBe(true);
+  });
+
+  it("shows each Korean calendar day's value as of the end of that day, not at the same clock time", async () => {
+    // 2026-10-09 23:30 KST = 14:30Z: belongs to KST Oct 9, so Oct 9's point must already include it.
+    const rows = [
+      { channel_id: "c1", metric: "subscriberCount", value: 100, recorded_at: "2026-10-08T03:00:00.000Z", source: "live" },
+      { channel_id: "c1", metric: "subscriberCount", value: 150, recorded_at: "2026-10-09T14:30:00.000Z", source: "live" },
+    ];
+    createClientMock.mockResolvedValue(makeClient({ tracked_channels: listQuery(youtube), marketing_metric_snapshots: realisticSnapshots(rows).builder as never }));
+
+    const metric = (await getChannelGrowthSeries("business-1", { now: new Date("2026-10-10T05:00:00.000Z"), days: 4 })).channels[0].metrics.find((m) => m.metric === "subscriberCount")!;
+
+    expect(metric.points.map((point) => `${point.date}:${point.value}`)).toEqual(["2026-10-07:null", "2026-10-08:100", "2026-10-09:150", "2026-10-10:150"]);
   });
 });

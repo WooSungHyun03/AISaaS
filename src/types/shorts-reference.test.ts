@@ -4,6 +4,8 @@ import {
   MASCOT_POSES,
   SHORTS_DURATION,
   assetsOfKind,
+  checkPhotoFile,
+  summarizeUsedReferences,
   describeAssetForPrompt,
   parseShortsSettings,
   totalSeconds,
@@ -98,5 +100,31 @@ describe("helpers", () => {
     expect(describeAssetForPrompt({ id: "i", kind: "image", origin: "upload", source: "x", label: "" })).toBe("[other] 사용자가 올린 참고 이미지");
     expect(describeAssetForPrompt({ id: "m", kind: "image", origin: "mascot", source: "wave", label: "" })).toContain("마스코트");
     expect(MASCOT_POSES).toHaveLength(8);
+  });
+});
+
+describe("reference photos", () => {
+  it("checks a photo before it is sent: type, size, emptiness and HEIC get a reason in Korean", () => {
+    const MB = 1024 * 1024;
+    expect(checkPhotoFile({ name: "a.JPG", size: 2 * MB, type: "image/jpeg" })).toBeNull();
+    expect(checkPhotoFile({ name: "a.webp", size: 1, type: "" })).toBeNull();
+    expect(checkPhotoFile({ name: "a.heic", size: 2 * MB, type: "image/heic" })).toContain("HEIC");
+    expect(checkPhotoFile({ name: "a.gif", size: 100, type: "image/gif" })).toContain("JPG·PNG·WEBP");
+    expect(checkPhotoFile({ name: "a.png", size: 100, type: "application/pdf" })).toContain("JPG·PNG·WEBP");
+    expect(checkPhotoFile({ name: "a.png", size: 0, type: "image/png" })).toContain("빈 파일");
+    expect(checkPhotoFile({ name: "a.png", size: 11 * MB, type: "image/png" })).toContain("10MB");
+  });
+
+  it("numbers the used references per kind and never exposes more than the private path", () => {
+    const parsed = parseShortsSettings({
+      assets: [image("a", { label: "빵", summary: "소금빵", role: "product" }), { id: "v", kind: "video", origin: "upload", source: "u/a/assets/v.mp4", label: "" }, image("b")],
+    });
+    expect(summarizeUsedReferences(parsed.assets)).toEqual([
+      { number: 1, id: "a", kind: "image", origin: "upload", label: "빵", role: "product", summary: "소금빵", path: "u/a/assets/a.png" },
+      { number: 1, id: "v", kind: "video", origin: "upload", label: "", role: null, summary: "", path: "u/a/assets/v.mp4" },
+      { number: 2, id: "b", kind: "image", origin: "upload", label: "", role: null, summary: "", path: "u/a/assets/b.png" },
+    ]);
+    const mascot = parseShortsSettings({ assets: [{ id: "mascot-wave", kind: "image", origin: "mascot", source: "wave", label: "인사" }] });
+    expect(summarizeUsedReferences(mascot.assets)[0]).toMatchObject({ origin: "mascot", role: "character", path: null });
   });
 });

@@ -209,6 +209,8 @@ export interface ImagePlacement extends BlogImageDetail {
   afterExcerpt: string | null;
   /** An image the owner already uploaded that fits this spot (name only). */
   ownedImage: string | null;
+  /** Number (1-based) of the photo the owner uploaded for this post that was placed here, or null. */
+  reference: number | null;
 }
 
 const IMAGE_TYPES: Record<PromotionType, Array<{ type: string; reason: string }>> = {
@@ -292,7 +294,8 @@ export function buildImagePlacements(post: BlogPost, details: BlogImageDetail[] 
     const description = stripInlineMarkup(block.slot);
     const caption = cleanText(block.caption, 80) || stored?.caption || description.slice(0, 40);
     const preferred = PREFERRED_OWNED[context.promotionType];
-    const ownedAt = owned.findIndex((image) => preferred.includes(image.subject));
+    // A photo the plan placed here by number wins over the guessed "already uploaded" one.
+    const ownedAt = block.ref ? -1 : owned.findIndex((image) => preferred.includes(image.subject));
     const ownedImage = ownedAt >= 0 ? owned.splice(ownedAt, 1)[0].label : null;
     return {
       number: index + 1,
@@ -305,6 +308,7 @@ export function buildImagePlacements(post: BlogPost, details: BlogImageDetail[] 
       sectionLabel: sectionLabelOf(post, sectionIndex),
       ...describeAfter(post, sectionIndex, block),
       ownedImage,
+      reference: block.ref ?? null,
     };
   });
 }
@@ -523,6 +527,7 @@ export function imageGuideText(placements: ImagePlacement[]): string {
       `캡션: ${item.caption}`,
       `대체 텍스트(Alt): ${item.altText}`,
       `필요한 이유: ${item.reason}`,
+      ...(item.reference ? [`올려주신 참고 사진 ${item.reference}번을 여기에 넣어요`] : []),
       ...(item.ownedImage ? [`올려둔 이미지 활용: ‘${item.ownedImage}’`] : []),
     ].join("\n")),
   ].join("\n");

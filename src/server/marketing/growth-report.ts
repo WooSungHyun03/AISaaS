@@ -1,8 +1,9 @@
 /**
  * Growth Report: only numbers that can be computed from this service's own
  * records, each tagged with where it came from. External performance data
- * (views, likes, followers, conversions) is listed as UNAVAILABLE instead of
- * being estimated or generated — nothing in this file calls an AI.
+ * (views, likes, followers, conversions) is never estimated or generated here —
+ * real channel numbers come from the verified channel snapshots (src/server/channels),
+ * and nothing in this file calls an AI.
  *
  * Pure functions: the page loads rows and passes them in, which keeps every
  * rule here unit-testable.
@@ -14,15 +15,12 @@ export type MetricSource =
   /** Read from an official platform API with the user's connected account. */
   | "EXTERNAL_VERIFIED"
   /** A modelled value, always labelled as an estimate. */
-  | "ESTIMATED"
-  /** Cannot be obtained with the access this service has today. */
-  | "UNAVAILABLE";
+  | "ESTIMATED";
 
 export const SOURCE_LABEL: Record<MetricSource, string> = {
   INTERNAL: "서비스 기록",
   EXTERNAL_VERIFIED: "플랫폼 확인",
   ESTIMATED: "추정",
-  UNAVAILABLE: "확인 불가",
 };
 
 export interface ContentRow {
@@ -76,7 +74,6 @@ export interface GrowthReport {
   weekly: Array<{ label: string; count: number }>;
   calendar: { planned: number; done: number; skipped: number; open: number; byPlatform: Array<{ platform: string; label: string; total: number; done: number }> };
   topTopics: Array<{ topic: string; count: number }>;
-  unavailable: Array<{ key: string; label: string; reason: string }>;
   suggestions: string[];
   hasAnyData: boolean;
 }
@@ -202,12 +199,6 @@ export function buildGrowthReport({ now, days, content, runs, calendar }: Report
     weekly,
     calendar: calendarSummary,
     topTopics,
-    unavailable: [
-      { key: "views", label: "조회수", reason: "인스타그램·유튜브의 성과 데이터(Insights/Analytics) 권한이 아직 연결돼 있지 않아 가져올 수 없어요." },
-      { key: "engagement", label: "좋아요·댓글·저장", reason: "공식 API 권한 없이는 확인할 수 없어서 추정하지 않아요." },
-      { key: "followers", label: "팔로워 증감", reason: "계정 연결과 성과 권한이 있어야 확인할 수 있어요." },
-      { key: "conversion", label: "문의·구매 전환", reason: "홈페이지·예약 시스템과 연결돼 있지 않아 이 서비스가 알 수 없는 값이에요." },
-    ],
     suggestions: [],
     hasAnyData: content.length > 0 || runs.length > 0 || calendar.length > 0,
   };

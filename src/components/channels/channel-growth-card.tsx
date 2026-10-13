@@ -7,6 +7,19 @@ import { SOURCE_LABEL } from "@/server/marketing/growth-report";
 import { cn } from "@/lib/utils";
 import type { ChannelGrowthSeries, GrowthMetricSeries } from "@/server/channels/growth-series";
 
+/** What one unit of each metric is, so a chart never shows a bare number. */
+const METRIC_UNIT: Record<string, string> = {
+  subscriberCount: "명",
+  viewCount: "회",
+  matchedPostCount: "개",
+  postsLast30Days: "개",
+  postCount: "개",
+  "yt_analytics.views": "회",
+  "yt_analytics.estimatedMinutesWatched": "분",
+  "yt_analytics.netSubscribers": "명",
+  "yt_analytics.averageViewDuration": "초",
+};
+
 function MetricDelta({ metric, days }: { metric: GrowthMetricSeries; days: number }) {
   if (metric.status === "COLLECTING") return <span className="text-muted-foreground">수집 중이에요</span>;
   if (metric.absoluteDelta === null) return <span className="text-muted-foreground">비교할 이전 기간 데이터 없음</span>;
@@ -37,7 +50,7 @@ function MetricCard({ metric, days }: { metric: GrowthMetricSeries; days: number
         <p className="tabular text-lg font-bold">{metric.current === null ? "측정 불가" : metric.current.toLocaleString("ko-KR")}</p>
       </div>
       <p className="text-[13px]"><MetricDelta metric={metric} days={days} /></p>
-      <GrowthLineChart points={metric.points} label={metric.label} />
+      <GrowthLineChart points={metric.points} label={metric.label} unit={METRIC_UNIT[metric.metric] ?? ""} />
     </div>
   );
 }
