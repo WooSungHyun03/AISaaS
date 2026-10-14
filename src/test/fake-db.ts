@@ -1,11 +1,11 @@
 /**
  * A tiny in-memory stand-in for the supabase-js query builder, just enough for the channel-collection tests:
- * select / insert / upsert / update / delete with `eq`, `is`, `lt`, `or` (ignored: every row counts as matching),
+ * select / insert / upsert / update / delete with `eq`, `neq`, `is`, `lt`, `or` (ignored: every row counts as matching),
  * `in`, `order`, `limit`, `maybeSingle`, `single` and a trailing `.select()` after an update (rows that really matched).
  * Filters are applied for real, so a "compare-and-set" claim only succeeds for a row that still has the old value.
  */
 type Row = Record<string, unknown>;
-type Filter = { column: string; kind: "eq" | "is" | "lt" | "in"; value: unknown };
+type Filter = { column: string; kind: "eq" | "neq" | "is" | "lt" | "in"; value: unknown };
 
 export interface FakeDb {
   tables: Record<string, Row[]>;
@@ -24,6 +24,7 @@ export function makeFakeDb(seed: Record<string, Row[]> = {}): FakeDb {
       const value = row[filter.column] ?? null;
       if (filter.kind === "is") return value === filter.value;
       if (filter.kind === "in") return (filter.value as unknown[]).includes(value);
+      if (filter.kind === "neq") return value !== filter.value;
       if (filter.kind === "lt") return value !== null && String(value) < String(filter.value);
       return value === filter.value;
     });
@@ -98,6 +99,7 @@ export function makeFakeDb(seed: Record<string, Row[]> = {}): FakeDb {
         return api;
       },
       eq: (column: string, value: unknown) => (state.filters.push({ column, kind: "eq", value }), api),
+      neq: (column: string, value: unknown) => (state.filters.push({ column, kind: "neq", value }), api),
       is: (column: string, value: unknown) => (state.filters.push({ column, kind: "is", value }), api),
       in: (column: string, value: unknown[]) => (state.filters.push({ column, kind: "in", value }), api),
       lt: (column: string, value: unknown) => (state.filters.push({ column, kind: "lt", value }), api),

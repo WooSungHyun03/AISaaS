@@ -87,6 +87,19 @@ suite("channel collection tables (migration 0075)", () => {
     expect((await admin.from("tracked_channels").update({ last_collection_status: "QUOTA_EXCEEDED" }).eq("id", channelId)).error).toBeNull();
   });
 
+  it("a paused channel can be resumed only by the server (the owner cannot flip its status directly)", async () => {
+    const [owner] = users;
+    expect((await admin.from("tracked_channels").update({ status: "PAUSED", consecutive_failure_count: 12 }).eq("id", channelId)).error).toBeNull();
+    await owner.db.from("tracked_channels").update({ status: "ACTIVE" }).eq("id", channelId);
+    expect((await admin.from("tracked_channels").select("status").eq("id", channelId).single()).data).toEqual({ status: "PAUSED" });
+
+    // Same update persistChannelCollection runs after a user-triggered collection reaches the source.
+    const resumed = await admin.from("tracked_channels").update({ status: "ACTIVE", consecutive_failure_count: 0, next_snapshot_at: new Date().toISOString() }).eq("id", channelId).neq("status", "ACTIVE").select("id");
+    expect(resumed.error).toBeNull();
+    expect(resumed.data).toHaveLength(1);
+    expect((await admin.from("tracked_channels").select("status, consecutive_failure_count").eq("id", channelId).single()).data).toEqual({ status: "ACTIVE", consecutive_failure_count: 0 });
+  });
+
   it("removes a channel's content snapshots with the channel", async () => {
     await admin.from("tracked_channels").delete().eq("id", channelId);
     expect((await admin.from("channel_content_snapshots").select("id").eq("channel_id", channelId)).data).toHaveLength(0);

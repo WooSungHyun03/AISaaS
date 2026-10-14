@@ -5,7 +5,7 @@ import { ChannelsError } from "./summary";
 import { saveMetricSnapshot } from "./snapshot";
 import { toChannelDisplayInfo, toContentSnapshots, toSnapshotMetricsRecord } from "./raw-metrics";
 import type { RawChannelMetrics } from "./raw-metrics";
-import { kstDateString } from "./schedule";
+import { kstDateString, nextDailyCollectionAt } from "./schedule";
 import { YouTubeCollectorError } from "./providers/youtube-types";
 import type { Json } from "@/types/domain";
 
@@ -70,6 +70,16 @@ export async function persistChannelCollection(params: { channelId: string; raw:
     })
     .eq("id", channelId);
   if (updateError) throw new ChannelsError("DATABASE_ERROR", "채널 수집 상태를 저장하지 못했습니다.", { cause: updateError });
+
+  // The daily collection pauses a channel after a long error streak and never picks it up again. When the owner's
+  // "다시 진단하기" (or registering the same address again) reaches the source, daily collection resumes from the
+  // next 06:00 KST. Only touches non-ACTIVE rows, so the daily run's own claim/next_snapshot_at is never overwritten.
+  const { error: resumeError } = await admin
+    .from("tracked_channels")
+    .update({ status: "ACTIVE", consecutive_failure_count: 0, next_snapshot_at: nextDailyCollectionAt(now).toISOString() })
+    .eq("id", channelId)
+    .neq("status", "ACTIVE");
+  if (resumeError) throw new ChannelsError("DATABASE_ERROR", "채널 수집을 다시 시작하지 못했습니다.", { cause: resumeError });
 
   return { metricsSaved: Object.keys(metrics).length, contentSaved: content.length, status };
 }

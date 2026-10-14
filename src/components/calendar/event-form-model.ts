@@ -31,6 +31,12 @@ const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:
 const weekdayOf = (date: string) => new Date(`${date}T00:00:00Z`).getUTCDay();
 
 /** A new event starting at `startWall` ("YYYY-MM-DD" or "YYYY-MM-DDTHH:mm…"); timed events default to one hour. */
+/** Seoul wall-clock start of the next full hour ("YYYY-MM-DDTHH:00:00"), rolling over to the next day after 23:00. */
+export function nextHourWall(nowMs: number = Date.now()): string {
+  const next = new Date(nowMs + 9 * 3_600_000 + 3_600_000);
+  return `${next.toISOString().slice(0, 10)}T${String(next.getUTCHours()).padStart(2, "0")}:00:00`;
+}
+
 export function valuesForNew(startWall: string, endWall?: string, allDay = false): EditorValues {
   const startDate = startWall.slice(0, 10);
   const startTime = allDay ? "09:00" : startWall.length >= 16 ? startWall.slice(11, 16) : "09:00";

@@ -151,6 +151,8 @@ export async function rediagnoseChannel(channelId: string): Promise<ChannelActio
   }
 
   revalidatePath("/diagnosis");
+  // A paused channel resumes daily collection here (persistChannelCollection), so the growth report's notice changes too.
+  revalidatePath("/growth-report");
   return { channelId: channel.id };
 }
 

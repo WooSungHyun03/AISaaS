@@ -7,6 +7,9 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   test: {
     environment: "node",
+    // The opt-in *.db.test.ts files share one local database; some assert exact table counts
+    // (admin dashboard), which another file inserting rows at the same moment would break.
+    fileParallelism: !process.env.RUN_DB_TESTS,
     // Importing src/server/automations/scheduler.ts pulls in the Supabase
     // admin client module for its (unused-by-these-tests) findDueAutomations
     // export, which validates env vars at import time — provide harmless

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { calendarEventInputSchema, type CalendarEventView } from "@/types/calendar-events";
-import { describeRecurrence, toInput, valuesForNew, valuesFromView } from "./event-form-model";
+import { describeRecurrence, nextHourWall, toInput, valuesForNew, valuesFromView } from "./event-form-model";
 
 const view: CalendarEventView = {
   occurrenceId: "e1:2026-10-12",
@@ -71,5 +71,18 @@ describe("event form model", () => {
     const values = valuesFromView(counted);
     expect(values).toMatchObject({ endMode: "COUNT", count: 4 });
     expect(toInput(values).recurrence).toEqual({ freq: "DAILY", interval: 1, count: 4 });
+  });
+});
+
+describe("nextHourWall", () => {
+  it("is the next full hour in Seoul time", () => {
+    expect(nextHourWall(Date.parse("2026-10-15T01:20:00Z"))).toBe("2026-10-15T11:00:00"); // 10:20 KST
+  });
+
+  it("rolls over to the next day after 23:00 KST instead of producing 24:00", () => {
+    const wall = nextHourWall(Date.parse("2026-10-15T14:30:00Z")); // 23:30 KST
+    expect(wall).toBe("2026-10-16T00:00:00");
+    const values = valuesForNew(wall);
+    expect(values).toMatchObject({ startDate: "2026-10-16", startTime: "00:00", endDate: "2026-10-16", endTime: "01:00" });
   });
 });

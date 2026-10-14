@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import type { CalendarEventView, CalendarSearchHit, EditScope } from "@/types/calendar-events";
 import type { CalendarItem } from "@/types/domain";
 import { EventEditorDialog, type EditorState } from "./event-editor-dialog";
-import { describeRecurrence, valuesForNew } from "./event-form-model";
+import { describeRecurrence, nextHourWall, valuesForNew } from "./event-form-model";
 import { EVENT_COLOR_HEX } from "./palette";
 
 const VIEWS = [
@@ -239,7 +239,7 @@ export function CalendarWorkspace() {
               </button>
             ))}
           </div>
-          <Button type="button" onClick={() => setEditor({ mode: "create", values: valuesForNew(`${day(seoulNow())}T${String(seoulNow().getUTCHours() + 1).padStart(2, "0")}:00:00`) })}>
+          <Button type="button" onClick={() => setEditor({ mode: "create", values: valuesForNew(nextHourWall()) })}>
             <CalendarPlus aria-hidden="true" /> 일정 추가
           </Button>
         </div>

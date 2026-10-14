@@ -64,7 +64,7 @@ function CollectionStatus({ collection, hasSample }: { collection: ChannelCollec
   const last = collection.lastCollectedAt ? KST_TIME.format(new Date(collection.lastCollectedAt)) : null;
   const next = collection.nextCollectionAt ? `${KST_DATE.format(new Date(collection.nextCollectionAt))} 오전 6시` : null;
   const problem =
-    collection.paused ? "여러 번 연속으로 수집하지 못해 수집을 멈췄어요. 채널 주소를 확인하고 다시 등록해주세요."
+    collection.paused ? "여러 번 연속으로 수집하지 못해 수집을 멈췄어요. 채널이 공개 상태인지 확인한 뒤 진단 화면에서 ‘다시 진단하기’를 누르면 매일 수집이 다시 시작돼요."
     : collection.state === "QUOTA_EXCEEDED" ? "YouTube 조회 한도에 걸려 잠시 쉬고 있어요. 곧 다시 수집해요."
     : collection.state === "FAILED" ? "최근 수집에 실패했어요. 마지막으로 성공한 데이터를 보여드리고 있어요."
     : collection.state === "UNAVAILABLE" ? "공개 데이터를 확인하지 못했어요. 비공개이거나 삭제된 채널일 수 있어요. 마지막으로 확인한 데이터를 보여드려요."

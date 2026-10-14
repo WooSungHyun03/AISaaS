@@ -258,6 +258,22 @@ describe("processDueChannels: the 06:00 KST tick", () => {
     expect(db.tables.tracked_channels[0]).toMatchObject({ status: "ACTIVE", consecutive_failure_count: 1 });
   });
 
+  it("a paused channel resumes daily collection once a user-triggered collection reaches the source", async () => {
+    const db = setup([channelRow("c1", { status: "PAUSED", consecutive_failure_count: 12, next_snapshot_at: "2026-10-01T00:00:00.000Z" })]);
+    youtubeCollectMock.mockResolvedValue(youtubeResult());
+    expect(await processDueChannels(NOW, 30_000)).toMatchObject({ processed: 0 }); // the daily run never picks it up
+
+    await collectAndPersistChannel({ id: "c1", platform: "youtube", external_id: "UCabcdefghijklmnopqrstuv", url: "" }, undefined, NOW);
+    expect(db.tables.tracked_channels[0]).toMatchObject({ status: "ACTIVE", consecutive_failure_count: 0, next_snapshot_at: NEXT_6AM });
+  });
+
+  it("collecting an active channel does not touch its schedule (the daily run sets next_snapshot_at itself)", async () => {
+    const db = setup([channelRow("c1", { next_snapshot_at: "2026-10-12T21:15:00.000Z" })]);
+    youtubeCollectMock.mockResolvedValue(youtubeResult());
+    await collectAndPersistChannel({ id: "c1", platform: "youtube", external_id: "UCabcdefghijklmnopqrstuv", url: "" }, undefined, NOW);
+    expect(db.tables.tracked_channels[0].next_snapshot_at).toBe("2026-10-12T21:15:00.000Z");
+  });
+
   it("admin 'collect now' (all: true) collects channels that are not due yet and logs it as MANUAL_ADMIN", async () => {
     const db = setup([channelRow("c1", { next_snapshot_at: NEXT_6AM })]);
     youtubeCollectMock.mockResolvedValue(youtubeResult());

@@ -4,7 +4,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 `main`, fixes what it finds, verifies, and pushes. The next run starts its
 "new changes" review from the **last reviewed SHA** below.
 
-**Last reviewed SHA:** `8fba31d` (2026-10-14 run — update the line on every run)
+**Last reviewed SHA:** `aae8954` (2026-10-15 run — update the line on every run)
 
 ## Open findings (carry over until fixed)
 
@@ -18,7 +18,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 | F-006 | P1 | migrations / 팀원 1·2 | 팀원 1 used `0040`–`0042` (ticket 1-5/1-7), which is 팀원 2's reserved range (0040–0049). 팀원 2's next migration must start at **0043** or later; check `ls supabase/migrations \| sort -V \| tail` before numbering. Claude uses 0050+. | superseded — migrations are now numbered sequentially across the team (0051–0066, Claude 0070); always `ls supabase/migrations | sort -V | tail` before numbering |
 | F-007 | P2 | channels / 팀원 1 | A tracked channel could never be removed (daily cron kept spending quota). | **fixed 2026-10-12** (/diagnosis 채널 카드 › 삭제) |
 | F-008 | P2 | channels / 팀원 1 | Growth narratives cached the rule-based fallback for the whole KST day. | **fixed 2026-10-12** (fallback reused for 1h only) |
-| F-009 | P2 | admin tests / 팀원 2 | `admin-security.db.test.ts` › "dashboard counts" compares live table counts and fails when the DB test files run in parallel (other files insert ledger rows in the same 60s window). Passes alone and with `--no-file-parallelism`. Run DB tests serially or assert deltas on fixture-only data. | open |
+| F-009 | P2 | admin tests / 팀원 2 | `admin-security.db.test.ts` › "dashboard counts" compares live table counts and fails when the DB test files run in parallel (other files insert ledger rows in the same 60s window). Passes alone and with `--no-file-parallelism`. Run DB tests serially or assert deltas on fixture-only data. | **fixed 2026-10-15** (`vitest.config.mts`: `fileParallelism` off when `RUN_DB_TESTS` is set) |
 | F-010 | P1 | billing refunds / 팀원 2 | Refund approval did not wait for a reservation opened before the request. If that run failed after approval, `release_credit` returned the credit to the grant and `admin_finalize_refund_request` raised **after Toss had cancelled the payment** — every retry hit the same mismatch (order stays PAID, payment cancelled). | **fixed 2026-10-12** (migration `0070`: approval refused while a reservation on the order is open) — **needs prod `db push`**. If 팀원 2 redefines `admin_review_refund_request` again, keep the open-reservation check. |
 | F-011 | P2 | billing refunds / 팀원 2 | `refund_requests` is unique per order and a REJECTED request blocks any new request for that order. When approval fails because the balance changed (user kept using credits after requesting), the only path is reject → the user can never request a refund for the remaining credits. Consider allowing a new request after REJECTED (partial unique index on non-rejected rows). | open (policy decision) |
 | F-012 | P2 | calendar / 0061 | `calendar_events` UPDATE policy checked only `user_id`; the INSERT policy's "series must be the caller's own" check was missing, so a customer could re-point their own replacement row at another user's series id through PostgREST and take that user's `(series_id, original_date)` unique slot (the owner could then no longer edit that day). Needs the victim's series UUID. | **fixed 2026-10-13** (migration `0074`) — **needs prod `db push`** |
@@ -29,8 +29,24 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 | F-017 | P1 | shorts copy | After YouTube publishing was removed, the Shorts schedule section still said "게시할 플랫폼을 골라두면 만든 영상을 그곳에 바로 올리고" and the page header promised "YouTube 게시" — a false auto-posting claim. | **fixed 2026-10-14** |
 | F-018 | P2 | channels / Naver | `rss.blog.naver.com/robots.txt` is `User-agent: * / Disallow: /`, so the Naver RSS path is never read (correctly). But the result was indistinguishable from "RSS off / no posts": preview, diagnosis finding and guide told owners to turn on RSS, which cannot help. | **fixed 2026-10-14** (`blockedByRobots` flag → explicit "not measured, search-only" note; guide copy) |
 | F-019 | P2 | channels collection | "No public data" days incremented `consecutive_failure_count`, the same streak that pauses a channel at 12; after 12 unmeasurable days one transient error paused the channel for good (there is no resume UI). The comment claimed such channels "are eventually paused", but that branch never paused. | **fixed 2026-10-14** (UNAVAILABLE ends the error streak; still counted as failed in the run log and shown as UNAVAILABLE) |
+| F-020 | P1 | channels collection / 팀원 1 | A channel paused after 12 failed collections was never collected again: the daily run only claims ACTIVE rows, nothing set it back, and the growth card told owners to "다시 등록" — but registering the same address returns the existing PAUSED row. | **fixed 2026-10-15** (`persistChannelCollection` sets a non-ACTIVE channel back to ACTIVE, streak 0, next 06:00 KST whenever a user-triggered diagnosis reaches the source; card copy points to ‘다시 진단하기’) |
+| F-021 | P2 | calendar / 팀원 1 | "일정 추가" between 23:00 and 23:59 KST pre-filled the start time `24:00` (invalid for a time input; end became earlier than start). | **fixed 2026-10-15** (`nextHourWall` rolls over to 00:00 of the next day) |
+| F-022 | P2 | dead code / repo | Never reached from any route or UI: `src/server/customer-support/widget.ts` (`handleWidgetChatRequest`, `getWidgetDisplayInfo`) + `answer.ts`/`conversations.ts`, `setup-request-transitions.ts`, `src/server/directory/*` (sync/classifier/github), and the public `/directory` page has no link anywhere. Owners should delete or wire them up; the audit did not delete teammates' code. | open |
 
 ## Run log
+
+### 2026-10-15 (run 6)
+
+- **Start SHA:** `aae8954` (no commits since the run-5 commit; whole-project review day).
+- **Working tree:** clean except the never-committed `mascot/` and `*-marketing.md`.
+- **Local env:** `bash scripts/dev-db.sh start` — local DB already at the latest migration (0075); all 11 `*.db.test.ts` files passed before changes.
+- **Reviewed:** channel pause/resume lifecycle (register, rediagnose, collect-now, persist, daily pipeline, growth card copy), Shorts mascot/asset source validation (`parseShortsSettings` limits mascot sources to pose keys — OK), blog HTML rendering (`dangerouslySetInnerHTML` on the workspace: text escaped, theme colours/sizes schema-validated hex/ints — OK), blog server actions (edit through RLS read + scoped service-role write — OK), run detail page (scoped by `getAutomationRunDetail(user.id, …)` — OK), auth actions + callback (safe redirect, recovery cookie, re-auth before password change / deletion — OK), SSRF guard and every raw `fetch` in `src/server`, KST date handling across calendar/growth/channels, sitemap/robots, unused modules.
+- **Findings & fixes:** F-020 (P1, paused channels never resumed), F-021 (P2, calendar 24:00), F-009 (test flake, fixed via config), F-022 (P2, dead code — reported to owners, not deleted).
+- **Tests added:** `collect-pipeline.test.ts` (paused channel resumes after a user-triggered collection; an ACTIVE channel's schedule is untouched), `channel-collection.db.test.ts` (owner cannot flip PAUSED→ACTIVE via PostgREST; the server's resume update works on the real schema), `event-form-model.test.ts` (`nextHourWall` rollover). `src/test/fake-db.ts` gained `neq`.
+- **Verification:** `npm run lint` ✅, `npm run typecheck` ✅, `npm test` ✅ (1217 passed / 53 skipped), `npm run build` ✅, `RUN_DB_TESTS=1 vitest` on all 11 DB files ✅ 51/51 (now serial by config). Browser smoke test **not run**: dev servers cannot be started from an unattended scheduled run (preview_start refused again).
+- **User-only actions:** unchanged from run 5 — production `npx supabase db push --linked --dry-run` then `npx supabase db push --linked` if 0074/0075 are not applied yet; remove unused `YOUTUBE_CLIENT_*` / Instagram variables from Vercel. No new migration today.
+- **Next run priorities:** browser smoke of `/diagnosis` + `/growth-report` + `/calendar` when a dev server can be started; F-011 decision; F-022 cleanup by owners; middleware per-request `profiles` lookup (팀원 2).
+- **Commit:** see git log (fix(channels,calendar): resume paused channels on re-diagnosis; next-hour rollover)
 
 ### 2026-10-14 (run 5)
 
