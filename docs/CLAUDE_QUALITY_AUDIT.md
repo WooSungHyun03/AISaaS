@@ -4,7 +4,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 `main`, fixes what it finds, verifies, and pushes. The next run starts its
 "new changes" review from the **last reviewed SHA** below.
 
-**Last reviewed SHA:** `33e831f` (2026-10-16 run — update the line on every run)
+**Last reviewed SHA:** `3ec1409` (2026-10-17 run — update the line on every run)
 
 ## Open findings (carry over until fixed)
 
@@ -35,8 +35,23 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 | F-023 | P2 | auth proxy | `updateSession` (src/lib/supabase/middleware.ts) built its redirects with a bare `NextResponse.redirect()`, dropping the auth cookies `getUser()` had just refreshed onto `response`. A signed-in user whose access token had expired and who opened `/login`/`/signup` (bounced to /dashboard) or a suspended user got redirected with the old, already-rotated refresh token in the browser, and was signed out on a later request. | **fixed 2026-10-16** (every redirect copies `response.cookies`) |
 | F-024 | P1 | billing checkout / 팀원 2 | A request that claimed a checkout session (`PROCESSING`) and then died (function timeout/crash after Toss confirmed) never reached `markCheckoutFailed`; the session stayed PROCESSING forever, so the user could have paid, got no credits, and every retry of the success URL answered "처리 중". | **fixed 2026-10-16** (`claimCheckoutSession` takes over a PROCESSING claim older than 10 min by compare-and-set on `updated_at`, even past the 30-min checkout window; provider confirm/charge are idempotent per session, `complete_billing_order` per order) |
 | F-025 | P1 | automations reaper / 팀원 2 | `reapStaleRuns` marked stale runs FAILED **before** releasing their credit reservation. A transient error in `releaseCreditByReference` aborted the loop and, because FAILED runs are never selected again, left that run's credit (and the later runs' credits in the same tick) reserved for good. | **fixed 2026-10-16** (select → release → mark FAILED per run; a failed release leaves the run in flight for the next tick; an already-settled reservation (55000) still closes the run) |
+| F-026 | P2 | business | `updateBusiness` had no user check and did not read the row back: RLS turns an update of a missing/foreign business (deleted in another tab, signed-out session) into 0 rows, so the form said "저장됨" while nothing was saved. | **fixed 2026-10-17** (signed-in check, `owner_id` filter, `select().maybeSingle()`; "찾을 수 없습니다" when 0 rows) |
+| F-027 | P2 | error boundaries | Every `error.tsx` wired "다시 시도" to `reset()`, which in Next 16.3 only clears the boundary state without re-fetching server data — after a transient Server Component error (DB timeout on /usage, /dashboard …) the button re-rendered the same error. No root `global-error.tsx`, so errors in the root layout and in `(admin)`/`(auth)` (no own boundary) fell to Next's unstyled default. | **fixed 2026-10-17** (all 7 boundaries use the stable `retry()` = router refresh + reset; `src/app/global-error.tsx` added) |
 
 ## Run log
+
+### 2026-10-17 (run 8)
+
+- **Start SHA:** `3ec1409` (no commits since the run-7 commit; whole-project review day).
+- **Working tree:** clean except the never-committed `mascot/` and `*-marketing.md`.
+- **Local env:** `bash scripts/dev-db.sh start` — local DB at 0075.
+- **Reviewed:** every `.update()`/`.delete()` in `src/app/**/actions.ts` for "0 rows = success" (automations, calendar skip/unskip, blog edit, settings — OK; business update — F-026), blog "바로 만들기" + edit actions, `triggerRunNow`/`advanceAutomationRun`/`updateAutomation` (ownership, in-flight checks, calendar linking — OK), billing checkout start action, refund-request read model, homepage diagnosis fetch (SSRF guard, prompt fencing), channel narrative prompt (numbers only, number guard — OK), error boundaries vs. the Next 16.3 `error.js` docs (F-027), sitemap/robots/legacy `/guides` redirect, proxy per-request cost (getUser + profiles lookup on every matched request: without auth cookies `getUser()` returns without a network call, so cron/webhook/anonymous requests cost nothing; kept as is).
+- **Findings & fixes:** F-026 (P2), F-027 (P2).
+- **Tests added:** `business/actions.test.ts` › `updateBusiness` (owner-scoped update succeeds; 0 rows → error and no revalidate; signed-out → no write).
+- **Verification:** `npm run lint` ✅, `npm run typecheck` ✅, `npm test` ✅ (1227 passed / 54 skipped), `npm run build` ✅, `RUN_DB_TESTS=1 vitest` on all 12 DB files ✅ 52/52. Browser smoke test **not run**: `preview_start` refuses dev servers in unattended runs.
+- **User-only actions:** unchanged — production `npx supabase db push --linked --dry-run` then `npx supabase db push --linked` if 0074/0075 are not applied yet; remove unused `YOUTUBE_CLIENT_*` / Instagram variables from Vercel. No new migration today.
+- **Next run priorities:** browser smoke (interactive session) of `/diagnosis`, `/growth-report`, `/calendar`, `/billing`, and the new global error page; F-011 decision; F-022 cleanup by owners; review Shorts generation/publishing-guide prompts and `/admin/users` actions in depth.
+- **Commit:** see git log (fix(business,errors): honest business update result; error boundaries re-fetch on retry; global error page)
 
 ### 2026-10-16 (run 7)
 

@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { ErrorState } from "@/components/ui/page-state";
 
-export default function AppError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function AppError({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   useEffect(() => {
     console.error(error);
   }, [error]);
@@ -13,7 +13,7 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
       <ErrorState
         title="화면을 불러오지 못했어요"
         description="인터넷 연결을 확인하고 다시 시도해주세요. 입력하신 내용은 그대로 안전해요."
-        onRetry={reset}
+        onRetry={retry}
         homeHref="/dashboard"
       />
     </div>

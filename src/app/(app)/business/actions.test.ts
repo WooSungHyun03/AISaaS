@@ -8,7 +8,7 @@ const { createClientMock, revalidatePathMock } = vi.hoisted(() => ({
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
 
-const { createBusiness } = await import("./actions");
+const { createBusiness, updateBusiness } = await import("./actions");
 
 function formData(fields: Record<string, string>) {
   const data = new FormData();
@@ -163,5 +163,51 @@ describe("createBusiness — promotion target", () => {
 
     expect(inserted[0]).not.toHaveProperty("promotion_type");
     expect(inserted[0]).not.toHaveProperty("promotion_details");
+  });
+});
+
+describe("updateBusiness", () => {
+  function makeUpdateClient(user: { id: string } | null, row: { id: string } | null) {
+    const filters: Array<[string, unknown]> = [];
+    const chain = {
+      eq: vi.fn((column: string, value: unknown) => { filters.push([column, value]); return chain; }),
+      select: vi.fn(() => chain),
+      maybeSingle: vi.fn().mockResolvedValue({ data: row, error: null }),
+    };
+    const update = vi.fn(() => chain);
+    return {
+      client: { auth: { getUser: vi.fn().mockResolvedValue({ data: { user } }) }, from: vi.fn(() => ({ update })) },
+      update,
+      filters,
+    };
+  }
+
+  it("scopes the update to the caller's own business and reports success", async () => {
+    const { client, filters } = makeUpdateClient({ id: "user-1" }, { id: "biz-1" });
+    createClientMock.mockResolvedValue(client);
+
+    const result = await updateBusiness("biz-1", {}, formData(BASE_FIELDS));
+
+    expect(result).toEqual({ success: true });
+    expect(filters).toEqual([["id", "biz-1"], ["owner_id", "user-1"]]);
+  });
+
+  it("does not claim success when no row was updated", async () => {
+    const { client } = makeUpdateClient({ id: "user-1" }, null);
+    createClientMock.mockResolvedValue(client);
+
+    const result = await updateBusiness("someone-elses", {}, formData(BASE_FIELDS));
+
+    expect(result.success).toBeUndefined();
+    expect(result.error).toContain("찾을 수 없습니다");
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("requires a signed-in user", async () => {
+    const { client, update } = makeUpdateClient(null, null);
+    createClientMock.mockResolvedValue(client);
+
+    expect((await updateBusiness("biz-1", {}, formData(BASE_FIELDS))).error).toBe("로그인이 필요합니다.");
+    expect(update).not.toHaveBeenCalled();
   });
 });

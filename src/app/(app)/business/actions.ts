@@ -125,12 +125,19 @@ export async function updateBusiness(
   formData: FormData,
 ): Promise<BusinessActionState> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+
   const fields = businessFieldsFromForm(formData);
   const validationError = validateBusinessFields(fields);
   if (validationError) return { error: validationError };
 
-  const { error } = await supabase.from("businesses").update(fields).eq("id", businessId);
+  // RLS turns an update of someone else's (or an already deleted) business into 0 rows, not an error —
+  // without reading the row back the form said "저장됨" while nothing was saved.
+  const { data: updated, error } = await supabase.from("businesses").update(fields)
+    .eq("id", businessId).eq("owner_id", user.id).select("id").maybeSingle();
   if (error) return { error: "사업체 정보를 수정하는 중 오류가 발생했습니다." };
+  if (!updated) return { error: "수정할 사업체를 찾을 수 없습니다. 페이지를 새로고침해주세요." };
 
   revalidatePath("/business");
   revalidatePath("/dashboard");
