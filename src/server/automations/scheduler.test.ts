@@ -117,32 +117,69 @@ describe("computeNextRunAt (MONTHLY)", () => {
 });
 
 describe("reapStaleRuns", () => {
-  it("fails plain runs after the stale window and deferred runs only after the longer one", async () => {
+  async function setup(release: (runId: string) => Promise<boolean>) {
     const lt: unknown[][] = [];
     const filters: unknown[][] = [];
-    const builder: Record<string, unknown> = {};
-    builder.update = vi.fn(() => builder);
-    builder.in = vi.fn(() => builder);
-    builder.lt = (...args: unknown[]) => (lt.push(args), builder);
-    builder.is = (...args: unknown[]) => (filters.push(["is", ...args]), builder);
-    builder.not = (...args: unknown[]) => (filters.push(["not", ...args]), builder);
-    builder.select = () => Promise.resolve({ data: [{ id: "r1" }, { id: "r2" }], error: null });
-    const releaseCreditByReference = vi.fn().mockResolvedValue(true);
-    vi.doMock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: () => builder }) }));
+    const failed: string[] = [];
+    let selects = 0;
+    const makeBuilder = () => {
+      const builder: Record<string, unknown> = {};
+      let updating = false;
+      let id = "";
+      builder.update = vi.fn(() => ((updating = true), builder));
+      builder.eq = (_column: string, value: string) => ((id = value), builder);
+      builder.in = vi.fn(() => builder);
+      builder.lt = (...args: unknown[]) => (lt.push(args), builder);
+      builder.is = (...args: unknown[]) => (filters.push(["is", ...args]), builder);
+      builder.not = (...args: unknown[]) => (filters.push(["not", ...args]), builder);
+      builder.select = () => {
+        if (updating) {
+          failed.push(id);
+          return Promise.resolve({ data: [{ id }], error: null });
+        }
+        return builder;
+      };
+      builder.then = (resolve: (value: unknown) => unknown) => {
+        selects += 1;
+        return resolve({ data: selects === 1 ? [{ id: "r1" }, { id: "r2" }] : [{ id: "d1" }], error: null });
+      };
+      return builder;
+    };
+    const releaseCreditByReference = vi.fn(release);
+    vi.doMock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: () => makeBuilder() }) }));
     vi.doMock("@/server/billing/credits", () => ({ releaseCreditByReference }));
+    vi.doMock("@/server/budget", () => ({ closeFailedRunBudget: vi.fn().mockResolvedValue(undefined) }));
     vi.resetModules();
-    const { reapStaleRuns, STALE_RUN_MINUTES, STALE_DEFERRED_RUN_MINUTES } = await import("./scheduler");
+    const scheduler = await import("./scheduler");
+    return { ...scheduler, lt, filters, failed, releaseCreditByReference };
+  }
+
+  it("fails plain runs after the stale window and deferred runs only after the longer one", async () => {
+    const { reapStaleRuns, STALE_RUN_MINUTES, STALE_DEFERRED_RUN_MINUTES, lt, filters, failed, releaseCreditByReference } =
+      await setup(async () => true);
 
     const now = new Date("2026-10-01T12:00:00.000Z");
-    await expect(reapStaleRuns(now)).resolves.toBe(4);
+    await expect(reapStaleRuns(now)).resolves.toBe(3);
 
     expect(lt).toEqual([
       ["created_at", new Date(now.getTime() - STALE_RUN_MINUTES * 60_000).toISOString()],
       ["created_at", new Date(now.getTime() - STALE_DEFERRED_RUN_MINUTES * 60_000).toISOString()],
     ]);
     expect(filters).toEqual([["is", "output", null], ["not", "output->job", "is", null]]);
-    expect(releaseCreditByReference).toHaveBeenCalledTimes(4);
+    expect(releaseCreditByReference).toHaveBeenCalledTimes(3);
     expect(releaseCreditByReference).toHaveBeenCalledWith("r1", "stale_run_reaped");
+    expect(failed).toEqual(["r1", "r2", "d1"]);
     expect(STALE_DEFERRED_RUN_MINUTES).toBeGreaterThan(STALE_RUN_MINUTES);
+  });
+
+  it("leaves a run in flight when its credit release fails, so the next tick retries instead of stranding the credit", async () => {
+    const { reapStaleRuns, failed } = await setup(async (runId) => {
+      if (runId === "r1") throw new Error("connection reset");
+      if (runId === "r2") throw Object.assign(new Error("settled credit reservation cannot be released"), { code: "55000" });
+      return true;
+    });
+
+    await expect(reapStaleRuns(new Date("2026-10-01T12:00:00.000Z"))).resolves.toBe(2);
+    expect(failed).toEqual(["r2", "d1"]);
   });
 });

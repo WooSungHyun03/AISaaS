@@ -95,34 +95,50 @@ export async function reapStaleRuns(now: Date = new Date()): Promise<number> {
 
   const plain = await admin
     .from("automation_runs")
-    .update(failure)
+    .select("id")
     .in("status", ["QUEUED", "RUNNING"])
     .lt("created_at", cutoff(STALE_RUN_MINUTES))
-    .is("output", null)
-    .select("id");
+    .is("output", null);
   if (plain.error) throw plain.error;
 
   const deferred = await admin
     .from("automation_runs")
-    .update(failure)
+    .select("id")
     .in("status", ["QUEUED", "RUNNING"])
     .lt("created_at", cutoff(STALE_DEFERRED_RUN_MINUTES))
-    .not("output->job", "is", null)
-    .select("id");
+    .not("output->job", "is", null);
   if (deferred.error) throw deferred.error;
 
-  // A stale run can no longer settle successfully. Close its reservation by
-  // the immutable run-id reference; publish-only/unmetered runs simply return false.
-  const reapedIds = [...(plain.data ?? []), ...(deferred.data ?? [])].map((run) => run.id);
-  for (const runId of reapedIds) {
-    await releaseCreditByReference(runId, "stale_run_reaped");
+  // A stale run can no longer settle successfully, so its credit reservation is released (by the immutable run-id
+  // reference; publish-only/unmetered runs simply return false) BEFORE the run is marked FAILED. The other order
+  // stranded the credit for good when the release hit a transient error: the FAILED run was never selected again.
+  // Now such a run stays in flight and the next tick retries it; release_credit is idempotent.
+  let reaped = 0;
+  for (const { id: runId } of [...(plain.data ?? []), ...(deferred.data ?? [])]) {
+    try {
+      await releaseCreditByReference(runId, "stale_run_reaped");
+    } catch (error) {
+      // 55000 = the reservation was already settled: nothing to strand, so the run is still closed below.
+      if ((error as { code?: string } | null)?.code !== "55000") {
+        logger.error("cron_reap_release_failed", { runId, message: error instanceof Error ? error.message : String(error) });
+        continue;
+      }
+    }
     // The same for the spend budget: what the run reserved counts as spent, its item slot goes back. No-op for unmetered runs.
     try {
       await closeFailedRunBudget(runId, "stale_run_reaped");
     } catch (error) {
       logger.error("cron_reap_budget_failed", { runId, message: error instanceof Error ? error.message : String(error) });
     }
+    const { data, error } = await admin
+      .from("automation_runs")
+      .update(failure)
+      .eq("id", runId)
+      .in("status", ["QUEUED", "RUNNING"])
+      .select("id");
+    if (error) throw error;
+    reaped += data?.length ?? 0;
   }
 
-  return reapedIds.length;
+  return reaped;
 }

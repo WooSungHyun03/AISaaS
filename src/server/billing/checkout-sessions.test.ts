@@ -143,9 +143,36 @@ describe("claimCheckoutSession", () => {
   });
 
   it("rejects a session already being processed by another request", async () => {
-    fromMock.mockReturnValueOnce(makeBuilder({ data: { ...SESSION_ROW, status: "PROCESSING" }, error: null }));
+    fromMock.mockReturnValueOnce(makeBuilder({ data: { ...SESSION_ROW, status: "PROCESSING", updated_at: new Date().toISOString() }, error: null }));
     const error = await claimCheckoutSession("session-1", "user-1", "toss").catch((caught) => caught);
     expect((error as InstanceType<typeof BillingCheckoutError>).code).toBe("CHECKOUT_IN_PROGRESS");
+  });
+
+  it("takes over a PROCESSING claim abandoned for more than 10 minutes, even past the checkout window", async () => {
+    const abandoned = {
+      ...SESSION_ROW,
+      status: "PROCESSING" as const,
+      updated_at: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      expires_at: new Date(Date.now() - 1000).toISOString(),
+    };
+    fromMock.mockReturnValueOnce(makeBuilder({ data: abandoned, error: null }));
+    const claimed = makeBuilder({ data: { ...abandoned, updated_at: new Date().toISOString() }, error: null });
+    fromMock.mockReturnValueOnce(claimed);
+
+    const result = await claimCheckoutSession("session-1", "user-1", "toss");
+
+    expect(claimed.eq).toHaveBeenCalledWith("status", "PROCESSING");
+    expect(claimed.eq).toHaveBeenCalledWith("updated_at", abandoned.updated_at);
+    expect(claimed.in).not.toHaveBeenCalled();
+    expect(result.status).toBe("PROCESSING");
+  });
+
+  it("does not take over a recent PROCESSING claim", async () => {
+    const recent = { ...SESSION_ROW, status: "PROCESSING" as const, updated_at: new Date(Date.now() - 60 * 1000).toISOString() };
+    fromMock.mockReturnValueOnce(makeBuilder({ data: recent, error: null }));
+    const error = await claimCheckoutSession("session-1", "user-1", "toss").catch((caught) => caught);
+    expect((error as InstanceType<typeof BillingCheckoutError>).code).toBe("CHECKOUT_IN_PROGRESS");
+    expect(fromMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a canceled session", async () => {

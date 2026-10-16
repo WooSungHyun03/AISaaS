@@ -28,6 +28,19 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // getUser() may have refreshed the session and queued new auth cookies on `response`. A bare
+  // NextResponse.redirect() would drop them: the browser keeps the old, already-rotated refresh
+  // token and is signed out on its next request. Every redirect below carries them over.
+  const redirectTo = (pathname: string, search?: Record<string, string>) => {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = pathname;
+    redirectUrl.search = "";
+    for (const [key, value] of Object.entries(search ?? {})) redirectUrl.searchParams.set(key, value);
+    const redirect = NextResponse.redirect(redirectUrl);
+    for (const cookie of response.cookies.getAll()) redirect.cookies.set(cookie);
+    return redirect;
+  };
+
   const { pathname } = request.nextUrl;
   const isProtected = matchesPrefix(pathname, PROTECTED_PREFIXES);
   const isAuthPage = matchesPrefix(pathname, AUTH_PREFIXES);
@@ -35,33 +48,13 @@ export async function updateSession(request: NextRequest) {
   if (user) {
     const { data: profile } = await supabase.from("profiles").select("account_status").eq("id", user.id).maybeSingle();
     const suspended = profile?.account_status === "SUSPENDED";
-    if (suspended && pathname !== "/account-suspended") {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = "/account-suspended";
-      redirectUrl.search = "";
-      return NextResponse.redirect(redirectUrl);
-    }
-    if (!suspended && pathname === "/account-suspended") {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = "/dashboard";
-      redirectUrl.search = "";
-      return NextResponse.redirect(redirectUrl);
-    }
+    if (suspended && pathname !== "/account-suspended") return redirectTo("/account-suspended");
+    if (!suspended && pathname === "/account-suspended") return redirectTo("/dashboard");
   }
 
-  if (!user && isProtected) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/login";
-    redirectUrl.searchParams.set("redirectTo", pathname);
-    return NextResponse.redirect(redirectUrl);
-  }
+  if (!user && isProtected) return redirectTo("/login", { redirectTo: pathname });
 
-  if (user && isAuthPage) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/dashboard";
-    redirectUrl.search = "";
-    return NextResponse.redirect(redirectUrl);
-  }
+  if (user && isAuthPage) return redirectTo("/dashboard");
 
   return response;
 }

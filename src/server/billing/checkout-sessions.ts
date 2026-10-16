@@ -61,6 +61,13 @@ export async function getCheckoutSession(sessionId: string, userId: string): Pro
   return data;
 }
 
+/**
+ * A request that claimed a session and then died (function timeout, crash) never reaches markCheckoutFailed, which
+ * left the session PROCESSING forever: the user may have paid, got no credits, and every retry was refused. A claim
+ * older than any request can run is treated as abandoned and may be taken over.
+ */
+const STALE_PROCESSING_MS = 10 * 60 * 1000;
+
 export async function claimCheckoutSession(
   sessionId: string,
   userId: string,
@@ -71,25 +78,31 @@ export async function claimCheckoutSession(
     throw new BillingCheckoutError("PROVIDER_MISMATCH", "결제 제공자 정보가 일치하지 않습니다.");
   }
   if (existing.status === "SUCCEEDED") return existing;
-  if (existing.status === "PROCESSING") {
+  const stale = existing.status === "PROCESSING"
+    && Date.now() - new Date(existing.updated_at).getTime() > STALE_PROCESSING_MS;
+  if (existing.status === "PROCESSING" && !stale) {
     throw new BillingCheckoutError("CHECKOUT_IN_PROGRESS", "결제를 처리하고 있습니다. 잠시 후 다시 확인해 주세요.");
   }
   if (existing.status === "CANCELED") {
     throw new BillingCheckoutError("CHECKOUT_CANCELED", "취소된 결제 요청입니다.");
   }
-  if (new Date(existing.expires_at).getTime() < Date.now()) {
+  // A stale PROCESSING claim may already have been charged by the provider, so it is retried even past the
+  // checkout window; the provider calls are idempotent per session and the grant is idempotent per order.
+  if (!stale && new Date(existing.expires_at).getTime() < Date.now()) {
     throw new BillingCheckoutError("CHECKOUT_EXPIRED", "결제 요청 시간이 만료되었습니다. 플랜을 다시 선택해 주세요.");
   }
 
   const admin = createAdminClient();
-  const { data, error } = await admin
+  const claim = admin
     .from("billing_checkout_sessions")
     .update({ status: "PROCESSING", error_code: null, error_message: null })
     .eq("id", sessionId)
-    .eq("user_id", userId)
-    .in("status", ["PENDING", "FAILED"])
-    .select("*")
-    .maybeSingle();
+    .eq("user_id", userId);
+  // Compare-and-set on updated_at so two retries of the same stale claim cannot both take it over.
+  const { data, error } = await (stale
+    ? claim.eq("status", "PROCESSING").eq("updated_at", existing.updated_at)
+    : claim.in("status", ["PENDING", "FAILED"])
+  ).select("*").maybeSingle();
 
   if (error) throw error;
   if (!data) throw new BillingCheckoutError("CHECKOUT_IN_PROGRESS", "결제를 처리하고 있습니다. 잠시 후 다시 확인해 주세요.");

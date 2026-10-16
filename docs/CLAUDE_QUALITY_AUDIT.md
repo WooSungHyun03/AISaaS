@@ -4,7 +4,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 `main`, fixes what it finds, verifies, and pushes. The next run starts its
 "new changes" review from the **last reviewed SHA** below.
 
-**Last reviewed SHA:** `aae8954` (2026-10-15 run — update the line on every run)
+**Last reviewed SHA:** `33e831f` (2026-10-16 run — update the line on every run)
 
 ## Open findings (carry over until fixed)
 
@@ -32,8 +32,24 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 | F-020 | P1 | channels collection / 팀원 1 | A channel paused after 12 failed collections was never collected again: the daily run only claims ACTIVE rows, nothing set it back, and the growth card told owners to "다시 등록" — but registering the same address returns the existing PAUSED row. | **fixed 2026-10-15** (`persistChannelCollection` sets a non-ACTIVE channel back to ACTIVE, streak 0, next 06:00 KST whenever a user-triggered diagnosis reaches the source; card copy points to ‘다시 진단하기’) |
 | F-021 | P2 | calendar / 팀원 1 | "일정 추가" between 23:00 and 23:59 KST pre-filled the start time `24:00` (invalid for a time input; end became earlier than start). | **fixed 2026-10-15** (`nextHourWall` rolls over to 00:00 of the next day) |
 | F-022 | P2 | dead code / repo | Never reached from any route or UI: `src/server/customer-support/widget.ts` (`handleWidgetChatRequest`, `getWidgetDisplayInfo`) + `answer.ts`/`conversations.ts`, `setup-request-transitions.ts`, `src/server/directory/*` (sync/classifier/github), and the public `/directory` page has no link anywhere. Owners should delete or wire them up; the audit did not delete teammates' code. | open |
+| F-023 | P2 | auth proxy | `updateSession` (src/lib/supabase/middleware.ts) built its redirects with a bare `NextResponse.redirect()`, dropping the auth cookies `getUser()` had just refreshed onto `response`. A signed-in user whose access token had expired and who opened `/login`/`/signup` (bounced to /dashboard) or a suspended user got redirected with the old, already-rotated refresh token in the browser, and was signed out on a later request. | **fixed 2026-10-16** (every redirect copies `response.cookies`) |
+| F-024 | P1 | billing checkout / 팀원 2 | A request that claimed a checkout session (`PROCESSING`) and then died (function timeout/crash after Toss confirmed) never reached `markCheckoutFailed`; the session stayed PROCESSING forever, so the user could have paid, got no credits, and every retry of the success URL answered "처리 중". | **fixed 2026-10-16** (`claimCheckoutSession` takes over a PROCESSING claim older than 10 min by compare-and-set on `updated_at`, even past the 30-min checkout window; provider confirm/charge are idempotent per session, `complete_billing_order` per order) |
+| F-025 | P1 | automations reaper / 팀원 2 | `reapStaleRuns` marked stale runs FAILED **before** releasing their credit reservation. A transient error in `releaseCreditByReference` aborted the loop and, because FAILED runs are never selected again, left that run's credit (and the later runs' credits in the same tick) reserved for good. | **fixed 2026-10-16** (select → release → mark FAILED per run; a failed release leaves the run in flight for the next tick; an already-settled reservation (55000) still closes the run) |
 
 ## Run log
+
+### 2026-10-16 (run 7)
+
+- **Start SHA:** `33e831f` (no commits since the run-6 commit; whole-project review day).
+- **Working tree:** clean except the never-committed `mascot/` and `*-marketing.md`.
+- **Local env:** `bash scripts/dev-db.sh start` — local DB at 0075.
+- **Reviewed:** auth proxy (`src/proxy.ts` → `updateSession`: route gating, suspension redirect, cookie handling), billing routes (Toss success/fail, webhook size cap + no-op Toss webhook, mock complete with `assertMockBillingAllowed`), Toss/mock providers (amount/order/session checks, idempotency keys, refund verification), `claimCheckoutSession` lifecycle, `complete_billing_order` (idempotent grant), credit read model, stale-run reaper + `release_credit` idempotency, cron routes (shared-secret `safeEqual`), inquiries (hourly cap, admin answer/close).
+- **Findings & fixes:** F-023 (P2, refreshed session cookies dropped on proxy redirects), F-024 (P1, checkout stuck PROCESSING after a crash), F-025 (P1, stale-run reaper could strand reserved credits). Checked, no change: admin inquiry search does not escape `%`/`_` in `ilike` (admin-only, harmless); `answerInquiry` writes the status-change history even if a concurrent change made its CAS update match nothing (cosmetic).
+- **Tests added:** `src/lib/supabase/middleware.test.ts` (refreshed cookie kept on /login bounce, suspension redirect and pass-through; signed-out redirect carries only `redirectTo`), `checkout-sessions.test.ts` (stale PROCESSING taken over past the window; recent PROCESSING still refused), `checkout-sessions.db.test.ts` (updated_at compare-and-set lets exactly one taker win on the real schema), `scheduler.test.ts` (release before FAILED; failed release keeps the run in flight; settled reservation still closes the run).
+- **Verification:** `npm run lint` ✅, `npm run typecheck` ✅, `npm test` ✅ (1224 passed / 53 skipped), `npm run build` ✅, `RUN_DB_TESTS=1 vitest` on all 12 DB files ✅ 52/52. Browser smoke test **not run**: `preview_start` refuses to start dev servers in unattended runs.
+- **User-only actions:** unchanged — production `npx supabase db push --linked --dry-run` then `npx supabase db push --linked` if 0074/0075 are not applied yet; remove unused `YOUTUBE_CLIENT_*` / Instagram variables from Vercel. No new migration today.
+- **Next run priorities:** browser smoke of `/diagnosis`, `/growth-report`, `/calendar`, `/billing` when a dev server can be started (interactive session); F-011 decision; F-022 cleanup by owners; middleware runs `getUser()` + a `profiles` query on every request including `/api/cron/*` and public pages (Supabase Free usage — consider skipping the profile lookup on public paths).
+- **Commit:** see git log (fix(auth,billing,automations): keep refreshed cookies on proxy redirects; recover abandoned checkout claims; reaper releases credits first)
 
 ### 2026-10-15 (run 6)
 
