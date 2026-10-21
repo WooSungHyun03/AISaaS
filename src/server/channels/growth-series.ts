@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ChannelsError, deltaPercent, latestBefore } from "./summary";
 import { nextDailyCollectionAt } from "./schedule";
 import type { ChannelPlatform } from "./platform";
+import { bucketPoints } from "@/lib/growth/select";
 
 const DAY_MS = 86_400_000;
 
@@ -89,8 +90,12 @@ export interface ChannelCollectionInfo {
   nextCollectionAt: string | null;
   /** How many different KST days have a real snapshot: 1 means "baseline only", the trend starts with the second. */
   measuredDays: number;
-  /** Paused after repeated failures: nothing is collected until the channel is registered again. */
+  /** Paused (the channel was confirmed gone for days): it is probed once a week and resumes by itself when it answers again. */
   paused: boolean;
+  /** The last time a collection really measured something (a failed attempt does not move it), or null. */
+  lastSuccessAt: string | null;
+  /** Why the last attempt measured nothing or failed (CHANNEL_NOT_FOUND, ROBOTS_DISALLOWED, FEED_TRANSIENT, …), for the owner's message. */
+  errorCode: string | null;
 }
 
 export type GrowthGranularity = "day" | "week" | "month";
@@ -114,7 +119,7 @@ export interface GrowthSeriesResult {
   hasAnyData: boolean;
 }
 
-type SnapshotRow = { channel_id: string; metric: string; value: number; recorded_at: string; source: string };
+export type SnapshotRow = { channel_id: string; metric: string; value: number; recorded_at: string; source: string };
 
 /** PostgREST returns at most 1,000 rows per request; a longer window than that (90 days x several metrics) must be read page by page or the oldest points silently vanish. */
 const SNAPSHOT_PAGE_SIZE = 1_000;
@@ -130,19 +135,27 @@ function toSnapshotRow(raw: { channel_id: string; metric: string; value: unknown
 }
 
 /**
- * Every snapshot of these channels from `since` on (oldest first), plus the single latest one BEFORE `since` for each
+ * Every snapshot of one channel from `since` on (oldest first), plus the single latest one BEFORE `since` for each
  * metric: the comparison "value before the period" must still exist when the channel was last collected a while ago.
  */
-async function fetchSnapshots(supabase: SnapshotClient, channelIds: string[], since: string): Promise<SnapshotRow[]> {
+async function fetchChannelSnapshots(supabase: SnapshotClient, channelId: string, since: string): Promise<SnapshotRow[]> {
   const rows: SnapshotRow[] = [];
+  const older = supabase
+    .from("marketing_metric_snapshots")
+    .select("channel_id, metric, value, recorded_at, source")
+    .eq("channel_id", channelId)
+    .lt("recorded_at", since)
+    .order("recorded_at", { ascending: false })
+    .limit(SNAPSHOT_PAGE_SIZE);
+  // The page loop and the "before the window" read are independent: they run side by side.
+  const olderPromise = Promise.resolve(older);
   for (let page = 0; page < MAX_SNAPSHOT_PAGES; page++) {
     const { data, error } = await supabase
       .from("marketing_metric_snapshots")
       .select("channel_id, metric, value, recorded_at, source")
-      .in("channel_id", channelIds)
+      .eq("channel_id", channelId)
       .gte("recorded_at", since)
       .order("recorded_at", { ascending: true })
-      .order("channel_id", { ascending: true })
       .range(page * SNAPSHOT_PAGE_SIZE, (page + 1) * SNAPSHOT_PAGE_SIZE - 1);
     if (error) throw new ChannelsError("DATABASE_ERROR", "채널 성장 지표를 불러오지 못했습니다.", { cause: error });
     const batch = (data ?? []) as Array<Parameters<typeof toSnapshotRow>[0]>;
@@ -153,17 +166,11 @@ async function fetchSnapshots(supabase: SnapshotClient, channelIds: string[], si
     if (batch.length < SNAPSHOT_PAGE_SIZE) break;
   }
 
-  const { data: older, error: olderError } = await supabase
-    .from("marketing_metric_snapshots")
-    .select("channel_id, metric, value, recorded_at, source")
-    .in("channel_id", channelIds)
-    .lt("recorded_at", since)
-    .order("recorded_at", { ascending: false })
-    .limit(SNAPSHOT_PAGE_SIZE);
+  const { data: before, error: olderError } = await olderPromise;
   if (olderError) throw new ChannelsError("DATABASE_ERROR", "채널 성장 지표를 불러오지 못했습니다.", { cause: olderError });
   const have = new Set(rows.map((row) => `${row.channel_id}:${row.metric}:${row.recorded_at}`));
   const seen = new Set<string>();
-  for (const raw of (older ?? []) as Array<Parameters<typeof toSnapshotRow>[0]>) {
+  for (const raw of (before ?? []) as Array<Parameters<typeof toSnapshotRow>[0]>) {
     const key = `${raw.channel_id}:${raw.metric}`;
     if (seen.has(key) || have.has(`${key}:${raw.recorded_at}`)) continue;
     seen.add(key);
@@ -171,6 +178,12 @@ async function fetchSnapshots(supabase: SnapshotClient, channelIds: string[], si
     if (row) rows.push(row);
   }
   return rows;
+}
+
+/** Snapshots of all the channels, one request per channel and all of them at once instead of one long page-by-page read. */
+async function fetchSnapshots(supabase: SnapshotClient, channelIds: string[], since: string): Promise<SnapshotRow[]> {
+  const perChannel = await Promise.all(channelIds.map((channelId) => fetchChannelSnapshots(supabase, channelId, since)));
+  return perChannel.flat();
 }
 
 /** KST (UTC+9) calendar date for an instant. Exported for reuse by growth-narrative.ts's "already generated today" cache check. */
@@ -181,35 +194,6 @@ export function kstDate(timeMs: number): string {
 /** The last millisecond of a KST calendar day (YYYY-MM-DD), as a UTC instant. */
 export function endOfKstDayMs(date: string): number {
   return Date.parse(`${date}T00:00:00.000Z`) + DAY_MS - 1 - 9 * 3_600_000;
-}
-
-/** Monday-based week start (KST calendar date) of a YYYY-MM-DD date. */
-function weekStart(date: string): string {
-  const ms = Date.parse(`${date}T00:00:00Z`);
-  const weekday = (new Date(ms).getUTCDay() + 6) % 7; // Monday = 0
-  return new Date(ms - weekday * DAY_MS).toISOString().slice(0, 10);
-}
-
-function bucketKey(date: string, granularity: GrowthGranularity): string {
-  if (granularity === "week") return weekStart(date);
-  if (granularity === "month") return `${date.slice(0, 7)}-01`;
-  return date;
-}
-
-/** Folds the day-by-day points into week / month buckets: a running total keeps its last known value, a flow adds up. */
-function bucketPoints(points: GrowthSeriesPoint[], granularity: GrowthGranularity, kind: "TOTAL" | "FLOW"): GrowthSeriesPoint[] {
-  if (granularity === "day") return points;
-  const buckets = new Map<string, GrowthSeriesPoint[]>();
-  for (const point of points) {
-    const key = bucketKey(point.date, granularity);
-    buckets.set(key, [...(buckets.get(key) ?? []), point]);
-  }
-  return [...buckets.entries()].map(([date, inside]) => {
-    const known = inside.filter((point) => point.value !== null);
-    const measured = inside.some((point) => point.measured);
-    if (known.length === 0) return { date, value: null, measured };
-    return { date, value: kind === "FLOW" ? known.reduce((sum, point) => sum + (point.value ?? 0), 0) : (known[known.length - 1].value as number), measured };
-  });
 }
 
 type SeriesRow = { value: number; recorded_at: string; source: string };
@@ -306,7 +290,7 @@ function buildDailyIncreaseSeries(metric: string, source: SeriesRow[], nowMs: nu
   };
 }
 
-type ChannelRow = {
+export type ChannelRow = {
   id: string;
   platform: ChannelPlatform;
   external_id: string;
@@ -316,17 +300,21 @@ type ChannelRow = {
   thumbnail_url: string | null;
   next_snapshot_at: string | null;
   last_collected_at: string | null;
+  last_success_at: string | null;
   last_collection_status: string | null;
+  last_error_code: string | null;
 };
 
-function collectionInfo(channel: ChannelRow, measuredDays: number): ChannelCollectionInfo {
+const CHANNEL_COLUMNS = "id, platform, external_id, url, status, display_name, thumbnail_url, next_snapshot_at, last_collected_at, last_success_at, last_collection_status, last_error_code";
+
+function collectionInfo(channel: ChannelRow, measuredDays: number, nowMs: number): ChannelCollectionInfo {
   const raw = channel.last_collection_status;
   const state: CollectionState = raw === "SUCCESS" || raw === "FAILED" || raw === "QUOTA_EXCEEDED" || raw === "UNAVAILABLE" ? raw : measuredDays > 0 ? "SUCCESS" : "PENDING";
   const paused = channel.status === "PAUSED" || channel.status === "ERROR";
   const scheduled = channel.next_snapshot_at ? Date.parse(channel.next_snapshot_at) : NaN;
   // A retry slot (30 min) is internal: what the owner is told is always the next regular 06:00 KST.
-  const nextCollectionAt = paused ? null : (Number.isFinite(scheduled) && scheduled > Date.now() + 2 * 3_600_000 ? new Date(scheduled) : nextDailyCollectionAt(new Date())).toISOString();
-  return { state, lastCollectedAt: channel.last_collected_at, nextCollectionAt, measuredDays, paused };
+  const nextCollectionAt = paused ? null : (Number.isFinite(scheduled) && scheduled > nowMs + 2 * 3_600_000 ? new Date(scheduled) : nextDailyCollectionAt(new Date(nowMs))).toISOString();
+  return { state, lastCollectedAt: channel.last_collected_at, nextCollectionAt, measuredDays, paused, lastSuccessAt: channel.last_success_at ?? (state === "SUCCESS" ? channel.last_collected_at : null), errorCode: channel.last_error_code };
 }
 
 /**
@@ -340,53 +328,64 @@ function collectionInfo(channel: ChannelRow, measuredDays: number): ChannelColle
  * never surface a view/visitor metric, no matter what ends up in the snapshots table. Old `yt_analytics.*` snapshots
  * (from the removed OAuth integration) stay in the database but are never read here.
  */
-export async function getChannelGrowthSeries(businessId: string, options: { days?: number; now?: Date; granularity?: GrowthGranularity } = {}): Promise<GrowthSeriesResult> {
-  const days = options.days ?? 30;
-  const granularity = options.granularity ?? "day";
-  const nowMs = (options.now ?? new Date()).getTime();
+/** The channels of a business in the order they are shown: YouTube, Naver, Tistory. */
+export async function loadGrowthChannels(businessId: string): Promise<ChannelRow[]> {
   const supabase = await createClient();
-
   const { data: channelRows, error: channelsError } = await supabase
     .from("tracked_channels")
-    .select("id, platform, external_id, url, status, display_name, thumbnail_url, next_snapshot_at, last_collected_at, last_collection_status")
+    .select(CHANNEL_COLUMNS)
     .eq("business_id", businessId)
     .order("created_at", { ascending: true });
   if (channelsError) throw new ChannelsError("DATABASE_ERROR", "추적 중인 채널을 불러오지 못했습니다.", { cause: channelsError });
 
-  // A stable on-screen order: YouTube, Naver, Tistory (rows registered together share one created_at).
+  // A stable on-screen order (rows registered together share one created_at).
   const platformRank = (platform: string) => ["youtube", "naver_blog", "tistory"].indexOf(platform);
-  const channels = ((channelRows ?? []) as ChannelRow[]).map((channel, index) => ({ channel, index })).sort((a, b) => platformRank(a.channel.platform) - platformRank(b.channel.platform) || a.index - b.index).map(({ channel }) => channel);
+  return ((channelRows ?? []) as ChannelRow[]).map((channel, index) => ({ channel, index })).sort((a, b) => platformRank(a.channel.platform) - platformRank(b.channel.platform) || a.index - b.index).map(({ channel }) => channel);
+}
+
+/** Every snapshot of these channels since `windowDays` (twice, for the comparison period) before `nowMs`. */
+export async function loadGrowthSnapshots(channels: ChannelRow[], nowMs: number, windowDays: number): Promise<SnapshotRow[]> {
+  if (channels.length === 0) return [];
+  const supabase = await createClient();
+  const since = new Date(nowMs - (windowDays * 2 + 1) * DAY_MS).toISOString();
+  return fetchSnapshots(supabase, channels.map((channel) => channel.id), since);
+}
+
+/** The channels of a business with every snapshot in the window (two steps in a row: the snapshots need the channel ids). */
+export async function loadGrowthInputs(businessId: string, nowMs: number, windowDays: number): Promise<{ channels: ChannelRow[]; snapshots: SnapshotRow[] }> {
+  const channels = await loadGrowthChannels(businessId);
+  return { channels, snapshots: await loadGrowthSnapshots(channels, nowMs, windowDays) };
+}
+
+/** One channel's series for one period and view, from the snapshots already read. Pure. */
+export function buildChannelSeries(channel: ChannelRow, snapshots: SnapshotRow[], nowMs: number, days: number, granularity: GrowthGranularity): ChannelGrowthSeries {
+  const own = snapshots.filter((row) => row.channel_id === channel.id);
+  const rowsOf = (metric: string) => own.filter((row) => row.metric === metric);
+  const measuredDays = new Set(own.map((row) => kstDate(Date.parse(row.recorded_at)))).size;
+  return {
+    channelId: channel.id,
+    platform: channel.platform,
+    externalId: channel.external_id,
+    url: channel.url,
+    displayName: channel.display_name,
+    thumbnailUrl: channel.thumbnail_url,
+    collection: collectionInfo(channel, measuredDays, nowMs),
+    metrics: ALLOWED_GROWTH_METRICS[channel.platform].map((metric) => {
+      const derived = DERIVED_FLOW_METRICS[metric];
+      return derived ? buildDailyIncreaseSeries(metric, rowsOf(derived.source), nowMs, days, granularity) : buildMetricSeries(metric, rowsOf(metric), nowMs, days, granularity);
+    }),
+  };
+}
+
+export async function getChannelGrowthSeries(businessId: string, options: { days?: number; now?: Date; granularity?: GrowthGranularity } = {}): Promise<GrowthSeriesResult> {
+  const days = options.days ?? 30;
+  const granularity = options.granularity ?? "day";
+  const nowMs = (options.now ?? new Date()).getTime();
+
+  const { channels, snapshots } = await loadGrowthInputs(businessId, nowMs, days);
   if (channels.length === 0) return { businessId, days, granularity, channels: [], hasAnyData: false };
 
-  const since = new Date(nowMs - (days * 2 + 1) * DAY_MS).toISOString();
-  const snapshots = await fetchSnapshots(supabase, channels.map((channel) => channel.id), since);
-
-  const byChannelMetric = new Map<string, SnapshotRow[]>();
-  for (const row of snapshots) {
-    const key = `${row.channel_id}:${row.metric}`;
-    const bucket = byChannelMetric.get(key) ?? [];
-    bucket.push(row);
-    byChannelMetric.set(key, bucket);
-  }
-
-  const result: ChannelGrowthSeries[] = channels.map((channel) => {
-    const rowsOf = (metric: string) => byChannelMetric.get(`${channel.id}:${metric}`) ?? [];
-    const measuredDays = new Set(snapshots.filter((row) => row.channel_id === channel.id).map((row) => kstDate(Date.parse(row.recorded_at)))).size;
-    return {
-      channelId: channel.id,
-      platform: channel.platform,
-      externalId: channel.external_id,
-      url: channel.url,
-      displayName: channel.display_name,
-      thumbnailUrl: channel.thumbnail_url,
-      collection: collectionInfo(channel, measuredDays),
-      metrics: ALLOWED_GROWTH_METRICS[channel.platform].map((metric) => {
-        const derived = DERIVED_FLOW_METRICS[metric];
-        return derived ? buildDailyIncreaseSeries(metric, rowsOf(derived.source), nowMs, days, granularity) : buildMetricSeries(metric, rowsOf(metric), nowMs, days, granularity);
-      }),
-    };
-  });
-
+  const result = channels.map((channel) => buildChannelSeries(channel, snapshots, nowMs, days, granularity));
   const hasAnyData = result.some((channel) => channel.metrics.some((metric) => metric.current !== null || metric.points.some((point) => point.value !== null)));
   return { businessId, days, granularity, channels: result, hasAnyData };
 }

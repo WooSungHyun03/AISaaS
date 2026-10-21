@@ -24,11 +24,14 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // getClaims() verifies the session's JWT against the project's published signing key (cached, no network round trip
+  // on the production project, which uses asymmetric keys) and refreshes the session when it has expired. It is the
+  // check Supabase recommends for a proxy; a project still on a shared secret falls back to asking the Auth server.
+  // A suspended account is still stopped below: that check reads the profile on every request.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const user = claimsData?.claims?.sub ? { id: claimsData.claims.sub } : null;
 
-  // getUser() may have refreshed the session and queued new auth cookies on `response`. A bare
+  // getClaims() may have refreshed the session and queued new auth cookies on `response`. A bare
   // NextResponse.redirect() would drop them: the browser keeps the old, already-rotated refresh
   // token and is signed out on its next request. Every redirect below carries them over.
   const redirectTo = (pathname: string, search?: Record<string, string>) => {

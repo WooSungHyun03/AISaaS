@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findDueMock, runDueMock, reapMock, advanceMock, processChannelsMock, cleanupMock, envState } = vi.hoisted(() => ({
+const { findDueMock, runDueMock, reapMock, advanceMock, processChannelsMock, cleanupMock, envState, tickMocks } = vi.hoisted(() => ({
+  tickMocks: { start: vi.fn(), finish: vi.fn(), cleanup: vi.fn() },
   processChannelsMock: vi.fn(),
   cleanupMock: vi.fn(),
   findDueMock: vi.fn(),
@@ -11,10 +12,11 @@ const { findDueMock, runDueMock, reapMock, advanceMock, processChannelsMock, cle
 }));
 
 vi.mock("@/lib/env/server", () => ({ serverEnv: envState }));
+vi.mock("@/server/automations/ticks", () => ({ startSchedulerTick: tickMocks.start, finishSchedulerTick: tickMocks.finish, cleanupOldTicks: tickMocks.cleanup }));
 vi.mock("@/server/channels/collect-pipeline", () => ({ processDueChannels: processChannelsMock, cleanupOldSnapshots: cleanupMock }));
 vi.mock("@/server/automations", () => ({ findDueAutomations: findDueMock, runDueAutomation: runDueMock, reapStaleRuns: reapMock, advanceDeferredRuns: advanceMock }));
 
-const { POST } = await import("./route");
+const { POST, GET } = await import("./route");
 
 const request = (secret?: string) =>
   new Request("http://localhost/api/cron/run-automations", { method: "POST", headers: secret ? { "x-cron-secret": secret } : {} });
@@ -26,6 +28,9 @@ beforeEach(() => {
   findDueMock.mockResolvedValue([]);
   processChannelsMock.mockResolvedValue({ processed: 0, failed: 0, paused: 0 });
   cleanupMock.mockResolvedValue(0);
+  tickMocks.start.mockResolvedValue("tick-1");
+  tickMocks.finish.mockResolvedValue(undefined);
+  tickMocks.cleanup.mockResolvedValue(undefined);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -124,5 +129,41 @@ describe("POST /api/cron/run-automations", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ processed: 1 });
+  });
+
+  it("passes each due row to runDueAutomation so the slot can be claimed, and records a heartbeat with the outcome", async () => {
+    findDueMock.mockResolvedValue([
+      { id: "a-1", schedule: { frequency: "DAILY", timeOfDay: "09:00" }, next_run_at: "2026-10-20T00:00:00.000Z" },
+      { id: "a-2", schedule: { frequency: "DAILY", timeOfDay: "09:00" }, next_run_at: "2026-10-20T00:00:00.000Z" },
+      { id: "a-3", schedule: { frequency: "DAILY", timeOfDay: "09:00" }, next_run_at: "2026-10-20T00:00:00.000Z" },
+    ]);
+    runDueMock.mockResolvedValueOnce({ runId: "r1", status: "SUCCESS" }).mockResolvedValueOnce({ runId: "", status: "SKIPPED" }).mockResolvedValueOnce({ runId: "r3", status: "FAILED" });
+
+    await POST(request("test-cron-secret"));
+
+    expect(runDueMock).toHaveBeenCalledWith("a-1", { id: "a-1", schedule: { frequency: "DAILY", timeOfDay: "09:00" }, next_run_at: "2026-10-20T00:00:00.000Z" });
+    expect(tickMocks.start).toHaveBeenCalledWith("CRON", expect.any(Date));
+    expect(tickMocks.finish).toHaveBeenCalledWith("tick-1", expect.objectContaining({ dueFound: 3, started: 2, succeeded: 1, failed: 1, skipped: 1 }));
+  });
+
+  it("still answers when the heartbeat table cannot be written", async () => {
+    tickMocks.start.mockResolvedValue(null);
+    expect((await POST(request("test-cron-secret"))).status).toBe(200);
+  });
+
+  describe("GET (Vercel Cron safety net)", () => {
+    const get = (headers: Record<string, string> = {}) => new Request("http://localhost/api/cron/run-automations", { method: "GET", headers });
+
+    it("accepts Vercel's Authorization: Bearer CRON_SECRET and runs a tick recorded as VERCEL_CRON", async () => {
+      const response = await GET(get({ authorization: "Bearer test-cron-secret" }));
+      expect(response.status).toBe(200);
+      expect(tickMocks.start).toHaveBeenCalledWith("VERCEL_CRON", expect.any(Date));
+    });
+
+    it("rejects a missing or wrong bearer token", async () => {
+      expect((await GET(get())).status).toBe(401);
+      expect((await GET(get({ authorization: "Bearer nope" }))).status).toBe(401);
+      expect(findDueMock).not.toHaveBeenCalled();
+    });
   });
 });

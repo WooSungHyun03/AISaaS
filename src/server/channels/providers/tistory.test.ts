@@ -181,6 +181,20 @@ describe("collectTistoryRssMetrics: graceful degradation", () => {
     expect(result.unavailableReason).toBeTruthy();
   });
 
+  it("tells a missing feed (404) from a private one (403) by code, both as 'cannot be measured' rather than errors", async () => {
+    mockOneRequest(makeMockResponse(404, XML_HEADERS));
+    expect(await collectTistoryRssMetrics("https://myname.tistory.com/")).toMatchObject({ unavailableCode: "FEED_NOT_FOUND" });
+    mockOneRequest(makeMockResponse(403, XML_HEADERS));
+    expect(await collectTistoryRssMetrics("https://myname.tistory.com/")).toMatchObject({ unavailableCode: "FEED_FORBIDDEN" });
+  });
+
+  it("an outage (503) or rate limit (429) is thrown as a transient failure with Retry-After, never reported as 'no posts'", async () => {
+    mockOneRequest(makeMockResponse(503, XML_HEADERS));
+    await expect(collectTistoryRssMetrics("https://myname.tistory.com/")).rejects.toMatchObject({ name: "FeedTransientError" });
+    mockOneRequest(makeMockResponse(429, { ...XML_HEADERS, "retry-after": "90" }));
+    await expect(collectTistoryRssMetrics("https://myname.tistory.com/")).rejects.toMatchObject({ name: "FeedTransientError", retryAfterMs: 90_000 });
+  });
+
   it("returns unavailableReason when the response isn't XML at all", async () => {
     mockOneRequest(makeMockResponse(200, { "content-type": "text/html" }), "<html>not rss</html>");
     const result = await collectTistoryRssMetrics("https://myname.tistory.com/");

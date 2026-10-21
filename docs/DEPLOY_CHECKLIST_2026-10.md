@@ -64,6 +64,10 @@ npx supabase db push --linked
 OAuth는 쓰지 않습니다. `docs/EXTERNAL_SETUP.md` 2번대로 **YouTube Data API v3** 를 켜고 API 키를 만들어 `YOUTUBE_API_KEY` 로 넣으세요.
 운영 DB에는 마이그레이션 `0075_channel_collection_v2.sql` 을 적용합니다(옛 OAuth 연결 비밀값 삭제, 수집 상태 컬럼, 영상별 스냅샷·수집 실행 기록 테이블).
 
+## 4-1. 2026-10-21 배포 (0076 먼저)
+
+`docs/RELIABILITY_AND_PERFORMANCE_2026-10-21.md` 8번대로: `npx supabase db push --linked`(0076) → 코드 push → `/api/health/scheduler` 200, 응답 헤더 `x-vercel-id: icn1::icn1`, `/admin/scheduler`. Supabase Storage → Settings 의 업로드 한도가 50MB 미만이면 영상(최대 100MB)은 올라가지 않습니다.
+
 ## 5. 스케줄러
 
 추가 등록 없음. 채널 지표 일일 수집(매일 06:00 KST)은 이미 등록된 5분 틱(`/api/cron/run-automations`)이 함께 처리합니다. 확인: Supabase SQL Editor에서 `select jobname, schedule, active from cron.job;` 에 `run-due-automations` 가 `*/5 * * * *` 로 active 인지 봅니다.

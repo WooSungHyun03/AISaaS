@@ -13,6 +13,7 @@ export * from "./raw-metrics";
 export * from "./growth-series";
 export * from "./growth-content";
 export * from "./growth-narrative";
+export * from "./growth-bundle";
 export * from "./diagnosis-rate-limit";
 export * from "./diagnose";
 export * from "./register";

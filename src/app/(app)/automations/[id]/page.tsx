@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { describeAutomationRunError } from "@/server/shared/errors";
 import { FormMessage } from "@/components/ui/form-message";
 import { PageHeader } from "@/components/layout/page-header";
@@ -27,7 +27,7 @@ export const maxDuration = 300;
 export default async function AutomationDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const { data: automation, error: automationError } = await supabase.from("automations")
@@ -90,7 +90,7 @@ export default async function AutomationDetailPage({ params }: { params: Promise
         title={automation.name}
         description={<span className="flex flex-wrap items-center gap-x-3 gap-y-1"><AutomationStatusBadge status={automation.status} /><span>{business?.name} · {template ? templateTitle(template.slug, template.name) : "콘텐츠"}</span></span>}
         actions={<>
-          <AutomationSettingsDialog key={automation.updated_at} automationId={automation.id} name={automation.name} businessId={automation.business_id} businesses={businesses} schedule={schedule} blogSettings={blogSettings} hasInFlightRun={hasInFlightRun} />
+          <AutomationSettingsDialog key={automation.updated_at} automationId={automation.id} name={automation.name} businessId={automation.business_id} businesses={businesses} schedule={schedule} blogSettings={blogSettings} hasInFlightRun={hasInFlightRun} status={automation.status} />
           <RunNowButton automationId={automation.id} hasInFlightRun={hasInFlightRun} progress={readDeferredJob(inFlightResult.data?.output)?.progress ?? null} />
           <AutomationStatusActions automationId={automation.id} status={automation.status} primary={Boolean(blogConfig)} hasInFlightRun={hasInFlightRun} />
         </>}

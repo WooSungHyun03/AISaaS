@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { FormMessage } from "@/components/ui/form-message";
 import { MockCheckoutConfirm } from "@/components/billing/mock-checkout-confirm";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { getCheckoutSession } from "@/server/billing/checkout-sessions";
 import { getProductConfig, isProductId } from "@/server/billing/products";
 import { getProductOrderByCheckoutSession } from "@/server/billing/orders";
@@ -14,8 +14,7 @@ export default async function MockCheckoutPage({
   const { session: sessionId } = await searchParams;
   if (!sessionId) redirect("/billing");
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
   const checkout = await getCheckoutSession(sessionId, user.id).catch(() => null);
   if (!checkout || checkout.provider !== "mock") redirect("/billing");

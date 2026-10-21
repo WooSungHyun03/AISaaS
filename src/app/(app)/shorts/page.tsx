@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/layout/page-header";
 import { ShortsCreateButton, ShortsStudio, type ShortsJobInfo } from "@/components/automations/shorts-studio";
 import { ShortsPublishingPanel } from "@/components/automations/shorts-publishing-panel";
@@ -26,20 +26,21 @@ export const maxDuration = 300;
 export default async function ShortsPage({ searchParams }: { searchParams: Promise<{ business?: string }> }) {
   const query = await searchParams;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
-  const { data: businesses, error: businessError } = await supabase.from("businesses").select("*")
-    .eq("owner_id", user.id).order("created_at");
+  // Independent reads start together: the business list, the credit balance and the Shorts template.
+  const [{ data: businesses, error: businessError }, credits, { data: template, error: templateError }] = await Promise.all([
+    supabase.from("businesses").select("*").eq("owner_id", user.id).order("created_at"),
+    getUsableCredits(supabase, user.id, "SHORTS"),
+    supabase.from("automation_templates").select("id").eq("slug", "shorts").maybeSingle(),
+  ]);
   if (businessError) throw new Error("사업체 정보를 불러오지 못했습니다.", { cause: businessError });
+  if (templateError) throw new Error("숏폼 템플릿을 확인하지 못했습니다.", { cause: templateError });
   const selectedBusiness = businesses?.find((business) => business.id === query.business) ?? businesses?.[0];
 
   if (!selectedBusiness) return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><EmptyState mascot="point" title="먼저 사업체를 등록해주세요" description="사업 정보가 있어야 업종과 고객에 맞는 숏폼 대본과 장면을 만들 수 있어요." action={<Button asChild><Link href="/business">사업체 등록</Link></Button>} /></div>;
 
-  const credits = await getUsableCredits(supabase, user.id, "SHORTS");
-
-  const { data: template, error: templateError } = await supabase.from("automation_templates").select("id").eq("slug", "shorts").maybeSingle();
-  if (templateError) throw new Error("숏폼 템플릿을 확인하지 못했습니다.", { cause: templateError });
   const { data: automation, error: automationError } = template
     ? await supabase.from("automations").select("*").eq("user_id", user.id).eq("business_id", selectedBusiness.id).eq("template_id", template.id).order("created_at").limit(1).maybeSingle()
     : { data: null, error: null };
@@ -60,11 +61,22 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     return (run.safe?.videoUrl || run.safe?.videoPath) && run.safe.script && raw?.operation !== "PUBLISH";
   });
   // A video made by the ad pipeline sits in private Storage: sign a fresh address for this page view. Older videos kept a public address.
-  const previewVideoUrl = previewRun?.safe
-    ? previewRun.safe.videoPath && isOwnedAssetPath(previewRun.safe.videoPath, user.id, automation.id)
-      ? await signAsset(createAdminClient(), VIDEO_BUCKET, previewRun.safe.videoPath, 60 * 60).catch(() => null)
-      : previewRun.safe.videoUrl
-    : null;
+  const schedule = automation.schedule as unknown as AutomationSchedule;
+  const settings = parseShortsSettings(automation.config);
+  const generatedPublishing = shortsPublishingSchema.safeParse(previewRun?.safe?.shortsPublishing);
+  // Signing the preview video, signing the reference files and reading the working copy of the posting text do not
+  // depend on each other: one round of requests instead of three in a row.
+  const [previewVideoUrl, assetViews, { data: workingCopy }] = await Promise.all([
+    previewRun?.safe
+      ? previewRun.safe.videoPath && isOwnedAssetPath(previewRun.safe.videoPath, user.id, automation.id)
+        ? signAsset(createAdminClient(), VIDEO_BUCKET, previewRun.safe.videoPath, 60 * 60).catch(() => null)
+        : Promise.resolve(previewRun.safe.videoUrl)
+      : Promise.resolve(null),
+    assetViewsFor(settings.assets, user.id, automation.id),
+    previewRun && generatedPublishing.success
+      ? supabase.from("content_history").select("id,publishing").eq("run_id", previewRun.id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
   const latestPreview = previewRun?.safe && previewVideoUrl ? {
     runId: previewRun.id,
     createdAt: previewRun.created_at,
@@ -80,16 +92,9 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     qa: previewRun.safe.qa,
     sample: previewRun.safe.sampleVideo,
   } : null;
-  const schedule = automation.schedule as unknown as AutomationSchedule;
-  const settings = parseShortsSettings(automation.config);
-  const assetViews = await assetViewsFor(settings.assets, user.id, automation.id);
   const jobState = readDeferredJob(inFlightResult.data?.output);
   const job = jobInfoOf(jobState?.state);
   // The posting text written for the latest video, and the owner's edited copy of it (older videos have neither).
-  const generatedPublishing = shortsPublishingSchema.safeParse(previewRun?.safe?.shortsPublishing);
-  const { data: workingCopy } = previewRun && generatedPublishing.success
-    ? await supabase.from("content_history").select("id,publishing").eq("run_id", previewRun.id).maybeSingle()
-    : { data: null };
   const editedPublishing = shortsPublishingSchema.safeParse(workingCopy?.publishing);
   const publishingSlot = generatedPublishing.success ? (
     <ShortsPublishingPanel

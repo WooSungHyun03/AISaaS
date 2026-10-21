@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { FormMessage } from "@/components/ui/form-message";
 import { TossCheckoutButton } from "@/components/billing/toss-checkout-button";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { clientEnv } from "@/lib/env/client";
 import { tossClientKey } from "@/server/billing/toss-keys";
 import { getCheckoutSession } from "@/server/billing/checkout-sessions";
@@ -12,8 +12,7 @@ export default async function TossCheckoutPage({ searchParams }: PageProps<"/bil
   const { session: sessionId } = await searchParams;
   if (typeof sessionId !== "string") redirect("/billing");
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const checkout = await getCheckoutSession(sessionId, user.id).catch(() => null);

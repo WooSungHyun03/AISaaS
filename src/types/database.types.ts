@@ -328,6 +328,7 @@ export interface Database {
           config: Json;
           last_run_at: string | null;
           next_run_at: string | null;
+          consecutive_failures: number;
           created_at: string;
           updated_at: string;
         };
@@ -342,6 +343,7 @@ export interface Database {
           config?: Json;
           last_run_at?: string | null;
           next_run_at?: string | null;
+          consecutive_failures?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -964,6 +966,7 @@ export interface Database {
           thumbnail_url: string | null;
           last_collected_at: string | null;
           last_collection_status: string | null;
+          last_success_at: string | null;
           last_error_code: string | null;
           created_at: string;
           updated_at: string;
@@ -981,6 +984,7 @@ export interface Database {
           thumbnail_url?: string | null;
           last_collected_at?: string | null;
           last_collection_status?: string | null;
+          last_success_at?: string | null;
           last_error_code?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -1012,6 +1016,40 @@ export interface Database {
           collected_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["channel_content_snapshots"]["Insert"]>;
+        Relationships: [];
+      };
+      scheduler_ticks: {
+        Row: {
+          id: string;
+          started_at: string;
+          finished_at: string | null;
+          trigger: string;
+          due_found: number;
+          started: number;
+          succeeded: number;
+          failed: number;
+          skipped: number;
+          advanced: number;
+          reaped: number;
+          channels_processed: number;
+          error: string | null;
+        };
+        Insert: {
+          id?: string;
+          started_at?: string;
+          finished_at?: string | null;
+          trigger?: string;
+          due_found?: number;
+          started?: number;
+          succeeded?: number;
+          failed?: number;
+          skipped?: number;
+          advanced?: number;
+          reaped?: number;
+          channels_processed?: number;
+          error?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["scheduler_ticks"]["Insert"]>;
         Relationships: [];
       };
       channel_collection_runs: {

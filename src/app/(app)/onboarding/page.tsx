@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { BusinessOnboardingWizard } from "@/components/business/business-onboarding-wizard";
 
 export default async function OnboardingPage({ searchParams }: PageProps<"/onboarding">) {
@@ -9,9 +9,7 @@ export default async function OnboardingPage({ searchParams }: PageProps<"/onboa
     : "/marketing/diagnosis";
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect(`/login?redirectTo=${encodeURIComponent("/onboarding")}`);
 
   const { data: business, error } = await supabase

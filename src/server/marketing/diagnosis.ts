@@ -30,10 +30,26 @@ export type DiagnosisErrorCode =
   | "AI_INVALID_RESPONSE";
 
 export class DiagnosisError extends AppError {
-  constructor(code: DiagnosisErrorCode, message: string, options?: { cause?: unknown }) {
+  /** The HTTP status of a refused fetch (404, 429, 503 …), when there was one. */
+  readonly status?: number;
+  /** What the server asked for with `Retry-After` (a 429 / 503), in milliseconds. */
+  readonly retryAfterMs?: number;
+
+  constructor(code: DiagnosisErrorCode, message: string, options?: { cause?: unknown; status?: number; retryAfterMs?: number }) {
     super("diagnosis", code, message, { cause: options?.cause });
     this.name = "DiagnosisError";
+    this.status = options?.status;
+    this.retryAfterMs = options?.retryAfterMs;
   }
+}
+
+/** `Retry-After` is either a number of seconds or an HTTP date. Capped at 6 hours: a longer wait is the next daily collection anyway. */
+export function parseRetryAfterMs(value: string | string[] | undefined, now: number = Date.now()): number | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  const ms = Number.isFinite(seconds) ? seconds * 1_000 : Date.parse(raw) - now;
+  return Number.isFinite(ms) && ms > 0 ? Math.min(ms, 6 * 3_600_000) : undefined;
 }
 
 const MAX_REDIRECTS = 3;
@@ -193,7 +209,7 @@ async function fetchHop(urlString: string, redirectsLeft: number, deadlineAt: nu
 
         if (status < 200 || status >= 300) {
           response.destroy();
-          reject(new DiagnosisError("FETCH_FAILED", `페이지를 가져오지 못했습니다 (HTTP ${status}).`));
+          reject(new DiagnosisError("FETCH_FAILED", `페이지를 가져오지 못했습니다 (HTTP ${status}).`, { status, retryAfterMs: parseRetryAfterMs(response.headers["retry-after"]) }));
           return;
         }
 

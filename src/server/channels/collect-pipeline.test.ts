@@ -21,7 +21,8 @@ vi.mock("./providers", () => ({
   getNaverBlogCollector: () => naverCollectMock,
 }));
 
-const { cleanupOldSnapshots, collectAndPersistChannel, processDueChannels, nextAttemptAfterFailure } = await import("./collect-pipeline");
+const { cleanupOldSnapshots, collectAndPersistChannel, processDueChannels, planFailure } = await import("./collect-pipeline");
+const { FeedTransientError } = await import("./providers/feed-failure");
 const { YouTubeCollectorError } = await import("./providers/youtube-types");
 
 // 2026-10-13 06:02 KST — just after the 06:00 slot.
@@ -159,8 +160,8 @@ describe("processDueChannels: the 06:00 KST tick", () => {
   });
 
   it("does nothing, and writes no run log, when no channel is due", async () => {
-    // the fake ignores `or`; a channel that is not ACTIVE never shows up
-    const db = setup([channelRow("c1", { status: "PAUSED" })]);
+    // the fake ignores `or`; a channel that is in no collectable state (ERROR) never shows up
+    const db = setup([channelRow("c1", { status: "ERROR" })]);
     const result = await processDueChannels(NOW, 30_000);
     expect(result).toMatchObject({ processed: 0, failed: 0, skipped: 0 });
     expect(db.tables.channel_collection_runs ?? []).toHaveLength(0);
@@ -199,18 +200,95 @@ describe("processDueChannels: the 06:00 KST tick", () => {
     expect(db.tables.channel_collection_runs[0]).toMatchObject({ status: "PARTIAL", channels_failed: 1, channels_succeeded: 1 });
   });
 
-  it("after three failed attempts the channel waits for the next 06:00 KST, and it is paused after twelve", () => {
-    expect(nextAttemptAfterFailure(1, NOW).toISOString()).toBe(new Date(NOW.getTime() + 30 * 60_000).toISOString());
-    expect(nextAttemptAfterFailure(2, NOW).toISOString()).toBe(new Date(NOW.getTime() + 30 * 60_000).toISOString());
-    expect(nextAttemptAfterFailure(3, NOW).toISOString()).toBe(NEXT_6AM);
+  describe("planFailure: what a failed attempt changes", () => {
+    const plan = (overrides: Record<string, unknown>) => planFailure({ kind: "TRANSIENT", failuresBefore: 0, paused: false, now: NOW, ...overrides } as never);
+
+    it("transient: two retries 30 minutes apart, then the next 06:00 KST", () => {
+      expect(plan({ failuresBefore: 0 }).nextAt.toISOString()).toBe(new Date(NOW.getTime() + 30 * 60_000).toISOString());
+      expect(plan({ failuresBefore: 1 }).nextAt.toISOString()).toBe(new Date(NOW.getTime() + 30 * 60_000).toISOString());
+      expect(plan({ failuresBefore: 2 }).nextAt.toISOString()).toBe(NEXT_6AM);
+    });
+
+    it("transient: the longer it keeps failing the longer the gap (daily, then every other day, then weekly) and it is never paused", () => {
+      expect(plan({ failuresBefore: 5 }).nextAt.toISOString()).toBe(NEXT_6AM); // 6th failure: still daily
+      expect(plan({ failuresBefore: 8 }).nextAt.toISOString()).toBe("2026-10-14T21:00:00.000Z"); // 9th: every other day
+      expect(plan({ failuresBefore: 14 }).nextAt.toISOString()).toBe("2026-10-19T21:00:00.000Z"); // 15th: weekly
+      for (const failuresBefore of [11, 40, 400]) expect(plan({ failuresBefore }).pause).toBe(false);
+    });
+
+    it("transient: a Retry-After longer than the retry slot is honoured", () => {
+      expect(plan({ failuresBefore: 0, retryAfterMs: 2 * 3_600_000 }).nextAt.toISOString()).toBe(new Date(NOW.getTime() + 2 * 3_600_000).toISOString());
+      expect(plan({ failuresBefore: 0, retryAfterMs: 60_000 }).nextAt.toISOString()).toBe(new Date(NOW.getTime() + 30 * 60_000).toISOString());
+    });
+
+    it("not found: one attempt a day, paused only after three days in a row", () => {
+      expect(plan({ kind: "NOT_FOUND", failuresBefore: 0 })).toMatchObject({ failures: 1, pause: false });
+      expect(plan({ kind: "NOT_FOUND", failuresBefore: 0 }).nextAt.toISOString()).toBe(NEXT_6AM);
+      expect(plan({ kind: "NOT_FOUND", failuresBefore: 1 }).pause).toBe(false);
+      expect(plan({ kind: "NOT_FOUND", failuresBefore: 2 }).pause).toBe(true);
+    });
+
+    it("our own configuration problem is not the channel's failure: not counted, looked at again in a few hours", () => {
+      expect(plan({ kind: "CONFIG", failuresBefore: 3 })).toMatchObject({ failures: 3, pause: false });
+      expect(plan({ kind: "CONFIG", failuresBefore: 3 }).nextAt.toISOString()).toBe(new Date(NOW.getTime() + 6 * 3_600_000).toISOString());
+    });
+
+    it("a paused channel stays paused when its probe fails, and is probed again in about a week", () => {
+      const probe = plan({ kind: "TRANSIENT", paused: true, failuresBefore: 3 });
+      expect(probe.pause).toBe(true);
+      expect(probe.nextAt.toISOString()).toBe("2026-10-19T21:00:00.000Z");
+    });
   });
 
-  it("pauses the channel once consecutive failures reach 12", async () => {
-    const db = setup([channelRow("c1", { consecutive_failure_count: 11 })]);
-    youtubeCollectMock.mockRejectedValue(new Error("boom"));
+  it("a streak of transient failures never pauses the channel: it just backs off", async () => {
+    const db = setup([channelRow("c1", { consecutive_failure_count: 30 })]);
+    youtubeCollectMock.mockRejectedValue(new YouTubeCollectorError("TIMEOUT", "응답 시간 초과"));
+    const result = await processDueChannels(NOW, 30_000);
+    expect(result).toMatchObject({ failed: 1, paused: 0 });
+    expect(db.tables.tracked_channels[0]).toMatchObject({ status: "ACTIVE", consecutive_failure_count: 31 });
+  });
+
+  it("a channel that is gone (404) is retried once a day and paused after the third day", async () => {
+    const db = setup([channelRow("c1", { consecutive_failure_count: 2 })]);
+    youtubeCollectMock.mockRejectedValue(new YouTubeCollectorError("CHANNEL_NOT_FOUND", "없음"));
     const result = await processDueChannels(NOW, 30_000);
     expect(result).toMatchObject({ failed: 1, paused: 1 });
-    expect(db.tables.tracked_channels[0]).toMatchObject({ status: "PAUSED", consecutive_failure_count: 12 });
+    expect(db.tables.tracked_channels[0]).toMatchObject({ status: "PAUSED", consecutive_failure_count: 3, last_error_code: "CHANNEL_NOT_FOUND", last_collection_status: "UNAVAILABLE" });
+  });
+
+  it("an invalid API key is our problem: the channel is not blamed and keeps its failure count", async () => {
+    const db = setup([channelRow("c1", { consecutive_failure_count: 1 })]);
+    youtubeCollectMock.mockRejectedValue(new YouTubeCollectorError("INVALID_API_KEY", "키 거부"));
+    await processDueChannels(NOW, 30_000);
+    expect(db.tables.tracked_channels[0]).toMatchObject({ status: "ACTIVE", consecutive_failure_count: 1, last_error_code: "INVALID_API_KEY" });
+    expect(db.tables.tracked_channels[0].next_snapshot_at).toBe(new Date(NOW.getTime() + 6 * 3_600_000).toISOString());
+  });
+
+  it("a blog that cannot be reached right now (timeout, 429, 5xx) is a failed attempt with a retry, not 'no data'", async () => {
+    const db = setup([channelRow("t1", { platform: "tistory", external_id: "https://myname.tistory.com", url: "https://myname.tistory.com" })]);
+    tistoryCollectMock.mockRejectedValue(new FeedTransientError("티스토리 RSS에 지금 연결하지 못했어요 (HTTP 503).", 90 * 60_000));
+    const result = await processDueChannels(NOW, 30_000);
+    expect(result).toMatchObject({ failed: 1, paused: 0 });
+    expect(db.tables.tracked_channels[0]).toMatchObject({ consecutive_failure_count: 1, last_collection_status: "FAILED", last_error_code: "FEED_TRANSIENT" });
+    // the source asked for 90 minutes: that is longer than the usual 30-minute retry
+    expect(db.tables.tracked_channels[0].next_snapshot_at).toBe(new Date(NOW.getTime() + 90 * 60_000).toISOString());
+  });
+
+  it("a paused channel is probed again and resumes by itself once the source answers", async () => {
+    const db = setup([channelRow("c1", { status: "PAUSED", consecutive_failure_count: 12, next_snapshot_at: "2026-10-12T20:00:00.000Z" })]);
+    youtubeCollectMock.mockResolvedValue(youtubeResult());
+    const result = await processDueChannels(NOW, 30_000);
+    expect(result).toMatchObject({ processed: 1, failed: 0 });
+    expect(db.tables.tracked_channels[0]).toMatchObject({ status: "ACTIVE", consecutive_failure_count: 0, last_collection_status: "SUCCESS", next_snapshot_at: NEXT_6AM });
+  });
+
+  it("a paused channel whose probe fails stays paused and waits a week", async () => {
+    const db = setup([channelRow("c1", { status: "PAUSED", consecutive_failure_count: 12, next_snapshot_at: "2026-10-12T20:00:00.000Z" })]);
+    youtubeCollectMock.mockRejectedValue(new YouTubeCollectorError("TIMEOUT", "응답 시간 초과"));
+    const result = await processDueChannels(NOW, 30_000);
+    expect(result).toMatchObject({ failed: 1, paused: 0 });
+    expect(db.tables.tracked_channels[0]).toMatchObject({ status: "PAUSED" });
+    expect(db.tables.tracked_channels[0].next_snapshot_at).toBe("2026-10-19T21:00:00.000Z");
   });
 
   it("YouTube quota exhausted: it stops calling YouTube, the channel is not blamed, and everything is retried an hour later", async () => {
@@ -259,9 +337,9 @@ describe("processDueChannels: the 06:00 KST tick", () => {
   });
 
   it("a paused channel resumes daily collection once a user-triggered collection reaches the source", async () => {
-    const db = setup([channelRow("c1", { status: "PAUSED", consecutive_failure_count: 12, next_snapshot_at: "2026-10-01T00:00:00.000Z" })]);
+    // not due yet (its next probe is in a week), so the daily run leaves it alone
+    const db = setup([channelRow("c1", { status: "PAUSED", consecutive_failure_count: 12, next_snapshot_at: "2026-10-19T21:00:00.000Z" })]);
     youtubeCollectMock.mockResolvedValue(youtubeResult());
-    expect(await processDueChannels(NOW, 30_000)).toMatchObject({ processed: 0 }); // the daily run never picks it up
 
     await collectAndPersistChannel({ id: "c1", platform: "youtube", external_id: "UCabcdefghijklmnopqrstuv", url: "" }, undefined, NOW);
     expect(db.tables.tracked_channels[0]).toMatchObject({ status: "ACTIVE", consecutive_failure_count: 0, next_snapshot_at: NEXT_6AM });

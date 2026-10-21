@@ -15,13 +15,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { BLOG_NOTES_MAX_LENGTH, blogPlatforms, type BlogAutomationConfig } from "@/types/blog-automation";
 import { BLOG_PLATFORM_LABEL } from "@/server/blog/post";
 import type { AutomationSchedule } from "@/types/automation";
+import type { AutomationStatus } from "@/types/domain";
 
 type BlogSettings = Pick<BlogAutomationConfig, "objective" | "keywords" | "tone" | "platform" | "notes"> & {
   legacy: boolean;
 };
 
 export function AutomationSettingsDialog({
-  automationId, name, businessId, businesses, schedule, blogSettings, hasInFlightRun,
+  automationId, name, businessId, businesses, schedule, blogSettings, hasInFlightRun, status,
 }: {
   automationId: string;
   name: string;
@@ -30,6 +31,8 @@ export function AutomationSettingsDialog({
   schedule: AutomationSchedule;
   blogSettings?: BlogSettings;
   hasInFlightRun: boolean;
+  /** Whether the schedule is on: the "자동으로 만들기" checkbox starts from it. */
+  status?: AutomationStatus;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -77,6 +80,18 @@ export function AutomationSettingsDialog({
             <h3 className="text-[15px] font-bold">만드는 때</h3>
             <ScheduleFields idPrefix="edit" value={scheduleValue} onChange={setScheduleValue} />
             <ScheduleHiddenInputs value={scheduleValue} />
+            {status !== undefined ? (
+              <div className="rounded-xl border bg-muted/40 p-4">
+                <input type="hidden" name="autoRunPresent" value="1" />
+                <label className="flex cursor-pointer items-start gap-3 text-sm">
+                  <input type="checkbox" name="autoRun" defaultChecked={status === "ACTIVE"} className="mt-1 size-4 accent-primary" />
+                  <span>
+                    <strong className="font-semibold">정한 때마다 자동으로 만들기</strong>
+                    <span className="mt-0.5 block text-[13px] text-muted-foreground">켜 두면 위에서 고른 요일과 시간(한국 시간)마다 글을 만들어 둬요. 끄면 ‘지금 만들기’로만 만들어져요.</span>
+                  </span>
+                </label>
+              </div>
+            ) : null}
           </section>
 
           {blogSettings && <section className="space-y-4 border-t pt-5">

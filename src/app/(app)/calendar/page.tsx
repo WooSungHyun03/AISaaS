@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { getMarketingCalendarPageData } from "@/server/marketing/calendar";
 import { CalendarItemDialog } from "@/components/marketing/calendar-item-dialog";
 import { CalendarWorkspaceLoader } from "@/components/calendar/calendar-loader";
@@ -19,8 +19,7 @@ function monthRange(today: string) {
 /** The owner's calendar: an ordinary schedule anyone can use without a business profile or any setup. */
 export default async function CalendarPage({ searchParams }: { searchParams: Promise<{ business?: string }> }) {
   const query = await searchParams;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const today = currentKstDate();

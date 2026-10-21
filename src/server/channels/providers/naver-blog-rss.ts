@@ -1,6 +1,7 @@
 import "server-only";
 import { DiagnosisError, fetchPublicXml } from "@/server/marketing/diagnosis";
 import { isFetchAllowedByRobots } from "./robots";
+import { FeedTransientError, classifyFeedFailure } from "./feed-failure";
 import { NaverCollectorError } from "./naver-types";
 import type { NaverBlogMetrics } from "./naver-types";
 import { parseRssChannelTitle, parseRssItems, parseRssPublishDates } from "./rss";
@@ -35,6 +36,10 @@ export async function collectNaverBlogRssMetrics(externalId: string, now: Date =
     xml = (await fetchPublicXml(feedUrl)).html;
   } catch (cause) {
     if (cause instanceof DiagnosisError && (cause.code === "BLOCKED_TARGET" || cause.code === "INVALID_URL")) throw cause;
+    if (cause instanceof DiagnosisError) {
+      const failure = classifyFeedFailure(cause);
+      if (failure.kind === "TRANSIENT") throw new FeedTransientError(`네이버 블로그 RSS에 지금 연결하지 못했어요${failure.status ? ` (HTTP ${failure.status})` : ""}.`, failure.retryAfterMs, { cause });
+    }
     return emptyMetrics();
   }
 

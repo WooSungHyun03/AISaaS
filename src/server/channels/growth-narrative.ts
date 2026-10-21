@@ -44,7 +44,7 @@ const copula = (text: string) => `${text}${hasBatchim(text) ? "이에요" : "예
  * Deterministic and always available — used when the AI step fails, is not connected, or gets fully stripped. It is
  * built only from the measured numbers: current value, the change against the previous period, and nothing else.
  */
-function buildRuleBasedNarrative(channel: ChannelGrowthSeries, days = 30): string {
+export function buildRuleBasedNarrative(channel: ChannelGrowthSeries, days = 30): string {
   const sentences: string[] = [];
   for (const metric of channel.metrics) {
     const name = metric.label.replace(/\s*\(.*\)\s*$/, "");

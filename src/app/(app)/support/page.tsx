@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { MessageCircleQuestion } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { listPublishedFaqs } from "@/server/customer-support/faq";
 import { listMyInquiries } from "@/server/inquiries/inquiries";
 import { isAdminUser } from "@/server/admin/access";
@@ -16,7 +16,7 @@ export const metadata = { title: "문의" };
 
 export default async function SupportPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   const faqs = await listPublishedFaqs(supabase);
   let inquiries: Awaited<ReturnType<typeof listMyInquiries>> = [];
   let inquiriesUnavailable = false;

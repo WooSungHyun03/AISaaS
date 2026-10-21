@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/layout/page-header";
 import {
   CalendarSummarySection,
@@ -25,13 +25,12 @@ import {
 } from "@/server/dashboard/overview";
 
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
-  // Layout and page rendering can overlap. The RPC is idempotent, so the
-  // dashboard may safely ensure the first-entry grant before reading it.
-  await ensureTrialCredits(user.id).catch(() => false);
+  // Layout and page rendering can overlap. The RPC is idempotent, so the dashboard ensures the first-entry grant itself,
+  // side by side with the identity read; only the credits card waits for it (a first visit must not show 0 credits).
+  const trialEnsured = ensureTrialCredits(user.id).catch(() => false);
   const identity = await getDashboardIdentity(user.id);
   const businessId = identity.business?.id ?? null;
 
@@ -50,7 +49,7 @@ export default async function DashboardPage() {
   const progressPromise = businessId
     ? getDashboardProgress(businessId, user.id)
     : Promise.resolve({ channelCount: 0, calendarCount: 0, contentCount: 0 });
-  const creditsPromise = getDashboardCredits(user.id);
+  const creditsPromise = trialEnsured.then(() => getDashboardCredits(user.id));
   const usagePromise = getDashboardRecentUsage();
   const actionPromise = Promise.all([progressPromise, diagnosisPromise]).then(([progress, diagnosis]) =>
     buildDashboardNextAction({

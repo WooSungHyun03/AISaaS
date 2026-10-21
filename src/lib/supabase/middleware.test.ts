@@ -12,10 +12,10 @@ const state = vi.hoisted(() => ({
 vi.mock("@supabase/ssr", () => ({
   createServerClient: (_url: string, _key: string, opts: { cookies: { setAll: (c: CookieToSet[]) => void } }) => ({
     auth: {
-      getUser: async () => {
-        // Simulates @supabase/ssr refreshing an expired access token during getUser().
+      getClaims: async () => {
+        // Simulates @supabase/ssr refreshing an expired access token while the claims are read.
         if (state.refreshed.length > 0) opts.cookies.setAll(state.refreshed);
-        return { data: { user: state.user } };
+        return { data: state.user ? { claims: { sub: state.user.id } } : null };
       },
     },
     from: () => ({

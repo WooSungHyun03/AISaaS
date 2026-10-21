@@ -23,7 +23,7 @@ function ScoreStat({ label, value }: { label: string; value: number | null }) {
  * 티스토리의 "최근 30개 글 기준" 관측 한계가 모두 findings에 이미 들어있어서
  * 플랫폼별 한계 안내를 따로 하드코딩하지 않아도 빠짐없이 보인다.
  */
-export function ChannelDiagnosisCard({ item, narrative, businessId }: { item: ChannelDiagnosisSummaryItem; narrative: string; businessId?: string }) {
+export function ChannelDiagnosisCard({ item, narrative, businessId }: { item: ChannelDiagnosisSummaryItem; narrative: React.ReactNode; businessId?: string }) {
   return (
     <div className="space-y-4 rounded-2xl border border-border bg-card p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Mascot } from "@/components/brand/mascot";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { getCheckoutSession } from "@/server/billing/checkout-sessions";
 import { getProductPurchaseResult } from "@/server/billing/orders";
 import { getProductConfig, isProductId } from "@/server/billing/products";
@@ -11,8 +11,7 @@ export default async function BillingSuccessPage({ searchParams }: PageProps<"/b
   const { session: sessionId } = await searchParams;
   if (typeof sessionId !== "string") redirect("/billing");
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   // Re-read the checkout, paid order, and grant after the provider callback. This is the source of

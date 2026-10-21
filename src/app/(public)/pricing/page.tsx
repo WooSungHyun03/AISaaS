@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Mascot } from "@/components/brand/mascot";
 import { ALL_PRODUCTS, type CreditKind, type ProductConfig } from "@/server/billing/products";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env/server";
 import { startProductOrder } from "@/app/(app)/billing/actions";
 
@@ -31,8 +31,7 @@ function ProductAction({ product, isAuthenticated }: { product: ProductConfig; i
 }
 
 export default async function PricingPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   const isTestBilling = serverEnv.BILLING_PROVIDER === "mock" || serverEnv.TOSS_SECRET_KEY?.startsWith("test_");
 
   return (

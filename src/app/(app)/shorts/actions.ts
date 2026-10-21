@@ -1,5 +1,6 @@
 "use server";
 
+import { logger } from "@/lib/logger";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -13,6 +14,7 @@ import {
   assetStoragePath,
   checkAssetBasics,
   checkAssetLimits,
+  AssetStorageError,
   createAssetUpload,
   detectAssetType,
   isOwnedAssetPath,
@@ -169,6 +171,7 @@ export async function saveShortsSchedule(automationId: string, formData: FormDat
     schedule: schedule as unknown as Json,
     config: { ...currentConfig },
     status: "ACTIVE",
+    consecutive_failures: 0,
     next_run_at: computeNextRunAt(schedule).toISOString(),
   }).eq("id", automationId).eq("user_id", owned.user.id);
   if (error) return { error: "예약 설정을 저장하지 못했습니다." };
@@ -242,8 +245,11 @@ export async function createShortsAssetUpload(
   try {
     const ticket = await createAssetUpload(createAdminClient(), path);
     return { success: true, assetId, path: ticket.path, token: ticket.token, bucket: REFERENCE_BUCKET };
-  } catch {
-    return { error: "업로드를 준비하지 못했어요. 잠시 후 다시 시도해주세요." };
+  } catch (error) {
+    const code = error instanceof AssetStorageError ? error.code : "UPLOAD_PREPARE";
+    // The cause (which Supabase call, its HTTP status and message) goes to the log; the owner only gets a short reference.
+    logger.error("shorts_asset_upload_ticket_failed", { automationId, userId: owned.user.id, kind, code, message: error instanceof Error ? error.message : String(error), cause: error instanceof Error && error.cause ? (error.cause instanceof Error ? error.cause.message : String(error.cause)) : undefined });
+    return { error: `업로드를 준비하지 못했어요. 잠시 후 다시 시도해주세요. 계속되면 문의에 이 코드를 알려주세요: ${code}` };
   }
 }
 

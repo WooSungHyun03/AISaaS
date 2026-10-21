@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/layout/page-header";
 import { AutomationSettingsDialog } from "@/components/automations/automation-settings-dialog";
+import { AutoRunToggle } from "@/components/automations/auto-run-toggle";
 import { RunNowButton } from "@/components/automations/run-now-button";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
@@ -31,17 +32,17 @@ export default async function BlogPage({
 }) {
   const query = await searchParams;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
-  const { data: businesses, error: businessError } = await supabase
-    .from("businesses")
-    .select("*")
-    .eq("owner_id", user.id)
-    .order("created_at");
+  // Independent reads start together: the business list, the credit balance and the blog template.
+  const [{ data: businesses, error: businessError }, credits, { data: template, error: templateError }] = await Promise.all([
+    supabase.from("businesses").select("*").eq("owner_id", user.id).order("created_at"),
+    getUsableCredits(supabase, user.id, "BLOG"),
+    supabase.from("automation_templates").select("id").eq("slug", "blog-marketing").maybeSingle(),
+  ]);
   if (businessError) throw new Error("사업체 정보를 불러오지 못했습니다.", { cause: businessError });
+  if (templateError) throw new Error("블로그 자동화 템플릿을 확인하지 못했습니다.", { cause: templateError });
 
   const selectedBusiness = businesses?.find((business) => business.id === query.business) ?? businesses?.[0];
   if (!selectedBusiness) {
@@ -58,20 +59,12 @@ export default async function BlogPage({
     );
   }
 
-  const credits = await getUsableCredits(supabase, user.id, "BLOG");
   const creditNotice = (
     <>
       <PromotionTargetCard business={selectedBusiness} />
       <CreditNotice kind="BLOG" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />
     </>
   );
-
-  const { data: template, error: templateError } = await supabase
-    .from("automation_templates")
-    .select("id")
-    .eq("slug", "blog-marketing")
-    .maybeSingle();
-  if (templateError) throw new Error("블로그 자동화 템플릿을 확인하지 못했습니다.", { cause: templateError });
 
   const { data: automations, error: automationsError } = template
     ? await supabase
@@ -111,7 +104,12 @@ export default async function BlogPage({
   }
 
   const automationIds = automations.map((automation) => automation.id);
-  const [contentResult, inFlightResult, businessOwnerBusinesses] = await Promise.all([
+  // The photo previews only need the automations, so they are signed while the history and in-flight runs are read.
+  const photoViewsPromise = Promise.all(automations.map(async (automation) => {
+    const photos = parseShortsSettings(automation.config).assets.filter((asset) => asset.kind === "image" && asset.origin === "upload");
+    return [automation.id, await assetViewsFor(photos, user.id, automation.id).catch(() => [])] as const;
+  }));
+  const [contentResult, inFlightResult, photoViewEntries] = await Promise.all([
     supabase
       .from("content_history")
       .select("*")
@@ -123,9 +121,9 @@ export default async function BlogPage({
       .select("automation_id,output")
       .in("automation_id", automationIds)
       .in("status", ["QUEUED", "RUNNING"]),
-    supabase.from("businesses").select("id, name").eq("owner_id", user.id).order("name"),
+    photoViewsPromise,
   ]);
-  if (contentResult.error || inFlightResult.error || businessOwnerBusinesses.error) {
+  if (contentResult.error || inFlightResult.error) {
     throw new Error("블로그 콘텐츠를 불러오지 못했습니다.");
   }
 
@@ -137,12 +135,9 @@ export default async function BlogPage({
   }
   const inFlightAutomationIds = new Set((inFlightResult.data ?? []).map((run) => run.automation_id));
   const progressByAutomation = new Map((inFlightResult.data ?? []).map((run) => [run.automation_id, readDeferredJob(run.output)?.progress ?? null]));
-  const businessPickerList = businessOwnerBusinesses.data ?? [];
+  const businessPickerList = (businesses ?? []).map((business) => ({ id: business.id, name: business.name })).sort((a, b) => a.name.localeCompare(b.name, "ko"));
   // Photos the owner gave each blog automation (looked at by the AI when the post is written).
-  const photoViewsByAutomation = new Map(await Promise.all(automations.map(async (automation) => {
-    const photos = parseShortsSettings(automation.config).assets.filter((asset) => asset.kind === "image" && asset.origin === "upload");
-    return [automation.id, await assetViewsFor(photos, user.id, automation.id).catch(() => [])] as const;
-  })));
+  const photoViewsByAutomation = new Map(photoViewEntries);
 
   return (
     <div className="mx-auto max-w-4xl space-y-10">
@@ -172,6 +167,7 @@ export default async function BlogPage({
               <div className="min-w-0">
                 <h2 id={`blog-automation-${automation.id}`} className="font-bold leading-6">{automation.name}</h2>
                 <p className="mt-0.5 text-[13px] text-muted-foreground">{scheduleText} (한국 시간) · <Link href={`/automations/${automation.id}`} className="underline underline-offset-2">자세히 보기</Link></p>
+                <div className="mt-2.5"><AutoRunToggle automationId={automation.id} status={automation.status} nextRunAt={automation.next_run_at} disabled={hasInFlightRun} /></div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <AutomationSettingsDialog
@@ -183,6 +179,7 @@ export default async function BlogPage({
                   schedule={schedule}
                   blogSettings={blogSettings}
                   hasInFlightRun={hasInFlightRun}
+                  status={automation.status}
                 />
                 <RunNowButton automationId={automation.id} hasInFlightRun={hasInFlightRun} progress={progressByAutomation.get(automation.id) ?? null} />
               </div>

@@ -126,7 +126,9 @@ export function GrowthLineChart({ points, label, unit = "", granularity = "day",
   };
 
   const midIndex = Math.floor((points.length - 1) / 2);
-  const xLabels = [{ index: 0, anchor: "start" as const }, { index: midIndex, anchor: "middle" as const }, { index: points.length - 1, anchor: "end" as const }];
+  // A short series (a month view of two buckets, a single point) has fewer than three distinct places to label: never
+  // draw two labels on top of each other (and never give React two children with the same key).
+  const xLabels = [{ index: 0, anchor: "start" as const }, { index: midIndex, anchor: "middle" as const }, { index: points.length - 1, anchor: "end" as const }].filter((label, position, all) => all.findIndex((other) => other.index === label.index) === position);
   const xFor = (index: number) => PLOT.left + (index / Math.max(points.length - 1, 1)) * model.plotWidth;
   const ticks = flat ? [{ value: min, y: yFor(min) }] : [{ value: max, y: yFor(max) }, { value: middleValue, y: yFor(middleValue) }, { value: min, y: yFor(min) }];
 
@@ -147,7 +149,7 @@ export function GrowthLineChart({ points, label, unit = "", granularity = "day",
       >
         <title id={titleId}>{summary}</title>
         {ticks.map((tick) => (
-          <g key={tick.y}>
+          <g key={`${tick.y}-${tick.value}`}>
             <line x1={PLOT.left} x2={WIDTH - PLOT.right} y1={tick.y} y2={tick.y} stroke="var(--border)" strokeWidth={1} strokeDasharray="3 3" />
             <text x={PLOT.left - 6} y={tick.y + 3.5} textAnchor="end" fontSize={10} fill="var(--muted-foreground)">{formatMetricValue(tick.value)}</text>
           </g>

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import {
   getUsageHistory,
   type UsageHistoryFilters,
@@ -126,8 +126,7 @@ export default async function UsagePage({ searchParams }: PageProps<"/usage">) {
   const requestedPage = Number.parseInt(firstParam(params.page) ?? "1", 10);
   const page = Number.isFinite(requestedPage) && requestedPage > 0 ? requestedPage : 1;
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const { items, total, pageSize } = await getUsageHistory({ kind, status, ...periodRange(period) }, page);

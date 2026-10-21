@@ -7,19 +7,47 @@ import { toChannelDisplayInfo, toContentSnapshots, toSnapshotMetricsRecord } fro
 import type { RawChannelMetrics } from "./raw-metrics";
 import { kstDateString, nextDailyCollectionAt } from "./schedule";
 import { YouTubeCollectorError } from "./providers/youtube-types";
+import { FeedTransientError } from "./providers/feed-failure";
 import type { Json } from "@/types/domain";
 
 export type CollectionStatus = "SUCCESS" | "FAILED" | "QUOTA_EXCEEDED" | "UNAVAILABLE";
 
-/** Maps whatever a collector threw to what the owner and the admin log should say. */
-export function classifyCollectionError(error: unknown): { status: Exclude<CollectionStatus, "SUCCESS">; code: string } {
+/**
+ * How a failed attempt is treated by the daily collection:
+ *  - QUOTA: YouTube's daily quota is used up. Nothing is wrong with the channel; YouTube is left alone for a while.
+ *  - NOT_FOUND: the channel is gone (or the address is wrong). Retrying today will not help; after a few days in a row
+ *    the channel is paused until the owner fixes the address (or it comes back and the probe finds it).
+ *  - CONFIG: our own configuration is at fault (an invalid API key). Not counted against the channel.
+ *  - TRANSIENT: a timeout, a rate limit, an outage. Retried with a back-off; it never stops the collection.
+ */
+export type FailureKind = "QUOTA" | "NOT_FOUND" | "CONFIG" | "TRANSIENT";
+
+export interface ClassifiedFailure {
+  status: Exclude<CollectionStatus, "SUCCESS">;
+  code: string;
+  kind: FailureKind;
+  /** What the source asked for (Retry-After), when it said. */
+  retryAfterMs?: number;
+}
+
+/** Maps whatever a collector threw to what the owner and the admin log should say and how the retry is scheduled. */
+export function classifyCollectionError(error: unknown): ClassifiedFailure {
   if (error instanceof YouTubeCollectorError) {
-    if (error.code === "QUOTA_EXCEEDED") return { status: "QUOTA_EXCEEDED", code: error.code };
-    if (error.code === "CHANNEL_NOT_FOUND") return { status: "UNAVAILABLE", code: error.code };
-    return { status: "FAILED", code: error.code };
+    if (error.code === "QUOTA_EXCEEDED") return { status: "QUOTA_EXCEEDED", code: error.code, kind: "QUOTA" };
+    if (error.code === "CHANNEL_NOT_FOUND") return { status: "UNAVAILABLE", code: error.code, kind: "NOT_FOUND" };
+    if (error.code === "INVALID_API_KEY") return { status: "FAILED", code: error.code, kind: "CONFIG" };
+    return { status: "FAILED", code: error.code, kind: "TRANSIENT" };
   }
+  if (error instanceof FeedTransientError) return { status: "FAILED", code: error.code, kind: "TRANSIENT", retryAfterMs: error.retryAfterMs };
   const code = error instanceof Error && error.name ? error.name : "UNKNOWN";
-  return { status: "FAILED", code };
+  return { status: "FAILED", code, kind: "TRANSIENT" };
+}
+
+/** Why a collection that ran fine still measured nothing, as a code for the log and the card. */
+export function unavailableCodeOf(raw: RawChannelMetrics): string {
+  if (raw.platform === "tistory") return raw.metrics.unavailableCode ?? "NO_PUBLIC_DATA";
+  if (raw.platform === "naver_blog" && raw.metrics.blockedByRobots) return "ROBOTS_DISALLOWED";
+  return "NO_PUBLIC_DATA";
 }
 
 /**
@@ -65,8 +93,9 @@ export async function persistChannelCollection(params: { channelId: string; raw:
       ...(display.displayName ? { display_name: display.displayName } : {}),
       ...(display.thumbnailUrl ? { thumbnail_url: display.thumbnailUrl } : {}),
       last_collected_at: now.toISOString(),
+      ...(status === "SUCCESS" ? { last_success_at: now.toISOString() } : {}),
       last_collection_status: status,
-      last_error_code: status === "UNAVAILABLE" ? "NO_PUBLIC_DATA" : null,
+      last_error_code: status === "UNAVAILABLE" ? unavailableCodeOf(raw) : null,
     })
     .eq("id", channelId);
   if (updateError) throw new ChannelsError("DATABASE_ERROR", "채널 수집 상태를 저장하지 못했습니다.", { cause: updateError });

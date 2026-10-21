@@ -6,6 +6,7 @@ import { collectRawChannelMetrics } from "./raw-metrics";
 import type { TrackedChannelForCollection } from "./raw-metrics";
 import { channelPlatformSchema } from "./platform";
 import { classifyCollectionError, persistChannelCollection, recordCollectionFailure } from "./persist";
+import type { FailureKind } from "./persist";
 import { finishCollectionRun, startCollectionRun } from "./collection-runs";
 import type { CollectionTrigger } from "./collection-runs";
 import { MAX_RETRIES_PER_SLOT, RETRY_DELAY_MS, currentCollectionSlot, kstDateString, nextDailyCollectionAt } from "./schedule";
@@ -13,8 +14,14 @@ import type { Database } from "@/types/database.types";
 
 /** Current-period + previous-period comparison (see getGrowthSummary) needs up to ~180 days; this adds a buffer so that comparison never silently loses its older half. */
 const RETENTION_DAYS = 200;
-/** A channel that fails this many attempts in a row (about four days of retries) is paused instead of being hammered forever. */
-const MAX_CONSECUTIVE_FAILURES = 12;
+/** A channel that is confirmed not to exist this many days in a row is paused: retrying cannot help until the owner fixes the address. */
+const MAX_NOT_FOUND_DAYS = 3;
+/** Back-off for channels that keep failing for a transient reason: daily at first, then every other day, then weekly. Never a stop. */
+const BACKOFF_DAYS = (failures: number): number => (failures <= 6 ? 1 : failures <= 12 ? 2 : 7);
+/** A paused channel is probed again this often, so one that came back (a blog made public again) resumes without anyone clicking. */
+const PAUSED_PROBE_DAYS = 7;
+/** An invalid API key is our own configuration problem, not the channel's: look again after this long without counting a failure. */
+const CONFIG_RETRY_MS = 6 * 3_600_000;
 /** Upper bound on rows read per tick; the time budget usually stops earlier and the rest stay due. */
 const MAX_CHANNELS_PER_TICK = 200;
 /** While a channel is being collected nobody else may claim it (a slow tick must not be doubled by the next one). */
@@ -60,9 +67,25 @@ export interface ProcessDueChannelsOptions {
   all?: boolean;
 }
 
-/** What happens to `next_snapshot_at` after a failed attempt: a few retries within the slot, then wait for the next 06:00 KST. */
-export function nextAttemptAfterFailure(failures: number, now: Date): Date {
-  return failures % MAX_RETRIES_PER_SLOT === 0 ? nextDailyCollectionAt(now) : new Date(now.getTime() + RETRY_DELAY_MS);
+/**
+ * What a failed attempt changes: when the channel is tried next, whether it counts as a failure, and whether it is paused.
+ *  - TRANSIENT: a few retries within the day (30 min apart, or what the source asked for), then the next daily slot, and
+ *    the longer the streak the longer the gap (daily → every other day → weekly). Never paused.
+ *  - NOT_FOUND: one attempt per day; paused after MAX_NOT_FOUND_DAYS days in a row.
+ *  - CONFIG: not counted; looked at again in a few hours.
+ *  A channel that is already paused (a probe that failed) stays paused and is probed again in a week.
+ */
+export function planFailure(params: { kind: Exclude<FailureKind, "QUOTA">; failuresBefore: number; paused: boolean; now: Date; retryAfterMs?: number }): { nextAt: Date; failures: number; pause: boolean } {
+  const { kind, failuresBefore, paused, now, retryAfterMs } = params;
+  if (kind === "CONFIG") return { nextAt: new Date(now.getTime() + CONFIG_RETRY_MS), failures: failuresBefore, pause: paused };
+  const failures = failuresBefore + 1;
+  if (paused) return { nextAt: nextDailyCollectionAt(new Date(now.getTime() + (PAUSED_PROBE_DAYS - 1) * 86_400_000)), failures, pause: true };
+  if (kind === "NOT_FOUND") return { nextAt: nextDailyCollectionAt(now), failures, pause: failures >= MAX_NOT_FOUND_DAYS };
+  // TRANSIENT
+  const retryLater = failures % MAX_RETRIES_PER_SLOT !== 0;
+  const base = retryLater ? new Date(now.getTime() + RETRY_DELAY_MS) : nextDailyCollectionAt(new Date(now.getTime() + (BACKOFF_DAYS(failures) - 1) * 86_400_000));
+  const asked = retryAfterMs ? new Date(now.getTime() + retryAfterMs) : null;
+  return { nextAt: asked && asked > base ? asked : base, failures, pause: false };
 }
 
 /**
@@ -84,8 +107,9 @@ export async function processDueChannels(now: Date = new Date(), budgetMs = 30_0
 
   let query = supabase
     .from("tracked_channels")
-    .select("id, business_id, platform, external_id, url, consecutive_failure_count, next_snapshot_at")
-    .eq("status", "ACTIVE");
+    .select("id, business_id, platform, external_id, url, status, consecutive_failure_count, next_snapshot_at")
+    // PAUSED channels are probed too (see PAUSED_PROBE_DAYS): a paused channel is not abandoned.
+    .in("status", ["ACTIVE", "PAUSED"]);
   // Rows registered before next_snapshot_at was set on insert are null — treat them as due.
   if (!options.all) query = query.or(`next_snapshot_at.is.null,next_snapshot_at.lte.${now.toISOString()}`);
   const { data: due, error: dueError } = await query.order("next_snapshot_at", { ascending: true, nullsFirst: true }).limit(MAX_CHANNELS_PER_TICK);
@@ -117,7 +141,7 @@ export async function processDueChannels(now: Date = new Date(), budgetMs = 30_0
     }
 
     // Claim: only the request that moves next_snapshot_at away from the value it just read may collect.
-    let claim = supabase.from("tracked_channels").update({ next_snapshot_at: new Date(now.getTime() + CLAIM_MS).toISOString() }).eq("id", channel.id).eq("status", "ACTIVE");
+    let claim = supabase.from("tracked_channels").update({ next_snapshot_at: new Date(now.getTime() + CLAIM_MS).toISOString() }).eq("id", channel.id).eq("status", channel.status);
     claim = channel.next_snapshot_at === null ? claim.is("next_snapshot_at", null) : claim.eq("next_snapshot_at", channel.next_snapshot_at);
     const { data: claimed, error: claimError } = await claim.select("id");
     if (claimError || !claimed || claimed.length === 0) {
@@ -144,9 +168,9 @@ export async function processDueChannels(now: Date = new Date(), budgetMs = 30_0
       }
       await supabase.from("tracked_channels").update(update).eq("id", channel.id);
     } catch (cause) {
-      const { status, code } = classifyCollectionError(cause);
+      const failure = classifyCollectionError(cause);
       await recordCollectionFailure(channel.id, cause, now).catch(() => undefined);
-      if (status === "QUOTA_EXCEEDED") {
+      if (failure.kind === "QUOTA") {
         quotaHit = true;
         result.quotaExceeded = true;
         await supabase.from("tracked_channels").update({ next_snapshot_at: new Date(now.getTime() + QUOTA_RETRY_MS).toISOString() }).eq("id", channel.id);
@@ -154,20 +178,23 @@ export async function processDueChannels(now: Date = new Date(), budgetMs = 30_0
         failureNotes.push("YouTube API 일일 한도를 넘어 잠시 쉬어요");
         continue;
       }
-      const failures = channel.consecutive_failure_count + 1;
-      const update: TrackedChannelUpdate = { consecutive_failure_count: failures, next_snapshot_at: nextAttemptAfterFailure(failures, now).toISOString() };
-      if (failures >= MAX_CONSECUTIVE_FAILURES) {
+      const plan = planFailure({ kind: failure.kind, failuresBefore: channel.consecutive_failure_count, paused: channel.status === "PAUSED", now, retryAfterMs: failure.retryAfterMs });
+      const update: TrackedChannelUpdate = { consecutive_failure_count: plan.failures, next_snapshot_at: plan.nextAt.toISOString() };
+      if (plan.pause && channel.status !== "PAUSED") {
         update.status = "PAUSED";
         result.paused++;
       }
       await supabase.from("tracked_channels").update(update).eq("id", channel.id);
       result.failed++;
-      failureNotes.push(`${channel.platform}:${channel.external_id} ${code}`);
+      failureNotes.push(`${channel.platform}:${channel.external_id} ${failure.code}`);
       logger.warn("channel_collection_failed", {
         channelId: channel.id,
         platform: channel.platform,
-        consecutiveFailureCount: failures,
-        code,
+        kind: failure.kind,
+        code: failure.code,
+        consecutiveFailureCount: plan.failures,
+        paused: plan.pause,
+        nextAttemptAt: plan.nextAt.toISOString(),
         message: cause instanceof Error ? cause.message : String(cause),
       });
     }

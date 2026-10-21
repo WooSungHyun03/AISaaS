@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, ClipboardList, RotateCcw } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { getRefundRequestPageData } from "@/server/billing/refund-requests";
 import { isMissingSchemaError } from "@/server/shared/db-errors";
 import { PageHeader } from "@/components/layout/page-header";
@@ -27,8 +27,7 @@ function formatDate(value: string) {
 
 export default async function RefundRequestsPage({ searchParams }: { searchParams: Promise<{ order?: string }> }) {
   const params = await searchParams;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) return null;
 
   let data: Awaited<ReturnType<typeof getRefundRequestPageData>> | null = null;

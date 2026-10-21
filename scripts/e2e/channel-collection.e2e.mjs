@@ -125,6 +125,46 @@ for (const mobile of [false, true]) {
   await mctx.close();
 }
 
+console.log("\n[성장 리포트 버튼: 즉시 반응, 네트워크 없음]");
+await step("기간·보기 단위 버튼은 요청 없이 바로 바뀌고, 연속으로 눌러도 마지막 선택이 남아요", async () => {
+  await page.goto(`${BASE_URL}/growth-report`, { waitUntil: "networkidle" });
+  // The first view of each period asks for its AI reading once, in the background. Visit every period first so those are done.
+  for (const name of ["최근 7일", "최근 90일", "최근 30일"]) {
+    await page.getByRole("navigation", { name: "기간 선택" }).getByText(name, { exact: true }).click();
+    await page.waitForTimeout(1200);
+  }
+  const calls = [];
+  const onRequest = (request) => { if (request.method() !== "GET" || /_rsc=/.test(request.url())) calls.push(`${request.method()} ${request.url().replace(BASE_URL, "")}`); };
+  page.on("request", onRequest);
+  const control = (group, name) => page.getByRole("navigation", { name: group }).getByText(name, { exact: true });
+  const timings = [];
+  for (const [group, name] of [["기간 선택", "최근 7일"], ["기간 선택", "최근 90일"], ["보기 단위", "월별"], ["보기 단위", "주별"], ["기간 선택", "최근 30일"]]) {
+    const started = Date.now();
+    await control(group, name).click();
+    await page.waitForFunction(({ group, name }) => [...document.querySelectorAll(`nav[aria-label="${group}"] button`)].some((el) => el.textContent?.trim() === name && el.getAttribute("aria-pressed") === "true"), { group, name }, { timeout: 2000 });
+    timings.push(Date.now() - started);
+  }
+  // the pressed state is immediate, not a page navigation
+  assert.ok(Math.max(...timings) < 700, `버튼 반응이 느려요: ${timings.join(", ")}ms`);
+  // rapid clicks: the last one wins and the content follows it
+  for (const name of ["최근 7일", "최근 90일", "최근 7일", "최근 30일"]) await control("기간 선택", name).click();
+  await page.waitForFunction(() => document.querySelector("#channel-growth-title")?.textContent?.includes("최근 30일"), null, { timeout: 3000 });
+  assert.equal(new URL(page.url()).searchParams.get("days"), "30");
+  page.off("request", onRequest);
+  assert.deepEqual(calls, [], `버튼을 눌러도 서버 요청이 없어야 해요: ${calls.join(", ")}`);
+});
+await step("7일과 90일은 같은 숫자를 다르게 보여줘요(그래프 점 수가 달라요)", async () => {
+  const points = async (name) => {
+    await page.getByRole("navigation", { name: "기간 선택" }).getByText(name, { exact: true }).click();
+    await page.getByRole("navigation", { name: "보기 단위" }).getByText("일별", { exact: true }).click();
+    await page.waitForTimeout(400);
+    return page.evaluate(() => document.querySelectorAll("section[aria-labelledby='channel-growth-title'] svg[role='img'] circle").length);
+  };
+  const seven = await points("최근 7일");
+  const ninety = await points("최근 90일");
+  assert.ok(seven > 0 && ninety > seven, `점 수: 7일 ${seven}, 90일 ${ninety}`);
+});
+
 console.log("\n[주소 변경]");
 await step("'주소 변경'으로 새 채널을 확인·등록하면 이전 채널이 지워져요", async () => {
   await page.goto(`${BASE_URL}/diagnosis`, { waitUntil: "networkidle" });

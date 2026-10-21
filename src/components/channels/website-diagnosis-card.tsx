@@ -20,7 +20,8 @@ export interface StoredWebsiteDiagnosis {
   createdAt: string | null;
 }
 
-const dateFormat = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
+// 24-hour clock: the AM/PM wording differs between server and browser ICU data, which breaks hydration.
+const dateFormat = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const initialState: DiagnosisActionState = {};
 
 const SUMMARY_RECOMMENDATIONS = 3;

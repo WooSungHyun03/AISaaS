@@ -1,13 +1,14 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Settings } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { getReadinessScore } from "@/server/marketing/readiness";
 import { ReadinessScoreCard } from "@/components/marketing/readiness-score-card";
-import { getChannelNarrative, getLatestChannelDiagnosisSummary } from "@/server/channels";
+import { buildRuleBasedChannelNarrative, getChannelNarrative, getLatestChannelDiagnosisSummary } from "@/server/channels";
 import { ChannelDiagnosisCard } from "@/components/channels/channel-diagnosis-card";
 import { AddChannelForm } from "@/components/channels/add-channel-form";
 import { WebsiteDiagnosisCard, type StoredWebsiteDiagnosis } from "@/components/channels/website-diagnosis-card";
@@ -26,9 +27,7 @@ export default async function DiagnosisPage({
 }) {
   const query = await searchParams;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const { data: businesses, error: businessError } = await supabase
@@ -95,8 +94,6 @@ export default async function DiagnosisPage({
     { platform: "naver_blog", label: "네이버 블로그", url: snsLinks.naver_blog },
   ].flatMap((entry) => (entry.url?.trim() && !trackedPlatforms.has(entry.platform) ? [{ label: entry.label, url: entry.url.trim() }] : []));
 
-  const narratives = await Promise.all(channelSummary.channels.map((item) => getChannelNarrative(item, selectedBusiness)));
-
   return (
     <div className="mx-auto max-w-5xl space-y-10">
       <PageHeading />
@@ -135,8 +132,15 @@ export default async function DiagnosisPage({
 
         {channelsUnavailable ? null : channelSummary.hasAnyData ? (
           <div className="space-y-4">
-            {channelSummary.channels.map((item, index) => (
-              <ChannelDiagnosisCard key={item.channelId} item={item} narrative={narratives[index].narrative} businessId={selectedBusiness.id} />
+            {channelSummary.channels.map((item) => (
+              <ChannelDiagnosisCard
+                key={item.channelId}
+                item={item}
+                // The card is on screen at once with the rule-based summary of the real scores; the AI reading (cached per
+                // diagnosis, generated at most once a day) streams in when it is ready instead of holding the whole page back.
+                narrative={<Suspense fallback={buildRuleBasedChannelNarrative(item)}><AiChannelNarrative item={item} business={selectedBusiness} /></Suspense>}
+                businessId={selectedBusiness.id}
+              />
             ))}
           </div>
         ) : (
@@ -149,6 +153,12 @@ export default async function DiagnosisPage({
       </section>
     </div>
   );
+}
+
+/** The AI reading of one channel's diagnosis; falls back to the rule-based summary inside getChannelNarrative if the AI is unavailable. */
+async function AiChannelNarrative({ item, business }: { item: Awaited<ReturnType<typeof getLatestChannelDiagnosisSummary>>["channels"][number]; business: Parameters<typeof getChannelNarrative>[1] }) {
+  const result = await getChannelNarrative(item, business).catch(() => null);
+  return <>{result?.narrative ?? buildRuleBasedChannelNarrative(item)}</>;
 }
 
 function PageHeading() {

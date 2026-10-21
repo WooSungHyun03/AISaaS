@@ -1,6 +1,8 @@
 import "server-only";
 import { serverEnv } from "@/lib/env/server";
 import { collectNaverBlogMetrics } from "./naver-blog";
+import { FeedTransientError } from "./feed-failure";
+import { NaverCollectorError } from "./naver-types";
 import { collectNaverBlogRssMetrics } from "./naver-blog-rss";
 import type { NaverBlogCollector, NaverBlogMetrics } from "./naver-types";
 
@@ -16,8 +18,12 @@ export const collectNaverBlogLive: NaverBlogCollector = async (externalId, busin
   try {
     const fromSearch = await collectNaverBlogMetrics(externalId, businessName, now);
     return fromSearch.matchedPostCount > 0 ? { ...fromSearch, basis: "search" } : fromRss;
-  } catch {
-    // The search API is only a fallback; an outage or a bad key must not turn "no posts seen" into an error.
+  } catch (error) {
+    // The search API is only a fallback. A bad key or an odd answer must not turn "no posts seen" into an error, but a
+    // rate limit or an outage is a failed attempt: it is retried with a back-off instead of being recorded as "no posts".
+    if (error instanceof NaverCollectorError && (error.code === "RATE_LIMITED" || error.code === "UNKNOWN")) {
+      throw new FeedTransientError("네이버 검색 API에 지금 연결하지 못했어요.", error.code === "RATE_LIMITED" ? 60 * 60_000 : undefined, { cause: error });
+    }
     return fromRss;
   }
 };

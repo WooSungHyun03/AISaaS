@@ -48,9 +48,20 @@ describe("collectNaverBlogRssMetrics", () => {
     expect(await collectNaverBlogRssMetrics("emptyblog", NOW)).toEqual({ matchedPostCount: 0, postsLast30Days: 0, averageGapDays: null, lastPostDate: null, firstPostDate: null, basis: "rss" });
   });
 
-  it("treats an unreachable or odd RSS as 'no posts seen' instead of failing the whole diagnosis", async () => {
-    fetchPublicXmlMock.mockRejectedValue(new DiagnosisError("FETCH_FAILED", "HTTP 500"));
-    await expect(collectNaverBlogRssMetrics("myblog", NOW)).resolves.toMatchObject({ matchedPostCount: 0 });
+  it("a missing, private or oddly formatted feed is 'no posts seen' (cannot be measured), not an error", async () => {
+    for (const error of [new DiagnosisError("FETCH_FAILED", "HTTP 404", { status: 404 }), new DiagnosisError("FETCH_FAILED", "HTTP 403", { status: 403 }), new DiagnosisError("UNSUPPORTED_CONTENT", "not xml")]) {
+      fetchPublicXmlMock.mockRejectedValueOnce(error);
+      await expect(collectNaverBlogRssMetrics("myblog", NOW)).resolves.toMatchObject({ matchedPostCount: 0 });
+    }
+  });
+
+  it("a feed that cannot be reached right now (5xx, 429, timeout) is a transient failure the daily collection retries, never 'no posts'", async () => {
+    for (const error of [new DiagnosisError("FETCH_FAILED", "HTTP 503", { status: 503 }), new DiagnosisError("FETCH_FAILED", "HTTP 429", { status: 429, retryAfterMs: 120_000 }), new DiagnosisError("FETCH_FAILED", "시간 초과")]) {
+      fetchPublicXmlMock.mockRejectedValueOnce(error);
+      await expect(collectNaverBlogRssMetrics("myblog", NOW)).rejects.toMatchObject({ name: "FeedTransientError", code: "FEED_TRANSIENT" });
+    }
+    fetchPublicXmlMock.mockRejectedValueOnce(new DiagnosisError("FETCH_FAILED", "HTTP 429", { status: 429, retryAfterMs: 120_000 }));
+    await expect(collectNaverBlogRssMetrics("myblog", NOW)).rejects.toMatchObject({ retryAfterMs: 120_000 });
   });
 
   it("still throws for a blocked target, and rejects ids that could redirect the request elsewhere", async () => {

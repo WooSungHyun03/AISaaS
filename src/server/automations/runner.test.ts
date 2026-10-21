@@ -427,7 +427,7 @@ describe("runDueAutomation / runAutomationNow — duplicate-run guard", () => {
 });
 
 describe("runDueAutomation / runAutomationNow — exception isolation", () => {
-  it("catches an exception the handler didn't anticipate, marks the run FAILED (never left RUNNING), and marks the automation ERROR", async () => {
+  it("catches an exception the handler didn't anticipate, marks the run FAILED (never left RUNNING), and keeps the schedule alive", async () => {
     const admin = makeAdmin({
       automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }],
       businesses: [{ data: BUSINESS, error: null }],
@@ -444,12 +444,65 @@ describe("runDueAutomation / runAutomationNow — exception isolation", () => {
 
     expect(result).toEqual({ runId: "run-3", status: "FAILED", errorMessage: "AI provider exploded" });
     expect(admin.updates.automation_runs[0]).toMatchObject({ status: "FAILED", error_message: "AI provider exploded" });
-    // updates.automations[0] is the next_run_at advance that already happened
-    // at run start (before the handler threw); [1] is the ERROR status write.
+    // updates.automations[0] is the next_run_at advance that already happened at run start (before the handler threw);
+    // [1] counts the failure. One failed scheduled run does not stop the schedule: the status stays ACTIVE.
     expect(admin.updates.automations[0]).toMatchObject({ next_run_at: computeNextRunAt(SCHEDULE).toISOString() });
-    expect(admin.updates.automations[1]).toMatchObject({ status: "ERROR" });
+    expect(admin.updates.automations[1]).toEqual({ consecutive_failures: 1 });
     expect(incrementUsageMock).not.toHaveBeenCalled();
     expect(releaseCreditByReferenceMock).toHaveBeenCalledWith("run-3", "AI provider exploded");
+  });
+
+  it("parks the automation (ERROR) only after three scheduled runs in a row failed", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: { ...AUTOMATION, consecutive_failures: 2 }, error: null }, { data: null, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-3b" }, error: null }, { data: null, error: null }],
+      content_history: [{ data: [], error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    getHandlerMock.mockReturnValue({ templateSlug: "blog-marketing", run: vi.fn().mockRejectedValue(new Error("AI provider exploded")) });
+
+    await runDueAutomation("auto-1");
+
+    expect(admin.updates.automations[1]).toEqual({ consecutive_failures: 3, status: "ERROR" });
+  });
+
+  it("a failed manual run never counts against the schedule or parks it", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: { ...AUTOMATION, consecutive_failures: 2 }, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-3c" }, error: null }, { data: null, error: null }],
+      content_history: [{ data: [], error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    getHandlerMock.mockReturnValue({ templateSlug: "blog-marketing", run: vi.fn().mockRejectedValue(new Error("AI provider exploded")) });
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result.status).toBe("FAILED");
+    expect(admin.updates.automations ?? []).toEqual([]);
+  });
+
+  it("a successful run resets the failure streak", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: { ...AUTOMATION, consecutive_failures: 2 }, error: null }, { data: null, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-3d" }, error: null }, { data: null, error: null }],
+      content_history: [{ data: [], error: null }, { data: { id: "ch-1" }, error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    okHandler({ output: { ok: true }, content: "본문", title: "제목" });
+
+    const result = await runDueAutomation("auto-1");
+
+    expect(result.status).toBe("SUCCESS");
+    expect(admin.updates.automations).toContainEqual(expect.objectContaining({ consecutive_failures: 0 }));
   });
 
   it("marks the run FAILED when the atomic SUCCESS/SETTLE RPC fails, instead of leaving it RUNNING", async () => {
@@ -469,8 +522,8 @@ describe("runDueAutomation / runAutomationNow — exception isolation", () => {
 
     expect(result.status).toBe("FAILED");
     expect(admin.updates.automation_runs[0]).toMatchObject({ status: "FAILED" });
-    // [0] advances the schedule, [1] records last_run_at, and [2] parks the automation.
-    expect(admin.updates.automations[2]).toMatchObject({ status: "ERROR" });
+    // [0] advances the schedule, [1] records last_run_at, and [2] counts the failure (the schedule stays ACTIVE).
+    expect(admin.updates.automations[2]).toEqual({ consecutive_failures: 1 });
   });
 
   it("refuses blog and shorts runs until the owner has chosen what is promoted, without touching credits", async () => {
@@ -621,5 +674,63 @@ describe("spend budget", () => {
     expect(budget.assertAllowed).not.toHaveBeenCalled();
     expect(budget.closeRunItem).not.toHaveBeenCalled();
     expect(budget.scopes).toEqual([]);
+  });
+});
+
+describe("runDueAutomation: taking the due slot", () => {
+  const due = { id: "auto-1", schedule: SCHEDULE, next_run_at: "2026-10-20T00:00:00.000Z" };
+
+  it("does nothing when another tick already took the slot (no run row, no credit, no handler)", async () => {
+    const admin = makeAdmin({ automations: [{ data: [], error: null }] });
+    createAdminClientMock.mockReturnValue(admin);
+
+    const result = await runDueAutomation("auto-1", due, new Date("2026-10-20T00:05:00.000Z"));
+
+    expect(result).toEqual({ runId: "", status: "SKIPPED" });
+    expect(admin.inserts.automation_runs).toBeUndefined();
+    expect(getHandlerMock).not.toHaveBeenCalled();
+    expect(reserveCreditMock).not.toHaveBeenCalled();
+    // the claim moved next_run_at to the next slot, guarded by the value the tick read
+    expect(admin.updates.automations[0]).toEqual({ next_run_at: computeNextRunAt(SCHEDULE, new Date("2026-10-20T00:05:00.000Z")).toISOString() });
+    expect(admin.filters.automations).toContainEqual(["next_run_at", "2026-10-20T00:00:00.000Z"]);
+  });
+
+  it("runs a slot that was missed for a short while exactly once (catch-up)", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: [{ id: "auto-1" }], error: null }, { data: { ...AUTOMATION, next_run_at: due.next_run_at }, error: null }, { data: null, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-c" }, error: null }, { data: null, error: null }],
+      content_history: [{ data: [], error: null }, { data: { id: "ch-c" }, error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    const run = okHandler({ output: { ok: true }, content: "본문", title: "제목" });
+
+    // two hours after the slot: the scheduler was down, still inside the catch-up window
+    const result = await runDueAutomation("auto-1", due, new Date("2026-10-20T02:00:00.000Z"));
+
+    expect(result.status).toBe("SUCCESS");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips and records a slot missed for more than 12 hours instead of producing content on the wrong day", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: [{ id: "auto-1" }], error: null }, { data: { ...AUTOMATION, next_run_at: due.next_run_at }, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [{ data: { id: "run-skip" }, error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+
+    const result = await runDueAutomation("auto-1", due, new Date("2026-10-21T03:00:00.000Z")); // 27 h late
+
+    expect(result.status).toBe("FAILED");
+    expect(result.errorMessage).toContain("건너뛰었어요");
+    expect(getHandlerMock).not.toHaveBeenCalled();
+    expect(reserveCreditMock).not.toHaveBeenCalled();
+    expect(admin.inserts.automation_runs[0]).toMatchObject({ source: "SCHEDULED", status: "FAILED" });
+    // a skipped slot is not a failure of the automation: no failure count, no parking
+    expect(admin.updates.automations).toHaveLength(1);
   });
 });

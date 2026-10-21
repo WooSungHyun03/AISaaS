@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Mascot } from "@/components/brand/mascot";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { isAdminUser } from "@/server/admin/access";
 
 const FRIENDLY_MESSAGES: Record<string, string> = {
@@ -42,8 +42,7 @@ export default async function BillingFailPage({ searchParams }: PageProps<"/bill
   const rawCode = typeof params.code === "string" ? params.code : "CHECKOUT_FAILED";
   const code = /^[A-Z0-9_]{1,80}$/.test(rawCode) ? rawCode : "CHECKOUT_FAILED";
   const message = FRIENDLY_MESSAGES[code] ?? "결제를 끝내지 못했어요. 잠시 후 다시 시도해 주세요.";
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   const adminHint = user && ADMIN_HINTS[code] && (await isAdminUser(user.id).catch(() => false)) ? ADMIN_HINTS[code] : null;
 
   return (

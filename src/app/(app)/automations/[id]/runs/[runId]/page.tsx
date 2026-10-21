@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { LoaderCircle } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { getAutomationRunDetail } from "@/server/automations/history";
 import { describeAutomationRunError } from "@/server/shared/errors";
 import { RunSourceBadge, RunStatusBadge } from "@/components/automations/run-badges";
@@ -44,7 +44,7 @@ function durationLabel(startedAt: string | null, completedAt: string | null) {
 export default async function RunDetailPage({ params }: PageProps<"/automations/[id]/runs/[runId]">) {
   const { id, runId } = await params;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const detail = await getAutomationRunDetail(user.id, id, runId);

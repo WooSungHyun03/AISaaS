@@ -101,35 +101,58 @@ export function buildContentReport(channelId: string, kind: "VIDEOS" | "POSTS", 
   };
 }
 
+/** Reads the snapshots of the given channels, one request per channel (all at once) and page by page within a channel. */
+async function fetchContentRows(channelIds: string[], sinceDate: string): Promise<Row[]> {
+  const supabase = await createClient();
+  const readChannel = async (channelId: string): Promise<Row[]> => {
+    const rows: Row[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const { data, error } = await supabase
+        .from("channel_content_snapshots")
+        .select("channel_id, external_content_id, title, url, published_at, snapshot_date, metrics")
+        .eq("channel_id", channelId)
+        .gte("snapshot_date", sinceDate)
+        .order("snapshot_date", { ascending: true })
+        .order("external_content_id", { ascending: true })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      if (error) throw new ChannelsError("DATABASE_ERROR", "게시물별 통계를 불러오지 못했습니다.", { cause: error });
+      rows.push(...((data ?? []) as Row[]));
+      if ((data ?? []).length < PAGE_SIZE) break;
+    }
+    return rows;
+  };
+  return (await Promise.all(channelIds.map(readChannel))).flat();
+}
+
+/**
+ * The per-video / per-post report of every channel for each of the three periods, from ONE read of the snapshots. The
+ * growth report sends all three to the browser so that switching the period needs no request.
+ */
+export async function getChannelContentReportsByPeriod<P extends number>(channels: Array<{ channelId: string; platform: string }>, periods: readonly P[], now: Date = new Date()): Promise<Map<string, Record<P, ChannelContentReport | null>>> {
+  const result = new Map<string, Record<P, ChannelContentReport | null>>();
+  if (channels.length === 0) return result;
+  const widest = Math.max(...periods);
+  const rows = await fetchContentRows(channels.map((channel) => channel.channelId), kstDateString(now.getTime() - (widest + 1) * DAY_MS));
+  for (const channel of channels) {
+    const own = rows.filter((row) => row.channel_id === channel.channelId);
+    const reports = {} as Record<P, ChannelContentReport | null>;
+    for (const days of periods) {
+      reports[days] = own.length === 0 ? null : buildContentReport(channel.channelId, channel.platform === "youtube" ? "VIDEOS" : "POSTS", own, kstDateString(now.getTime() - days * DAY_MS), now);
+    }
+    result.set(channel.channelId, reports);
+  }
+  return result;
+}
+
 /** Per-video (YouTube) and per-post (blogs) performance of every channel of a business, from the daily content snapshots. */
 export async function getChannelContentReports(businessId: string, channels: Array<{ channelId: string; platform: string }>, options: { days?: number; now?: Date } = {}): Promise<Map<string, ChannelContentReport>> {
   const days = options.days ?? 30;
   const now = options.now ?? new Date();
   const result = new Map<string, ChannelContentReport>();
-  if (channels.length === 0) return result;
-
-  const supabase = await createClient();
-  const periodStartKst = kstDateString(now.getTime() - days * DAY_MS);
-  const rows: Row[] = [];
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const { data, error } = await supabase
-      .from("channel_content_snapshots")
-      .select("channel_id, external_content_id, title, url, published_at, snapshot_date, metrics")
-      .in("channel_id", channels.map((channel) => channel.channelId))
-      .gte("snapshot_date", kstDateString(now.getTime() - (days + 1) * DAY_MS))
-      .order("snapshot_date", { ascending: true })
-      .order("external_content_id", { ascending: true })
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-    if (error) throw new ChannelsError("DATABASE_ERROR", "게시물별 통계를 불러오지 못했습니다.", { cause: error });
-    rows.push(...((data ?? []) as Row[]));
-    if ((data ?? []).length < PAGE_SIZE) break;
-  }
   void businessId; // channels are already scoped to the business by the caller's RLS-checked list
-
-  for (const channel of channels) {
-    const own = rows.filter((row) => row.channel_id === channel.channelId);
-    if (own.length === 0) continue;
-    result.set(channel.channelId, buildContentReport(channel.channelId, channel.platform === "youtube" ? "VIDEOS" : "POSTS", own, periodStartKst, now));
+  for (const [channelId, reports] of await getChannelContentReportsByPeriod(channels, [days], now)) {
+    const report = reports[days];
+    if (report) result.set(channelId, report);
   }
   return result;
 }

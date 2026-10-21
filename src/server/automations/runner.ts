@@ -20,7 +20,7 @@ import { isDeferredOutcome, type AutomationBudgetKind, type AutomationHandlerRes
 import type { Automation, AutomationRunSource, Json } from "@/types/domain";
 import type { Database } from "@/types/database.types";
 import { getHandler } from "./handlers";
-import { computeNextRunAt } from "./scheduler";
+import { MAX_CATCH_UP_MS, MAX_CONSECUTIVE_SCHEDULED_FAILURES, claimDueSlot, computeNextRunAt } from "./scheduler";
 
 type AdminClient = SupabaseClient<Database>;
 
@@ -29,7 +29,7 @@ export const PROMOTION_TYPE_REQUIRED_MESSAGE = "홍보 대상(가게·상품·�
 export interface RunAutomationResult {
   runId: string;
   /** `RUNNING` means the handler deferred: the run continues from the cron tick or the open page. */
-  status: "SUCCESS" | "FAILED" | "RUNNING";
+  status: "SUCCESS" | "FAILED" | "RUNNING" | "SKIPPED";
   progress?: string;
   output?: unknown;
   contentHistoryId?: string;
@@ -37,6 +37,8 @@ export interface RunAutomationResult {
 }
 
 export interface RunAutomationOptions {
+  /** A scheduled slot that is not run (it was missed for too long): recorded in the history with this reason instead. */
+  skipReason?: string;
   calendarItem?: AutomationRunContext["calendarItem"];
   shorts?: AutomationRunContext["shorts"];
 }
@@ -172,7 +174,7 @@ async function persistSuccess(admin: AdminClient, ctx: RunFinishContext, result:
 
   const { error: lastRunAtError } = await admin
     .from("automations")
-    .update({ last_run_at: new Date().toISOString() })
+    .update({ last_run_at: new Date().toISOString(), consecutive_failures: 0 })
     .eq("id", automationId);
   if (lastRunAtError) throw lastRunAtError;
 
@@ -254,18 +256,19 @@ async function persistFailure(admin: AdminClient, ctx: RunFinishContext, err: un
     logger.error("automation_run_terminal_write_failed", { automationId, runId: run.id, dbError: markFailedError });
   }
 
-  // Stop scheduling this automation until a human looks at it — no
-  // infinite retries (Rule 29). This is a stronger guarantee than merely
-  // advancing next_run_at: findDueAutomations() only ever selects
-  // status = 'ACTIVE', so an ERROR automation can't be picked up by any
-  // future cron tick regardless of what next_run_at holds, and
-  // reactivating it (activateAutomation()) always recomputes a fresh
-  // next_run_at anyway.
-  if (!budgetRefusal) {
-    const { error: markErrorStatusError } = await admin.from("automations").update({ status: "ERROR" }).eq("id", automationId);
-    if (markErrorStatusError) {
-      logger.error("automation_status_update_failed", { automationId, dbError: markErrorStatusError });
-    }
+  // One failed scheduled run must not stop a weekly schedule for good: the next slot (next_run_at was already moved
+  // forward when the run started) simply runs again. Only a streak of failures parks the automation, because then
+  // something is wrong that a person has to look at (findDueAutomations() only selects ACTIVE rows, and activating it
+  // again recomputes next_run_at). A failed manual "지금 만들기" never touches the schedule at all.
+  if (!budgetRefusal && source === "SCHEDULED") {
+    const failures = (automation.consecutive_failures ?? 0) + 1;
+    const park = failures >= MAX_CONSECUTIVE_SCHEDULED_FAILURES;
+    const { error: failureCountError } = await admin
+      .from("automations")
+      .update({ consecutive_failures: failures, ...(park ? { status: "ERROR" as const } : {}) })
+      .eq("id", automationId);
+    if (failureCountError) logger.error("automation_status_update_failed", { automationId, dbError: failureCountError });
+    if (park) logger.error("automation_parked_after_failures", { automationId, runId: run.id, failures });
   }
 
   // Any domain's typed error (AIProviderError, ConnectorError, ...) carries
@@ -338,6 +341,8 @@ async function executeAutomation(
   if (templateError || !template) {
     throw new Error(`Template not found for automation ${automationId}`);
   }
+
+  if (options.skipReason) return recordRefusedRun(admin, automation, source, options.skipReason, { advanceSchedule: false });
 
   // A run can only ever be triggered (manually or by the cron tick) while
   // an automation is ACTIVE. findDueAutomations() already filters to ACTIVE
@@ -516,8 +521,24 @@ export async function runAutomationNow(
   return executeAutomation(automationId, "MANUAL", options);
 }
 
-/** Cron-triggered run for a due automation — advances next_run_at on success. */
-export async function runDueAutomation(automationId: string): Promise<RunAutomationResult> {
+const MISSED_SLOT_MESSAGE = "예약한 시간이 한참 지나서(서비스 점검 등) 이번 제작은 건너뛰었어요. 다음 예약 시간에 정상적으로 만들어요.";
+
+/**
+ * Cron-triggered run for a due automation. Given the row the tick read, it first takes the due slot (compare-and-set
+ * on next_run_at, see claimDueSlot): the tick that loses does nothing, so a slot is never run twice. A slot that was
+ * missed by more than MAX_CATCH_UP_MS is skipped and recorded instead of running on a day the owner did not choose.
+ */
+export async function runDueAutomation(automationId: string, due?: Pick<Automation, "id" | "schedule" | "next_run_at">, now: Date = new Date()): Promise<RunAutomationResult> {
+  if (!due) return executeAutomation(automationId, "SCHEDULED");
+  const claim = await claimDueSlot(due, now);
+  if (claim.kind === "LOST") {
+    logger.info("automation_due_slot_taken", { automationId });
+    return { runId: "", status: "SKIPPED" };
+  }
+  if (claim.overdueMs > MAX_CATCH_UP_MS) {
+    logger.warn("automation_due_slot_missed", { automationId, overdueMinutes: Math.round(claim.overdueMs / 60_000) });
+    return executeAutomation(automationId, "SCHEDULED", { skipReason: MISSED_SLOT_MESSAGE });
+  }
   return executeAutomation(automationId, "SCHEDULED");
 }
 

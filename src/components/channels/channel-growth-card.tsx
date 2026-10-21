@@ -59,16 +59,30 @@ function MetricCard({ metric, days, granularity }: { metric: GrowthMetricSeries;
   );
 }
 
+function describeProblem(collection: ChannelCollectionInfo): string | null {
+  const { state, errorCode, paused } = collection;
+  if (paused) {
+    return errorCode === "CHANNEL_NOT_FOUND"
+      ? "채널을 찾을 수 없어 수집을 멈췄어요. 주소가 맞는지 확인하고 ‘주소 변경’이나 ‘다시 진단하기’를 눌러주세요. 일주일에 한 번은 자동으로도 다시 확인해요."
+      : "수집을 잠시 멈췄어요. 일주일에 한 번 자동으로 다시 확인하고, 연결되면 매일 수집이 다시 시작돼요. 바로 다시 시작하려면 진단 화면에서 ‘다시 진단하기’를 눌러주세요.";
+  }
+  if (state === "QUOTA_EXCEEDED") return "YouTube 조회 한도에 걸려 잠시 쉬고 있어요. 곧 다시 수집해요.";
+  if (state === "FAILED") return "일시적인 문제로 수집하지 못했어요. 자동으로 다시 시도하고, 지금까지 모은 기록은 그대로예요.";
+  if (state === "UNAVAILABLE") {
+    if (errorCode === "ROBOTS_DISALLOWED") return "이 블로그는 자동 수집을 허용하지 않아 공개 글 수를 확인하지 못했어요. 확인하지 못한 값은 0으로 보여드리지 않아요.";
+    if (errorCode === "FEED_NOT_FOUND" || errorCode === "CHANNEL_NOT_FOUND") return "주소를 찾을 수 없어요. 주소가 맞는지 확인해주세요. 마지막으로 확인한 데이터를 보여드려요.";
+    if (errorCode === "FEED_FORBIDDEN") return "블로그가 비공개이거나 RSS 접근을 막고 있어요. 공개로 바꾸면 다음 수집부터 기록돼요.";
+    return "공개 데이터를 확인하지 못했어요. 비공개이거나 글이 아직 없을 수 있어요. 마지막으로 확인한 데이터를 보여드려요.";
+  }
+  return null;
+}
+
 /** One line (plus an explanation when needed) saying how fresh the numbers are and what to expect next. */
 function CollectionStatus({ collection, hasSample }: { collection: ChannelCollectionInfo; hasSample: boolean }) {
-  const last = collection.lastCollectedAt ? KST_TIME.format(new Date(collection.lastCollectedAt)) : null;
+  const lastAt = collection.lastSuccessAt ?? collection.lastCollectedAt;
+  const last = lastAt ? KST_TIME.format(new Date(lastAt)) : null;
   const next = collection.nextCollectionAt ? `${KST_DATE.format(new Date(collection.nextCollectionAt))} 오전 6시` : null;
-  const problem =
-    collection.paused ? "여러 번 연속으로 수집하지 못해 수집을 멈췄어요. 채널이 공개 상태인지 확인한 뒤 진단 화면에서 ‘다시 진단하기’를 누르면 매일 수집이 다시 시작돼요."
-    : collection.state === "QUOTA_EXCEEDED" ? "YouTube 조회 한도에 걸려 잠시 쉬고 있어요. 곧 다시 수집해요."
-    : collection.state === "FAILED" ? "최근 수집에 실패했어요. 마지막으로 성공한 데이터를 보여드리고 있어요."
-    : collection.state === "UNAVAILABLE" ? "공개 데이터를 확인하지 못했어요. 비공개이거나 삭제된 채널일 수 있어요. 마지막으로 확인한 데이터를 보여드려요."
-    : null;
+  const problem = describeProblem(collection);
   return (
     <div className="space-y-2 text-[13px]">
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">

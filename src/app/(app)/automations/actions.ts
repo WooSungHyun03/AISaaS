@@ -118,12 +118,13 @@ export async function activateAutomation(automationId: string): Promise<Manageme
 
   const { data: updated, error } = await supabase
     .from("automations")
-    .update({ status: "ACTIVE", next_run_at: nextRunAt.toISOString() })
+    .update({ status: "ACTIVE", next_run_at: nextRunAt.toISOString(), consecutive_failures: 0 })
     .eq("id", automationId).eq("user_id", user.id).select("id").maybeSingle();
   if (error || !updated) return { error: "자동화를 활성화하지 못했습니다." };
 
   revalidatePath(`/automations/${automationId}`);
   revalidatePath("/automations");
+  revalidatePath("/blog");
   revalidatePath("/dashboard");
   return { success: true };
 }
@@ -138,6 +139,7 @@ export async function pauseAutomation(automationId: string): Promise<ManagementA
   if (error || !data) return { error: "자동화를 일시정지하지 못했습니다." };
   revalidatePath(`/automations/${automationId}`);
   revalidatePath("/automations");
+  revalidatePath("/blog");
   revalidatePath("/dashboard");
   return { success: true };
 }
@@ -208,8 +210,14 @@ export async function updateAutomation(automationId: string, formData: FormData)
     config = { ...blogConfig, ...(referencePhotos.length > 0 ? { assets: referencePhotos } : {}) } as unknown as Json;
   }
 
+  // The settings form can also switch the schedule on or off (the "자동으로 만들기" checkbox). A form without that field
+  // (older pages) keeps the status as it was.
+  const switchPresent = formData.has("autoRunPresent");
+  const wantsOn = formData.get("autoRun") === "on";
+  const status = !switchPresent ? automation.status : wantsOn ? "ACTIVE" : automation.status === "ACTIVE" ? "PAUSED" : automation.status;
+
   let nextRunAt: string | null = null;
-  if (automation.status === "ACTIVE") {
+  if (status === "ACTIVE") {
     try {
       nextRunAt = computeNextRunAt(schedule).toISOString();
     } catch {
@@ -222,12 +230,15 @@ export async function updateAutomation(automationId: string, formData: FormData)
     business_id: businessId,
     schedule: schedule as unknown as Json,
     config,
+    status,
     next_run_at: nextRunAt,
+    ...(status === "ACTIVE" && automation.status !== "ACTIVE" ? { consecutive_failures: 0 } : {}),
   }).eq("id", automationId).eq("user_id", user.id).eq("status", automation.status).select("id").maybeSingle();
   if (error || !updated) return { error: "설정을 저장하지 못했습니다. 상태가 바뀌었다면 새로고침 후 다시 시도해주세요." };
 
   revalidatePath(`/automations/${automationId}`);
   revalidatePath("/automations");
+  revalidatePath("/blog");
   revalidatePath("/dashboard");
   return { success: true };
 }

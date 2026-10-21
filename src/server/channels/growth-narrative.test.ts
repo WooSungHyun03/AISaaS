@@ -20,7 +20,7 @@ const CHANNEL: Parameters<typeof buildGrowthNarrative>[0] = {
   url: "https://youtube.com/@mychannel",
   displayName: null,
   thumbnailUrl: null,
-  collection: { state: "SUCCESS", lastCollectedAt: null, nextCollectionAt: null, measuredDays: 2, paused: false },
+  collection: { state: "SUCCESS", lastCollectedAt: null, nextCollectionAt: null, measuredDays: 2, paused: false, lastSuccessAt: null, errorCode: null },
   metrics: [
     { metric: "subscriberCount", label: "구독자 수", status: "OK", current: 1050, previous: 1000, absoluteDelta: 50, deltaPercent: 5, points: [], hasDemoSeedData: false, hasSampleData: false, kind: "TOTAL" },
     { metric: "viewCount", label: "조회수", status: "COLLECTING", current: null, previous: null, absoluteDelta: null, deltaPercent: null, points: [], hasDemoSeedData: false, hasSampleData: false, kind: "TOTAL" },

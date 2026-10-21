@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Check } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { getSetupRequest } from "@/server/setup-requests";
 import { SetupRequestStatusBadge } from "@/components/setup-requests/setup-request-status";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,7 @@ const formatter = new Intl.DateTimeFormat("ko-KR", { dateStyle: "long", timeStyl
 
 export default async function SetupRequestDetailPage({ params }: PageProps<"/setup-request/[id]">) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect(`/login?redirectTo=${encodeURIComponent(`/setup-request/${id}`)}`);
 
   const request = await getSetupRequest(user.id, id);

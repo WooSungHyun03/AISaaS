@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { AutomationForm } from "@/components/automations/automation-form";
 import { BlogSetupWizard } from "@/components/automations/blog-setup-wizard";
 import { Button } from "@/components/ui/button";
@@ -14,9 +14,7 @@ export default async function NewAutomationPage({
 }) {
   const { template } = await searchParams;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) return null;
 
   const [businessResult, templateResult] = await Promise.all([

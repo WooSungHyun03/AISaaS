@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { clientEnv } from "@/lib/env/client";
+import { logger } from "@/lib/logger";
 import { ConnectorError } from "@/server/shared/errors";
 import type { Database } from "@/types/database.types";
 import { ASSET_LIMITS, type ShortsAsset, type ShortsAssetKind } from "@/types/shorts-reference";
@@ -75,35 +76,76 @@ export function videoStoragePath(userId: string, automationId: string, runId: st
 
 let bucketsReady = false;
 
+/** What went wrong while preparing storage; `code` is shown to the owner as a short reference, `cause` only goes to the log. */
+export class AssetStorageError extends Error {
+  constructor(
+    public readonly code: "STORAGE_BUCKET" | "STORAGE_SIGN",
+    message: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
+    this.name = "AssetStorageError";
+  }
+}
+
+type BucketOptions = { public: boolean; fileSizeLimit?: number; allowedMimeTypes?: string[] };
+
+function describeStorageError(error: unknown): { message: string; status?: number } {
+  const record = error as { message?: unknown; status?: unknown; statusCode?: unknown } | null;
+  const status = Number(record?.status ?? record?.statusCode);
+  return { message: typeof record?.message === "string" ? record.message : String(error), ...(Number.isFinite(status) ? { status } : {}) };
+}
+
+/**
+ * Makes sure one private bucket exists with the wanted options. A hosted Supabase project has a global upload limit
+ * (50 MB on the free plan) that a bucket's own limit may not exceed: asking for more is refused, and that refusal used
+ * to fail every upload — photos included — in production while the local stack (no such check) worked. So a refused
+ * size limit is retried without it (the bucket then follows the project's global limit), and a bucket that already
+ * exists is only updated on a best-effort basis: an update that fails must never block using the bucket.
+ */
+async function provisionBucket(admin: AdminClient, id: string, options: BucketOptions): Promise<void> {
+  const withoutLimit: BucketOptions = { public: options.public, ...(options.allowedMimeTypes ? { allowedMimeTypes: options.allowedMimeTypes } : {}) };
+  const created = await admin.storage.createBucket(id, options);
+  if (!created.error) return;
+  if (!/already exists|duplicate/i.test(created.error.message)) {
+    logger.warn("storage_bucket_create_refused", { bucket: id, ...describeStorageError(created.error) });
+    const retried = await admin.storage.createBucket(id, withoutLimit);
+    if (!retried.error) return;
+    if (!/already exists|duplicate/i.test(retried.error.message)) throw new AssetStorageError("STORAGE_BUCKET", "영상 파일 저장 공간을 준비하지 못했습니다.", { cause: retried.error });
+  }
+  // The bucket exists: widen it if possible, but it is usable either way.
+  const updated = await admin.storage.updateBucket(id, options);
+  if (!updated.error) return;
+  const updatedWithoutLimit = await admin.storage.updateBucket(id, withoutLimit);
+  if (updatedWithoutLimit.error) logger.warn("storage_bucket_update_failed", { bucket: id, ...describeStorageError(updatedWithoutLimit.error) });
+}
+
 /** Creates the private buckets on first use (and widens the older, image-only one), so no manual Supabase step is needed. */
 export async function ensureShortsBuckets(admin: AdminClient): Promise<void> {
   if (bucketsReady) return;
-  const wanted = [
-    {
-      id: REFERENCE_BUCKET,
-      options: {
-        public: false,
-        fileSizeLimit: ASSET_LIMITS.video.maxBytes,
-        allowedMimeTypes: [...new Set([...ASSET_LIMITS.image.mimes, ...ASSET_LIMITS.video.mimes, ...ASSET_LIMITS.audio.mimes, ...ASSET_LIMITS.logo.mimes])],
-      },
-    },
-    { id: VIDEO_BUCKET, options: { public: false, fileSizeLimit: 200 * 1024 * 1024, allowedMimeTypes: ["video/mp4", "audio/mpeg"] } },
-  ];
-  for (const bucket of wanted) {
-    const { error } = await admin.storage.createBucket(bucket.id, bucket.options);
-    if (!error) continue;
-    if (!/already exists|duplicate/i.test(error.message)) throw new Error("영상 파일 저장 공간을 준비하지 못했습니다.", { cause: error });
-    const { error: updateError } = await admin.storage.updateBucket(bucket.id, bucket.options);
-    if (updateError) throw new Error("영상 파일 저장 공간을 준비하지 못했습니다.", { cause: updateError });
-  }
+  await provisionBucket(admin, REFERENCE_BUCKET, {
+    public: false,
+    fileSizeLimit: ASSET_LIMITS.video.maxBytes,
+    allowedMimeTypes: [...new Set([...ASSET_LIMITS.image.mimes, ...ASSET_LIMITS.video.mimes, ...ASSET_LIMITS.audio.mimes, ...ASSET_LIMITS.logo.mimes])],
+  });
+  await provisionBucket(admin, VIDEO_BUCKET, { public: false, fileSizeLimit: 200 * 1024 * 1024, allowedMimeTypes: ["video/mp4", "audio/mpeg"] });
   bucketsReady = true;
 }
 
-/** A one-time URL the browser uploads to (supabase-js `uploadToSignedUrl`). */
+/**
+ * A one-time URL the browser uploads to (supabase-js `uploadToSignedUrl`). The bucket almost always exists already, so
+ * the URL is requested first; only when that fails are the buckets provisioned and the request repeated. That keeps a
+ * cold start from paying for bucket setup on every upload and keeps a bucket-settings problem from blocking uploads.
+ */
 export async function createAssetUpload(admin: AdminClient, path: string): Promise<{ path: string; token: string }> {
-  await ensureShortsBuckets(admin);
-  const { data, error } = await admin.storage.from(REFERENCE_BUCKET).createSignedUploadUrl(path);
-  if (error || !data) throw new Error("업로드 주소를 만들지 못했습니다.", { cause: error });
+  const sign = () => admin.storage.from(REFERENCE_BUCKET).createSignedUploadUrl(path);
+  let { data, error } = await sign();
+  if (error || !data) {
+    logger.warn("storage_signed_upload_first_attempt_failed", { ...describeStorageError(error) });
+    await ensureShortsBuckets(admin);
+    ({ data, error } = await sign());
+  }
+  if (error || !data) throw new AssetStorageError("STORAGE_SIGN", "업로드 주소를 만들지 못했습니다.", { cause: error });
   return { path: data.path, token: data.token };
 }
 

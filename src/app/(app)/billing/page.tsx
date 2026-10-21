@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CalendarClock, Check, Clapperboard, FileText, ReceiptText, RotateCcw } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { serverEnv } from "@/lib/env/server";
 import { ALL_PRODUCTS, getProductConfig, isProductId, type CreditKind, type ProductConfig } from "@/server/billing/products";
 import { getCreditBillingOverview } from "@/server/billing/read-model";
@@ -55,8 +55,7 @@ function ProductCard({ product, selected }: { product: ProductConfig; selected: 
 export default async function BillingPage({ searchParams }: PageProps<"/billing">) {
   const params = await searchParams;
   const selectedProduct = typeof params.product === "string" && isProductId(params.product) ? params.product : null;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) return null;
 
   const { balances, orders } = await getCreditBillingOverview(user.id);

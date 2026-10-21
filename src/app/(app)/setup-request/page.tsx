@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/layout/page-header";
 import { SetupRequestForm } from "@/components/setup-requests/setup-request-form";
 import { Mascot } from "@/components/brand/mascot";
@@ -12,8 +12,7 @@ const STEPS = [
 ];
 
 export default async function SetupRequestPage() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect(`/login?redirectTo=${encodeURIComponent("/setup-request")}`);
 
   return (

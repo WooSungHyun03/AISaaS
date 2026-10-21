@@ -1,9 +1,14 @@
 import "server-only";
 import { getNaverBlogCollector, getTistoryCollector, getYouTubeDataProvider } from "./providers";
+import { FeedTransientError } from "./providers/feed-failure";
 import { YouTubeCollectorError } from "./providers/youtube-types";
 import { parseChannelUrl } from "./url-parser";
 import type { ParsedChannelUrl } from "./url-parser";
 import type { ChannelPlatform } from "./platform";
+import type { NaverBlogMetrics } from "./providers/naver-types";
+import type { TistoryRssMetrics } from "./providers/tistory";
+
+const UNREACHABLE_NOTE = "블로그에 지금 연결하지 못했어요. 등록은 할 수 있고, 매일 자동으로 다시 확인해요.";
 
 /** What the registration form shows before anything is saved, so the owner can confirm it is the right channel. */
 export interface ChannelPreview {
@@ -66,7 +71,11 @@ export async function resolveParsedChannel(parsed: Extract<ParsedChannelUrl, { o
       }
     }
     case "tistory": {
-      const metrics = await getTistoryCollector()(parsed.normalizedUrl, now);
+      const metrics = await getTistoryCollector()(parsed.normalizedUrl, now).catch((error: unknown): TistoryRssMetrics => {
+        // The blog could not be reached just now: it can still be registered, the daily collection tries again.
+        if (!(error instanceof FeedTransientError)) throw error;
+        return { posts: [], observedCapped: false, unavailableReason: UNREACHABLE_NOTE };
+      });
       const verified = metrics.unavailableReason === null && metrics.posts.length > 0;
       return {
         ok: true,
@@ -83,7 +92,10 @@ export async function resolveParsedChannel(parsed: Extract<ParsedChannelUrl, { o
       };
     }
     case "naver_blog": {
-      const metrics = await getNaverBlogCollector()(parsed.externalId, undefined, now);
+      const metrics: NaverBlogMetrics & { unreachable?: boolean } = await getNaverBlogCollector()(parsed.externalId, undefined, now).catch((error: unknown): NaverBlogMetrics & { unreachable?: boolean } => {
+        if (!(error instanceof FeedTransientError)) throw error;
+        return { matchedPostCount: 0, postsLast30Days: 0, averageGapDays: null, lastPostDate: null, firstPostDate: null, unreachable: true };
+      });
       const verified = metrics.matchedPostCount > 0;
       return {
         ok: true,
@@ -97,7 +109,9 @@ export async function resolveParsedChannel(parsed: Extract<ParsedChannelUrl, { o
           verified,
           note: verified
             ? null
-            : metrics.blockedByRobots
+            : metrics.unreachable
+              ? UNREACHABLE_NOTE
+              : metrics.blockedByRobots
               ? NAVER_ROBOTS_BLOCKED_NOTE
               : "공개된 글이 보이지 않아요. RSS 공개가 꺼져 있거나 아직 글이 없다면 수집할 수 있는 지표가 없어요.",
         },

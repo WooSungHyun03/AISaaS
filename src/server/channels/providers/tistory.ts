@@ -1,6 +1,7 @@
 import "server-only";
 import { DiagnosisError, fetchPublicXml } from "@/server/marketing/diagnosis";
 import { ROBOTS_DISALLOWED_REASON, isFetchAllowedByRobots } from "./robots";
+import { FeedTransientError, classifyFeedFailure } from "./feed-failure";
 import type { DiagnosisErrorCode } from "@/server/marketing/diagnosis";
 import { parseRssChannelTitle, parseRssItems, parseRssPublishDates } from "./rss";
 
@@ -24,6 +25,8 @@ export interface TistoryRssMetrics {
   blogTitle?: string | null;
   /** null이 아니면 posts는 비어 있고, 이 문자열이 사유(비공개/404/형식오류 등). */
   unavailableReason: string | null;
+  /** Why nothing could be measured, as a stable code for the collection log and the owner's message. */
+  unavailableCode?: "ROBOTS_DISALLOWED" | "FEED_NOT_FOUND" | "FEED_FORBIDDEN" | "FEED_FORMAT";
 }
 
 function describeUnavailable(code: DiagnosisErrorCode): string {
@@ -51,12 +54,18 @@ export async function collectTistoryRssMetrics(blogUrl: string): Promise<Tistory
   let xml: string;
   try {
     // robots.txt first: a blog that does not allow automated reads is shown as "cannot be measured", never read anyway.
-    if (!(await isFetchAllowedByRobots(rssUrl))) return { posts: [], observedCapped: false, unavailableReason: ROBOTS_DISALLOWED_REASON };
+    if (!(await isFetchAllowedByRobots(rssUrl))) return { posts: [], observedCapped: false, unavailableReason: ROBOTS_DISALLOWED_REASON, unavailableCode: "ROBOTS_DISALLOWED" };
     xml = (await fetchPublicXml(rssUrl)).html;
   } catch (cause) {
     if (cause instanceof DiagnosisError) {
       if (cause.code === "BLOCKED_TARGET" || cause.code === "INVALID_URL") throw cause;
-      return { posts: [], observedCapped: false, unavailableReason: describeUnavailable(cause.code as DiagnosisErrorCode) };
+      const failure = classifyFeedFailure(cause);
+      // A timeout, a 429 or a 5xx says nothing about the blog: report it as a failed attempt (retried with a back-off),
+      // not as "this blog has no data".
+      if (failure.kind === "TRANSIENT") throw new FeedTransientError(`티스토리 RSS에 지금 연결하지 못했어요${failure.status ? ` (HTTP ${failure.status})` : ""}.`, failure.retryAfterMs, { cause });
+      if (failure.kind === "NOT_FOUND") return { posts: [], observedCapped: false, unavailableReason: "블로그 주소를 찾을 수 없어요(404). 주소가 맞는지 확인해주세요.", unavailableCode: "FEED_NOT_FOUND" };
+      if (failure.kind === "FORBIDDEN") return { posts: [], observedCapped: false, unavailableReason: "블로그가 비공개이거나 RSS 접근을 막고 있어요.", unavailableCode: "FEED_FORBIDDEN" };
+      return { posts: [], observedCapped: false, unavailableReason: describeUnavailable(cause.code as DiagnosisErrorCode), unavailableCode: "FEED_FORMAT" };
     }
     throw cause;
   }

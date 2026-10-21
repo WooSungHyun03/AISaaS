@@ -20,11 +20,16 @@ pg_cron (5분마다, 0014/0018) → Edge Function run-due-automations → POST /
 |---|---|
 | 두 틱·관리자 클릭이 겹침 | `next_snapshot_at` compare-and-set 으로 먼저 잡은 쪽만 수집(다른 쪽은 건너뜀) |
 | 한 채널 실패 | 다른 채널은 계속. 이전 정상 데이터는 건드리지 않음 |
-| 실패 재시도 | 30분 뒤 재시도, 같은 슬롯에서 3번 실패하면 다음 06:00 KST까지 대기, 연속 12번 실패하면 `PAUSED` |
+| 일시적 오류(타임아웃·429·5xx) | 같은 날 30분 간격 재시도(서버가 `Retry-After`를 주면 그만큼), 3회 후 다음 06:00 KST. 실패가 길어지면 매일 → 이틀 → 주 1회로 **간격만** 늘림. 중단하지 않음 |
+| 채널 없음(404 확정) | 하루 1번, 3일 연속이면 `PAUSED` |
+| 중지된 채널 | 일주일에 한 번 자동으로 다시 확인, 응답하면 스스로 `ACTIVE` 로 재개 |
+| 우리 설정 문제(잘못된 API 키) | 채널 탓으로 세지 않음, 6시간 뒤 다시 |
 | YouTube 할당량 소진 | 채널 탓이 아님. 그 틱의 남은 YouTube 채널은 호출하지 않고 1시간 뒤 재시도. 블로그는 계속 수집 |
-| 블로그를 읽을 수 없음 | `UNAVAILABLE` (0으로 저장하지 않음). 수집 기록에는 실패로 남지만 오류 연속 횟수는 끊어 일시중지하지 않음 — 매일 다시 확인하고 글이 보이면 그때부터 기록. 네이버 블로그 RSS는 robots.txt가 모든 봇을 막아 읽지 않고, 검색 API로만 측정 |
+| robots.txt 거부·비공개·공개 글 없음 | `UNAVAILABLE` + 사유 코드(`ROBOTS_DISALLOWED` 등). 오류가 아니라 "측정 불가"이며 0으로 저장하지 않음. 매일 확인 |
 | 시간 초과 | 틱의 시간 예산을 넘기면 나머지는 다음 틱(5분 뒤)에 처리 |
 | 오래된 데이터 | 200일이 지난 스냅샷은 정리 |
+
+> 네이버 블로그 RSS(`rss.blog.naver.com`)의 robots.txt 는 모든 크롤러를 막습니다. 우회하지 않으며, 네이버는 공식 검색 API(`NAVER_CLIENT_ID/SECRET`)로 잡히는 글만 집계하고 나머지는 "측정 불가"로 둡니다.
 
 ## 기록과 수동 실행
 
@@ -41,3 +46,9 @@ select started_at, trigger, status, channels_total, channels_succeeded, channels
 ```
 
 `CRON_SECRET`(Vercel)과 Edge Function secret 이 같아야 하고, `YOUTUBE_API_KEY` 가 Production 에 있어야 합니다.
+
+## 스케줄러가 돌고 있는지 확인
+
+- `GET /api/health/scheduler` — 마지막 틱 시각과 `healthy`(15분 이내). 200 이면 pg_cron → Edge Function → 이 라우트 전체가 살아 있다는 뜻입니다. 모니터링에 걸어 두세요.
+- 관리자 `/admin/scheduler` — 최근 틱(대상·시작·성공·실패·건너뜀), 켜져 있는 예약의 다음 시각, 여러 번 실패해서 멈춘 예약.
+- `vercel.json` 의 Vercel Cron 이 하루 한 번(06:00 KST) 같은 라우트를 GET 으로 호출합니다. DB 스케줄러가 죽었을 때의 안전망이며, 슬롯 선점 덕에 둘이 겹쳐도 중복 제작이 없습니다.

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useTransition, type ReactNode } from "reac
 import { useRouter } from "next/navigation";
 import { CalendarClock, Check, CircleAlert, CircleCheck, Film, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
+import { AutoRunToggle } from "@/components/automations/auto-run-toggle";
+import type { AutomationStatus } from "@/types/domain";
 import { advanceShortsJob, createShortsAutomation, generateShortsPreview, saveShortsSchedule } from "@/app/(app)/shorts/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -160,7 +162,7 @@ export function ShortsStudio({
         <JobSteps job={job} />
         <p className="text-xs leading-5 text-muted-foreground">광고 영상은 몇 분에서 십여 분 걸릴 수 있어요. 이 화면을 닫아도 계속 만들어지고, 끝나면 이곳에 나타나요.</p>
       </div> : null}
-      {automationStatus === "ERROR" ? <FormMessage>최근 실행 오류로 예약이 멈췄어요. 아래 예약 설정을 다시 저장해주세요.</FormMessage> : null}
+      {automationStatus === "ERROR" ? <FormMessage>예약 제작이 여러 번 실패해서 멈췄어요. 아래 ‘자동으로 만들기’를 켜거나 예약 설정을 다시 저장하면 다시 시작해요.</FormMessage> : null}
 
       <section aria-labelledby="preview-heading" className="grid gap-6 lg:grid-cols-[minmax(280px,380px)_1fr]">
         <div className="overflow-hidden rounded-3xl border bg-neutral-950 shadow-sm">
@@ -230,6 +232,7 @@ export function ShortsStudio({
 
       <section aria-labelledby="schedule-heading" className="rounded-2xl border bg-card p-5 sm:p-7">
         <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-start gap-3"><span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-primary"><CalendarClock className="size-5" aria-hidden="true" /></span><div><h2 id="schedule-heading" className="text-lg font-extrabold tracking-[-0.03em]">예약 만들기</h2><p className="mt-1 text-sm leading-6 text-muted-foreground">저장하면 예약 시각마다 새 영상을 만들어 둬요. 자동으로 게시하지는 않으니, 만든 영상을 확인한 뒤 내려받아 직접 올려주세요.</p></div></div>{nextRunAt && automationStatus === "ACTIVE" ? <Badge variant="brand">다음 만들기 {new Date(nextRunAt).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}</Badge> : <Badge variant="secondary">예약 꺼짐</Badge>}</div>
+        <div className="mt-4"><AutoRunToggle automationId={automationId} status={automationStatus as AutomationStatus} nextRunAt={nextRunAt ?? null} disabled={busy || hasInFlightRun} /></div>
         <form className="mt-6 space-y-5" action={(formData) => run("schedule", () => saveShortsSchedule(automationId, formData), "예약 설정을 저장하고 켰어요.")}>
           <ScheduleFields idPrefix="shorts" label="예약" value={scheduleValue} onChange={setScheduleValue} disabled={busy} />
           <ScheduleHiddenInputs value={scheduleValue} />

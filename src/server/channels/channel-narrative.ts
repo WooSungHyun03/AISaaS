@@ -21,7 +21,7 @@ function tierLabel(score: number): string {
 }
 
 /** Deterministic, always available — used when the AI step below fails or gets fully stripped by ai-number-guard. */
-function buildRuleBasedNarrative(diagnosis: ChannelDiagnosis): string {
+export function buildRuleBasedChannelNarrative(diagnosis: ChannelDiagnosis): string {
   const sentences = [`${PLATFORM_LABEL[diagnosis.channel]} 채널의 전체 점수는 ${diagnosis.overallScore}점이에요. ${tierLabel(diagnosis.overallScore)}.`];
   if (diagnosis.findings[0]) sentences.push(diagnosis.findings[0]);
   return sentences.join(" ");
@@ -78,7 +78,7 @@ function buildNarrativePrompt(diagnosis: ChannelDiagnosis, business: Pick<Busine
  * narrates is unaffected either way.
  */
 export async function buildChannelNarrative(diagnosis: ChannelDiagnosis, business: Pick<Business, "name" | "industry">): Promise<ChannelNarrativeResult> {
-  const ruleBased = buildRuleBasedNarrative(diagnosis);
+  const ruleBased = buildRuleBasedChannelNarrative(diagnosis);
 
   let verified: string | null = null;
   try {

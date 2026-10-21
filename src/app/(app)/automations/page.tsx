@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChevronRight, Plus } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { PageHeader } from "@/components/layout/page-header";
@@ -9,9 +9,7 @@ import { AutomationStatusBadge } from "@/components/automations/run-badges";
 
 export default async function MyAutomationsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) return null;
 
   const { data: automations, error: automationsError } = await supabase
