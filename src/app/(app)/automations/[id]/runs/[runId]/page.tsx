@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { uniqueTexts } from "@/lib/utils/text";
 import { LoaderCircle } from "lucide-react";
 import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { getAutomationRunDetail } from "@/server/automations/history";
@@ -130,8 +131,8 @@ export default async function RunDetailPage({ params }: PageProps<"/automations/
               {output.imageSuggestion && !(workingCopy?.content && looksLikeBlogMarkup(workingCopy.content)) ? <div><p className={label}>이미지 제안</p><p className="mt-1 text-[15px] leading-7">{output.imageSuggestion}</p></div> : null}
               {usedReferences ? <UsedReferences references={usedReferences} /> : null}
               {output.callToAction ? <div><p className={label}>행동 유도 문구</p><p className="mt-1 text-[15px] leading-7">{output.callToAction}</p></div> : null}
-              {output.keywords.length ? <div><p className={label}>키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.keywords.map((keyword) => <Badge key={keyword} variant="brand">{keyword}</Badge>)}</div></div> : null}
-              {output.seoKeywords.length ? <div><p className={label}>SEO 키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{output.seoKeywords.map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>)}</div></div> : null}
+              {output.keywords.length ? <div><p className={label}>키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{uniqueTexts(output.keywords).map((keyword) => <Badge key={keyword} variant="brand">{keyword}</Badge>)}</div></div> : null}
+              {output.seoKeywords.length ? <div><p className={label}>SEO 키워드</p><div className="mt-2 flex flex-wrap gap-1.5">{uniqueTexts(output.seoKeywords).map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>)}</div></div> : null}
               {videoUrl ? <div><p className={label}>영상 미리보기</p><video src={videoUrl} controls preload="metadata" playsInline className="mt-2 aspect-[9/16] max-h-[620px] w-full rounded-2xl bg-black object-contain" aria-label="생성된 숏폼 영상 미리보기">브라우저에서 영상 재생을 지원하지 않습니다.</video>{output.sampleVideo ? null : <a href={videoUrl} download target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-sm font-semibold text-primary underline underline-offset-2">영상 파일 다운로드</a>}</div> : null}
               {output.shortsPublishing && videoUrl ? (
                 <ShortsPublishingPanel

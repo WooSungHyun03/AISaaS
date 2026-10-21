@@ -58,7 +58,7 @@ export default async function GrowthReportPage({ searchParams }: { searchParams:
       (bundle) => ({ bundle, unavailable: false }),
       (error: unknown) => {
         if (!isMissingSchemaError(error)) throw error;
-        return { bundle: { businessId: business.id, generatedAtMs: now.getTime(), channels: [], hasAnyData: false }, unavailable: true };
+        return { bundle: { businessId: business.id, aiNarratives: false, generatedAtMs: now.getTime(), channels: [], hasAnyData: false }, unavailable: true };
       },
     ),
     automationsPromise,

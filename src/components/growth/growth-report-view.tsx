@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/page-state";
 import { FormMessage } from "@/components/ui/form-message";
 import { loadGrowthNarrative } from "@/app/(app)/growth-report/actions";
-import { GROWTH_PERIODS, defaultGranularity, selectChannelSeries, type GrowthBundle, type GrowthPeriod } from "@/lib/growth/select";
+import { GROWTH_PERIODS, defaultGranularity, selectChannelSeries, shouldRequestNarrative, type GrowthBundle, type GrowthPeriod } from "@/lib/growth/select";
 import { SOURCE_LABEL, type Comparison, type GrowthReport, type MetricSource, type Rate } from "@/server/marketing/growth-report";
 import type { GrowthGranularity } from "@/server/channels/growth-series";
 import { cn } from "@/lib/utils";
@@ -108,7 +108,7 @@ export function GrowthReportView({ bundle, internal, truncated, channelsUnavaila
   useEffect(() => {
     for (const channel of bundle.channels) {
       const key = `${channel.channelId}:${days}`;
-      if (channel.narratives[days].aiUsed || requested.current.has(key)) continue;
+      if (!shouldRequestNarrative({ aiNarratives: bundle.aiNarratives, aiUsed: channel.narratives[days].aiUsed, alreadyRequested: requested.current.has(key) })) continue;
       requested.current.add(key);
       loadGrowthNarrative(channel.channelId, days)
         .then((result) => {
@@ -116,7 +116,7 @@ export function GrowthReportView({ bundle, internal, truncated, channelsUnavaila
         })
         .catch(() => undefined);
     }
-  }, [bundle.channels, days]);
+  }, [bundle.channels, bundle.aiNarratives, days]);
 
   const series = useMemo(
     () => bundle.channels.map((channel) => ({ channel, series: selectChannelSeries(channel, shownDays, shownView) })),
