@@ -1,0 +1,32 @@
+# Fly.io: `fly launch --no-deploy --copy-config --dockerfile Dockerfile` from this folder, then
+#   fly secrets set WORKER_TOKEN=<same value as POSTPROCESS_WORKER_TOKEN in Vercel> \
+#       WORKER_ALLOWED_HOSTS="dvkfvommrhvlvuccxgeh.supabase.co,.fal.media,.fal.run"
+#   fly deploy
+# The app name below is a placeholder: fly launch asks for (and may rewrite) it.
+app = "autobiz-ffmpeg-worker"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  WORKER_CONCURRENCY = "2"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Jobs outlive the request that started them: never stop or scale to zero.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"

@@ -99,6 +99,8 @@ With `AD_VIDEO_PROVIDER=mock` (default) nothing is called or paid: the planner/v
 - Real ElevenLabs voice and its Korean pronunciation.
 - The worker has been run for real only on a developer machine (real `ffmpeg`, real local Supabase Storage); deploy it and run `npm run check:providers`.
 
+Deploying the worker and wiring `POSTPROCESS_WORKER_URL`: see `docs/FFMPEG_WORKER_DEPLOY.md`.
+
 ## First real video: checklist
 
 1. Apply migration 0073; set the env (see `.env.example`: `AD_VIDEO_PROVIDER=fal`, `FAL_KEY`, worker, `AI_PROVIDER=anthropic`, `ALLOW_PAID_AI_CALLS=true`, period, budgets).

@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { requireAdmin } from "@/server/admin/access";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSchedulerHealth, listRecentTicks } from "@/server/automations/ticks";
+import { getVideoPipelineChecks } from "@/server/connectors/video-readiness";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ const TRIGGER_LABEL: Record<string, string> = { CRON: "DB 스케줄러(5분)", V
 export default async function AdminSchedulerPage() {
   await requireAdmin({ action: "ADMIN_SCHEDULER_VIEW", targetType: "route", targetId: "/admin/scheduler", onDenied: "navigate" });
   const admin = createAdminClient();
+  const videoChecks = getVideoPipelineChecks();
   const [health, ticks, active, parked] = await Promise.all([
     getSchedulerHealth(),
     listRecentTicks(40),
@@ -37,6 +39,19 @@ export default async function AdminSchedulerPage() {
           <Badge variant={health.healthy ? "secondary" : "destructive"}>{health.healthy ? "정상" : "멈춘 것 같아요"}</Badge>
         </div>
         {!health.healthy ? <p className="mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">15분 넘게 실행 기록이 없어요. Supabase에서 `select * from cron.job_run_details order by start_time desc limit 5;` 로 pg_cron 상태를, Edge Function 로그와 `CRON_SECRET` 일치 여부를 확인하세요.</p> : null}
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border bg-card">
+        <h2 className="border-b px-5 py-3 font-bold">광고 영상 서비스 연결 {videoChecks.some((check) => check.required && !check.ok) ? <span className="text-destructive">· 빠진 설정이 있어 영상을 만들 수 없어요</span> : <span className="text-success">· 모두 연결됨</span>}</h2>
+        <ul className="divide-y text-sm">
+          {videoChecks.map((check) => (
+            <li key={check.name} className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+              <span><span className="font-semibold">{check.label}</span> <code className="text-xs text-muted-foreground">{check.name}</code></span>
+              {check.ok ? <Badge variant="secondary">설정됨</Badge> : <span className={check.required ? "text-destructive" : "text-muted-foreground"}>{check.required ? "빠짐" : "안 씀"} · {check.hint}</span>}
+            </li>
+          ))}
+        </ul>
+        <p className="border-t px-5 py-3 text-xs text-muted-foreground">값은 보여주지 않고 이름과 설정 여부만 보여줘요. 환경변수를 바꾸면 다시 배포해야 적용돼요.</p>
       </section>
 
       {parked.data?.length ? (

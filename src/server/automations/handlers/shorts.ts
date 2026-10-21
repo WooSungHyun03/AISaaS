@@ -20,6 +20,7 @@ import {
 } from "@/server/budget";
 import { getPostprocessProvider, MockPostprocessProvider, type ComposeOverlay, type PostprocessProvider, type VideoAnalysis } from "@/server/connectors/postprocess";
 import { getTtsProvider } from "@/server/connectors/tts";
+import { missingVideoRequirements } from "@/server/connectors/video-readiness";
 import { getWanProvider, isRealVideoGeneration, wanHandleSchema, type WanHandle, type WanRequest } from "@/server/connectors/wan";
 import { isAppError } from "@/server/shared/errors";
 import { promotionFieldValue } from "@/lib/promotion";
@@ -681,12 +682,17 @@ export const shortsAutomationHandler: AutomationHandler = {
   },
 
   preflight(ctx) {
-    const unavailable = "영상 제작 서비스가 아직 연결되지 않아 지금은 광고 영상을 만들 수 없어요. 이용권은 차감되지 않았어요. 관리자에게 문의해주세요.";
+    const base = "영상 제작 서비스가 아직 연결되지 않아 지금은 광고 영상을 만들 수 없어요. 이용권은 차감되지 않았어요. 관리자에게 문의해주세요.";
+    // Which setting is missing goes to the log (names only); the owner just gets the plain sentence.
+    const refuse = () => {
+      logger.warn("shorts_pipeline_not_ready", { missing: missingVideoRequirements() });
+      return base;
+    };
     // Without a real generator a production run would "succeed" with a placeholder instead of a video.
-    if (process.env.NODE_ENV === "production" && !isRealVideoGeneration()) return unavailable;
+    if (process.env.NODE_ENV === "production" && !isRealVideoGeneration()) return refuse();
     if (isRealVideoGeneration()) {
-      if (serverEnv.AI_PROVIDER !== "anthropic" || !serverEnv.FAL_KEY) return unavailable;
-      if (serverEnv.POSTPROCESS_PROVIDER !== "worker" || !serverEnv.POSTPROCESS_WORKER_URL || !serverEnv.POSTPROCESS_WORKER_TOKEN) return unavailable;
+      if (serverEnv.AI_PROVIDER !== "anthropic" || !serverEnv.FAL_KEY) return refuse();
+      if (serverEnv.POSTPROCESS_PROVIDER !== "worker" || !serverEnv.POSTPROCESS_WORKER_URL || !serverEnv.POSTPROCESS_WORKER_TOKEN) return refuse();
       // A Korean voice the owner asked for needs the voice service; without it the run would only produce the silent kind.
       if (parseShortsSettings(ctx.config).voiceMode === "tts" && (serverEnv.TTS_PROVIDER !== "elevenlabs" || !serverEnv.ELEVENLABS_API_KEY || !serverEnv.TTS_VOICE_ID)) {
         return "한국어 음성 서비스가 아직 연결되지 않아 음성을 입힌 영상은 지금 만들 수 없어요. '영상 자체 목소리'로 바꾸거나 관리자에게 문의해주세요. 이용권은 차감되지 않았어요.";
