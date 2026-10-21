@@ -29,3 +29,7 @@ The short version of the vibe-coding rules (full detail in TEAM_GUIDE.md):
 8. Keep mock and real implementations clearly separate (`AI_PROVIDER`/`BILLING_PROVIDER` default to `mock`).
 9. Check `src/types/` and the relevant domain's `types.ts`/`provider.ts` before implementing a feature.
 10. Only add a new abstraction when it has two real call sites, not in anticipation of a future one.
+
+## Iterative quality harness
+
+Before implementing or changing functionality, read [docs/HARNESS.md](docs/HARNESS.md). Run the scoped checks, then the full gates and local demo tests when applicable. Preserve team ownership and existing AGENTS.md Next.js rules.

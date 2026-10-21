@@ -1,4 +1,5 @@
 import { ExternalLink, Plus } from "lucide-react";
+import { uniqueTexts } from "@/lib/utils/text";
 import { createClient, getAuthUser } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -64,7 +65,7 @@ export default async function BusinessPage() {
                 "대표 키워드",
                 business.keywords.length ? (
                   <span className="flex flex-wrap gap-1.5">
-                    {business.keywords.map((keyword) => <Badge key={keyword} variant="secondary" className="font-medium">{keyword}</Badge>)}
+                    {uniqueTexts(business.keywords).map((keyword) => <Badge key={keyword} variant="secondary" className="font-medium">{keyword}</Badge>)}
                   </span>
                 ) : null,
               ],

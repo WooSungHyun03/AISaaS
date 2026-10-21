@@ -1,5 +1,6 @@
 "use client";
 
+import { uniqueTexts } from "@/lib/utils/text";
 import { useMemo, useState, useTransition } from "react";
 import { Camera, Check, Copy, Code2, Pencil } from "lucide-react";
 import { toast } from "sonner";
@@ -283,15 +284,15 @@ export function BlogWorkspace({
             <div><p className="text-[13px] font-semibold text-muted-foreground">추천 제목</p><ol className="mt-1 list-decimal space-y-0.5 pl-5">{seo.titleCandidates.map((candidate) => <li key={candidate}>{candidate}</li>)}</ol></div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div><p className="text-[13px] font-semibold text-muted-foreground">핵심 키워드</p><p className="mt-1"><Badge variant="brand">{seo.primaryKeyword}</Badge></p></div>
-              <div><p className="text-[13px] font-semibold text-muted-foreground">보조 키워드</p><p className="mt-1 flex flex-wrap gap-1.5">{seo.secondaryKeywords.length ? seo.secondaryKeywords.map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>) : "-"}</p></div>
-              <div><p className="text-[13px] font-semibold text-muted-foreground">지역 키워드</p><p className="mt-1 flex flex-wrap gap-1.5">{seo.regionKeywords.length ? seo.regionKeywords.map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>) : <span className="text-muted-foreground">해당 없음 (가게 홍보에만 써요)</span>}</p></div>
+              <div><p className="text-[13px] font-semibold text-muted-foreground">보조 키워드</p><p className="mt-1 flex flex-wrap gap-1.5">{seo.secondaryKeywords.length ? uniqueTexts(seo.secondaryKeywords).map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>) : "-"}</p></div>
+              <div><p className="text-[13px] font-semibold text-muted-foreground">지역 키워드</p><p className="mt-1 flex flex-wrap gap-1.5">{seo.regionKeywords.length ? uniqueTexts(seo.regionKeywords).map((keyword) => <Badge key={keyword} variant="secondary">{keyword}</Badge>) : <span className="text-muted-foreground">해당 없음 (가게 홍보에만 써요)</span>}</p></div>
               <div><p className="text-[13px] font-semibold text-muted-foreground">검색 의도</p><p className="mt-1"><strong>{seo.searchIntent}</strong> — {seo.searchIntentNote}</p></div>
             </div>
             <div><p className="text-[13px] font-semibold text-muted-foreground">검색 결과용 요약</p><p className="mt-1">{seo.metaDescription}</p></div>
           </div>
           <div className="space-y-3 rounded-2xl border bg-card p-5">
             <p className="font-bold">태그 {seo.tags.length}개</p>
-            <p className="flex flex-wrap gap-1.5">{seo.tags.map((tag) => <Badge key={tag} variant="outline">#{tag}</Badge>)}</p>
+            <p className="flex flex-wrap gap-1.5">{uniqueTexts(seo.tags).map((tag) => <Badge key={tag} variant="outline">#{tag}</Badge>)}</p>
             <div className="flex flex-wrap gap-2">
               {copyButton("tags-naver", "네이버용 태그 복사", formatTags(seo.tags, "naver"), "네이버 블로그 태그 칸에 붙여넣으세요. (#로 구분)")}
               {copyButton("tags-tistory", "티스토리용 태그 복사", formatTags(seo.tags, "tistory"), "티스토리 태그 칸에 붙여넣으세요. (쉼표로 구분)")}

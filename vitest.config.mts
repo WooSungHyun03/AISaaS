@@ -1,12 +1,14 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   test: {
     environment: "node",
+    // scripts/harness/*.test.mjs are node:test files (npm run harness:test); Vitest finds no suite in them and would fail.
+    exclude: [...configDefaults.exclude, "scripts/harness/**"],
     // The opt-in *.db.test.ts files share one local database; some assert exact table counts
     // (admin dashboard), which another file inserting rows at the same moment would break.
     fileParallelism: !process.env.RUN_DB_TESTS,

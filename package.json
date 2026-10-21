@@ -15,9 +15,16 @@
     "e2e:collection": "node scripts/e2e/channel-collection.e2e.mjs",
     "e2e:schedule": "node scripts/e2e/scheduled-content.e2e.mjs",
     "perf:measure": "node scripts/perf/measure.mjs",
+    "e2e:journey": "node scripts/e2e/new-user-journey.e2e.mjs",
     "e2e:admin": "node scripts/e2e/admin-access.e2e.mjs",
     "e2e:guide": "node scripts/e2e/guide-pages.e2e.mjs",
-    "guide:capture": "node scripts/e2e/capture-guide.mjs"
+    "guide:capture": "node scripts/e2e/capture-guide.mjs",
+    "harness:audit": "node scripts/harness/run.mjs audit",
+    "harness:focus": "node scripts/harness/run.mjs focus",
+    "harness:verify": "node scripts/harness/run.mjs verify",
+    "harness:demo": "node scripts/harness/run.mjs demo",
+    "harness:perf": "node scripts/harness/run.mjs perf",
+    "harness:test": "node --test scripts/harness/*.test.mjs"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.21",

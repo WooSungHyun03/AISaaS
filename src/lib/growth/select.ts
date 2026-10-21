@@ -83,6 +83,8 @@ export interface GrowthBundleChannel {
 
 export interface GrowthBundle {
   businessId: string;
+  /** Whether a real AI is connected. With the mock AI the background request would only return the rule-based text already on screen, so it is never sent. */
+  aiNarratives: boolean;
   /** The instant the bundle was built; dates and "next collection" are relative to it, on the server and in the browser alike. */
   generatedAtMs: number;
   channels: GrowthBundleChannel[];
@@ -114,4 +116,9 @@ export function selectChannelSeries(channel: GrowthBundleChannel, days: GrowthPe
 /** A 7-day chart is daily; a longer one reads better by week unless the owner picks otherwise. */
 export function defaultGranularity(days: GrowthPeriod): GrowthGranularity {
   return days >= 90 ? "week" : "day";
+}
+
+/** Whether the browser should ask the server for the AI reading of this channel and period (once per session, only when an AI is connected and today's reading is missing). */
+export function shouldRequestNarrative(params: { aiNarratives: boolean; aiUsed: boolean; alreadyRequested: boolean }): boolean {
+  return params.aiNarratives && !params.aiUsed && !params.alreadyRequested;
 }

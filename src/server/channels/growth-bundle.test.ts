@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GROWTH_PERIODS, bucketPoints, defaultGranularity, selectChannelSeries } from "@/lib/growth/select";
+import { GROWTH_PERIODS, bucketPoints, defaultGranularity, selectChannelSeries, shouldRequestNarrative } from "@/lib/growth/select";
 import { assembleBundleChannel } from "./growth-bundle";
 import { buildChannelSeries, type ChannelRow, type SnapshotRow } from "./growth-series";
 
@@ -98,5 +98,17 @@ describe("bucketPoints / defaultGranularity", () => {
     expect(defaultGranularity(7)).toBe("day");
     expect(defaultGranularity(30)).toBe("day");
     expect(defaultGranularity(90)).toBe("week");
+  });
+});
+
+describe("shouldRequestNarrative: the browser never sends a request that cannot add anything", () => {
+  it("sends none with the mock AI (the rule-based text is already on screen): switching periods makes zero requests", () => {
+    for (const aiUsed of [false, true]) for (const alreadyRequested of [false, true]) expect(shouldRequestNarrative({ aiNarratives: false, aiUsed, alreadyRequested })).toBe(false);
+  });
+
+  it("with a real AI it asks once per channel and period, and not when today's reading already exists", () => {
+    expect(shouldRequestNarrative({ aiNarratives: true, aiUsed: false, alreadyRequested: false })).toBe(true);
+    expect(shouldRequestNarrative({ aiNarratives: true, aiUsed: false, alreadyRequested: true })).toBe(false);
+    expect(shouldRequestNarrative({ aiNarratives: true, aiUsed: true, alreadyRequested: false })).toBe(false);
   });
 });

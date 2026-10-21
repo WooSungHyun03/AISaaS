@@ -37,4 +37,13 @@ describe("getAIProvider in production", () => {
     const dev = await load({ NODE_ENV: "development", AI_PROVIDER: "mock", ALLOW_MOCK_AI: "false" });
     expect(dev.isMockAiBlocked()).toBe(false);
   });
+
+  it("never serves the mock on Vercel's real production, even if ALLOW_MOCK_AI=true was left in that environment", async () => {
+    const prod = await load({ NODE_ENV: "production", VERCEL_ENV: "production", AI_PROVIDER: "mock", ALLOW_MOCK_AI: "true" });
+    expect(prod.isMockAiBlocked()).toBe(true);
+    await expect(prod.getAIProvider().generateText({ prompt: "x" })).rejects.toMatchObject({ code: "MISSING_API_KEY" });
+    // a preview deployment (or any non-Vercel demo image) that opted in keeps working
+    const preview = await load({ NODE_ENV: "production", VERCEL_ENV: "preview", AI_PROVIDER: "mock", ALLOW_MOCK_AI: "true" });
+    expect(preview.isMockAiBlocked()).toBe(false);
+  });
 });

@@ -1,0 +1,50 @@
+{
+  "schedule": {
+    "priority": "P0",
+    "objective": "지정한 KST 요일에 블로그와 숏폼이 실제 생성되고 중복 실행·중복 차감이 없을 것",
+    "paths": ["src/server/automations", "src/app/api/cron/run-automations/route.ts", "supabase/functions/run-due-automations"],
+    "tests": ["src/server/automations/runner.test.ts", "src/server/automations/scheduler.test.ts", "src/server/automations/schedule-weekday.test.ts", "src/server/automations/deferred-run.test.ts", "src/app/api/cron/run-automations/route.test.ts"]
+  },
+  "assets": {
+    "priority": "P0",
+    "objective": "블로그·광고 참고 사진 업로드→소유권 검증→AI 입력 반영→생성 이력까지 연결",
+    "paths": ["src/app/(app)/shorts/actions.test.ts", "src/app/(app)/blog/actions.test.ts", "src/server/shorts"],
+    "tests": ["src/app/(app)/shorts/actions.test.ts", "src/app/(app)/blog/actions.test.ts"]
+  },
+  "growth": {
+    "priority": "P0",
+    "objective": "공개 YouTube·블로그만 적법하게 수집하고 실제 스냅샷·그래프를 정확히 표시",
+    "paths": ["src/server/channels", "src/app/api/cron/collect-metrics/route.ts"],
+    "tests": ["src/server/channels/collect-pipeline.test.ts", "src/server/channels/growth-bundle.test.ts", "src/server/channels/providers/naver-blog.test.ts", "src/app/api/cron/collect-metrics/route.test.ts"]
+  },
+  "ai": {
+    "priority": "P0",
+    "objective": "AI 실응답 검증, 운영 mock 방지, 생성물 저장, 예산 상한과 실패 복구",
+    "paths": ["src/server/ai", "src/server/budget", "src/server/automations/handlers"],
+    "tests": ["src/server/ai/mock-guard.test.ts", "src/server/ai/generate-budget.test.ts", "src/server/automations/handlers/blog.test.ts", "src/server/automations/handlers/shorts.test.ts", "src/server/budget/pricing.test.ts"]
+  },
+  "billing": {
+    "priority": "P0",
+    "objective": "이용권 원장, 실행 단위 멱등성, 실패 환원 및 결제·체험 모드 구분",
+    "paths": ["src/server/billing", "src/server/budget"],
+    "tests": ["src/server/billing/credits.test.ts", "src/server/billing/run-credits.test.ts", "src/server/billing/entitlements.test.ts", "src/server/billing/checkout-sessions.test.ts", "src/server/budget/period.test.ts"]
+  },
+  "security": {
+    "priority": "P0",
+    "objective": "인증·인가, RLS 및 관리자 접근, URL·업로드 보안, 시크릿과 사용자 격리",
+    "paths": ["src/server/security", "src/server/admin", "src/lib/supabase"],
+    "tests": ["src/server/admin/access.test.ts", "src/lib/supabase/route-access.test.ts", "src/lib/safe-external-url.test.ts", "src/app/(auth)/actions.test.ts"]
+  },
+  "ui": {
+    "priority": "P1",
+    "objective": "실제 서비스 화면·가이드·라우팅·모바일·오류 및 빈 상태의 완결성",
+    "paths": ["src/app", "src/components", "src/lib/guide-content.test.ts"],
+    "tests": ["src/components/layout/nav-config.test.ts", "src/lib/guide-content.test.ts", "src/components/channels/growth-line-chart.test.ts"]
+  },
+  "performance": {
+    "priority": "P1",
+    "objective": "성장 리포트 버튼 즉각 반응, 불필요한 네트워크 요청 0, 주요 화면 TTFB 및 UX 기록",
+    "paths": ["scripts/perf/measure.mjs", "src/server/channels/growth-bundle.ts"],
+    "tests": ["src/server/channels/growth-bundle.test.ts", "src/components/channels/growth-line-chart.test.ts"]
+  }
+}

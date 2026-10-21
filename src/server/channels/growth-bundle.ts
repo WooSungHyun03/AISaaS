@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
+import { serverEnv } from "@/lib/env/server";
 import { GROWTH_PERIODS, type GrowthBundle, type GrowthBundleChannel, type GrowthBundleMetric, type GrowthPeriod } from "@/lib/growth/select";
 import { isMockAiText } from "@/server/ai/mock-marker";
 import { getChannelContentReportsByPeriod } from "./growth-content";
@@ -88,8 +89,9 @@ export function assembleBundleChannel(
  */
 export async function getGrowthBundle(businessId: string, now: Date = new Date()): Promise<GrowthBundle> {
   const nowMs = now.getTime();
+  const aiConnected = serverEnv.AI_PROVIDER !== "mock";
   const channels = await loadGrowthChannels(businessId);
-  if (channels.length === 0) return { businessId, generatedAtMs: nowMs, channels: [], hasAnyData: false };
+  if (channels.length === 0) return { businessId, aiNarratives: aiConnected, generatedAtMs: nowMs, channels: [], hasAnyData: false };
 
   // Once the channels are known, the snapshots, the per-video rows and today's readings are three independent reads: one round.
   const channelIds = channels.map((channel) => channel.id);
@@ -103,5 +105,5 @@ export async function getGrowthBundle(businessId: string, now: Date = new Date()
     assembleBundleChannel(channel, snapshots, nowMs, contentByChannel.get(channel.id) ?? { 7: null, 30: null, 90: null }, aiNarratives),
   );
   const hasAnyData = bundleChannels.some((channel) => channel.metrics.some((metric) => metric.points.some((point) => point.value !== null) || metric.byDays[30].current !== null));
-  return { businessId, generatedAtMs: nowMs, channels: bundleChannels, hasAnyData };
+  return { businessId, aiNarratives: aiConnected, generatedAtMs: nowMs, channels: bundleChannels, hasAnyData };
 }

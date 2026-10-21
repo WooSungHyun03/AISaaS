@@ -44,7 +44,8 @@ await page.goto(`${BASE_URL}/growth-report`, { waitUntil: "networkidle" });
 const buttons = [["최근 7일", "기간 선택"], ["최근 90일", "기간 선택"], ["최근 30일", "기간 선택"], ["주별", "보기 단위"], ["월별", "보기 단위"], ["일별", "보기 단위"]];
 for (const [name, group] of buttons) {
   let requests = 0;
-  const onReq = (r) => { if (!/\.(png|jpg|svg|woff2?|css)$/.test(r.url())) requests += 1; };
+  // The browser re-asks for the favicon when the URL is updated (history.replaceState); that is not app traffic.
+  const onReq = (r) => { if (!/\.(png|jpg|svg|ico|woff2?|css)(\?.*)?$/.test(r.url())) requests += 1; };
   page.on("request", onReq);
   const control = page.getByRole("navigation", { name: group }).getByText(name, { exact: true });
   const t0 = Date.now();

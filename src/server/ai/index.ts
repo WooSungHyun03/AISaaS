@@ -9,9 +9,15 @@ import { AnthropicProvider } from "./providers/anthropic";
 
 let cachedProvider: AIProvider | undefined;
 
-/** The mock provider is for development, tests and demo images: a production deployment must not serve its placeholders. */
+/**
+ * The mock provider is for development, tests and demo images: a production deployment must not serve its placeholders.
+ * ALLOW_MOCK_AI lets a self-hosted demo image opt in, but it is ignored on Vercel's real production environment
+ * (VERCEL_ENV=production): the variable exists in that project's Production scope, and a forgotten opt-in there must
+ * never turn placeholder text into customers' "AI results".
+ */
 export function isMockAiBlocked(): boolean {
-  return serverEnv.AI_PROVIDER === "mock" && process.env.NODE_ENV === "production" && serverEnv.ALLOW_MOCK_AI !== "true";
+  if (serverEnv.AI_PROVIDER !== "mock" || process.env.NODE_ENV !== "production") return false;
+  return process.env.VERCEL_ENV === "production" || serverEnv.ALLOW_MOCK_AI !== "true";
 }
 
 /** Stands in for the mock provider in production: every call fails with a clear, retryable-by-configuration error. */
