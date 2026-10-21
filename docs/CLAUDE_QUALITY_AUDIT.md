@@ -4,7 +4,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 `main`, fixes what it finds, verifies, and pushes. The next run starts its
 "new changes" review from the **last reviewed SHA** below.
 
-**Last reviewed SHA:** `3ec1409` (2026-10-17 run — update the line on every run)
+**Last reviewed SHA:** `46a703e` (2026-10-22 run — update the line on every run)
 
 ## Open findings (carry over until fixed)
 
@@ -37,8 +37,23 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 | F-025 | P1 | automations reaper / 팀원 2 | `reapStaleRuns` marked stale runs FAILED **before** releasing their credit reservation. A transient error in `releaseCreditByReference` aborted the loop and, because FAILED runs are never selected again, left that run's credit (and the later runs' credits in the same tick) reserved for good. | **fixed 2026-10-16** (select → release → mark FAILED per run; a failed release leaves the run in flight for the next tick; an already-settled reservation (55000) still closes the run) |
 | F-026 | P2 | business | `updateBusiness` had no user check and did not read the row back: RLS turns an update of a missing/foreign business (deleted in another tab, signed-out session) into 0 rows, so the form said "저장됨" while nothing was saved. | **fixed 2026-10-17** (signed-in check, `owner_id` filter, `select().maybeSingle()`; "찾을 수 없습니다" when 0 rows) |
 | F-027 | P2 | error boundaries | Every `error.tsx` wired "다시 시도" to `reset()`, which in Next 16.3 only clears the boundary state without re-fetching server data — after a transient Server Component error (DB timeout on /usage, /dashboard …) the button re-rendered the same error. No root `global-error.tsx`, so errors in the root layout and in `(admin)`/`(auth)` (no own boundary) fell to Next's unstyled default. | **fixed 2026-10-17** (all 7 boundaries use the stable `retry()` = router refresh + reset; `src/app/global-error.tsx` added) |
+| F-028 | P1 | automations scheduler | A due ACTIVE automation whose schedule has no next slot (WEEKLY with no weekday, a broken `timeOfDay`; `automations.schedule` is owner-writable through RLS, and older rows predate the form validation) made `claimDueSlot` → `computeNextRunAt` throw on **every** tick. The row stayed ACTIVE with a past `next_run_at`, so it was read first (`order by next_run_at`, limit 20) forever; 20 such rows would have stopped every other user's scheduled content. | **fixed 2026-10-22** (the claim parks it — `status ERROR`, `next_run_at null` by compare-and-set — and the tick reports it FAILED; re-activating asks for a valid schedule) |
+| F-029 | P2 | growth report | `loadGrowthNarrative` (Server Action that can start a paid AI call and write the narrative cache) authorised with `getAuthUser()` = local JWT check, so a session signed out / deleted within the last hour still passed — against the rule written next to `getAuthUser` ("a Server Action that changes anything still calls getUser"). | **fixed 2026-10-22** (`supabase.auth.getUser()`) |
 
 ## Run log
+
+### 2026-10-22
+
+- **Start SHA:** `46a703e` (4 commits since the run-8 commit `730c7f7`, all from the user's interactive sessions: scheduler reliability + migration `0076` (slot claim, failure streak, tick heartbeat, `/admin/scheduler`, `/api/health/scheduler`, daily Vercel cron fallback), upload bucket-limit fix, Naver robots / collection back-off, `getClaims` + growth bundle performance, Shorts readiness, quality harness).
+- **Working tree:** clean except the never-committed `mascot/` and `*-marketing.md`.
+- **Local env:** `bash scripts/dev-db.sh start` — local DB at 0076.
+- **Reviewed:** cron route (auth for POST + Vercel `Bearer` GET, heartbeat, budget), `claimDueSlot`/`planDueClaim`/`runDueAutomation` (CAS, catch-up window, double advance is idempotent), failure streak + `AutoRunToggle`/`updateAutomation` status switch, `automations` column privileges (owner can write every column — F-028), `scheduler_ticks` RLS, proxy/`getAuthUser` (`getClaims`; suspension still read per request; every `getAuthUser` caller that is a Server Action — F-029), growth bundle (paged snapshot reads, 2× window for the comparison, mock AI never requested), collection back-off / paused probe / `last_success_at`, bucket provisioning + signed upload retry, blog page parallel reads, blog prompt facts.
+- **Findings & fixes:** F-028 (P1), F-029 (P2).
+- **Tests added:** `scheduler.db.test.ts` › invalid schedule is parked once (two concurrent claims → one `INVALID_SCHEDULE`, one `LOST`; no longer due) — fails before the fix; `growth-report/actions.test.ts` (signed-out session gets no reading and no read; bad period refused) — fails before the fix.
+- **Verification:** `npm run harness:verify` ✅ (audit, lint, typecheck, Vitest 1321 passed / 61 skipped, build, diff check); `RUN_DB_TESTS=1` on all 13 DB test files ✅ 59/59. **Not run:** `harness:demo` / `harness:perf` / browser smoke — `.env.local` points at the hosted project and the guard (correctly) refuses; swapping the owner's env file in an unattended run was not done.
+- **User-only actions:** none new (no migration today). Still open from the harness run: make sure Vercel Production has `AI_PROVIDER=anthropic` and no `ALLOW_MOCK_AI` (H-003).
+- **Next run priorities:** `harness:demo` + `harness:perf` in an interactive session; F-011 decision; F-022 cleanup by owners; `/admin/users` + refunds pages after any teammate change.
+- **Commit:** see git log (fix(scheduler,growth): park automations whose schedule has no next slot; growth AI reading re-checks the session)
 
 ### 2026-10-17 (run 8)
 

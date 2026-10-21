@@ -86,7 +86,7 @@ export const MAX_CATCH_UP_MS = 12 * 60 * 60_000;
 /** After this many scheduled runs in a row fail, the automation is parked (status ERROR) until its owner looks at it. One failure must not stop a weekly schedule for good. */
 export const MAX_CONSECUTIVE_SCHEDULED_FAILURES = 3;
 
-export type DueClaim = { kind: "CLAIMED"; overdueMs: number } | { kind: "LOST" };
+export type DueClaim = { kind: "CLAIMED"; overdueMs: number } | { kind: "LOST" } | { kind: "INVALID_SCHEDULE" };
 
 /**
  * What taking a due slot does: how late it is, and where `next_run_at` goes. A slot that is within the catch-up window
@@ -106,8 +106,22 @@ export function planDueClaim(schedule: AutomationSchedule, dueAt: string | null,
  * from looking due again on every following tick.
  */
 export async function claimDueSlot(automation: Pick<Automation, "id" | "schedule" | "next_run_at">, now: Date = new Date()): Promise<DueClaim> {
-  const plan = planDueClaim(automation.schedule as unknown as AutomationSchedule, automation.next_run_at, now);
   const admin = createAdminClient();
+  let plan: ReturnType<typeof planDueClaim>;
+  try {
+    plan = planDueClaim(automation.schedule as unknown as AutomationSchedule, automation.next_run_at, now);
+  } catch (cause) {
+    // A schedule with no next slot (no weekday chosen, a broken time) would throw here on every tick and stay first in
+    // the due queue for good, crowding out everyone else's slots. Park it instead: activating it again asks the owner
+    // to fix the schedule (activateAutomation refuses a schedule computeNextRunAt cannot use).
+    let park = admin.from("automations").update({ status: "ERROR", next_run_at: null }).eq("id", automation.id).eq("status", "ACTIVE");
+    park = automation.next_run_at === null ? park.is("next_run_at", null) : park.eq("next_run_at", automation.next_run_at);
+    const { data, error } = await park.select("id");
+    if (error) throw error;
+    if (!data || data.length === 0) return { kind: "LOST" };
+    logger.error("automation_parked_invalid_schedule", { automationId: automation.id, message: cause instanceof Error ? cause.message : String(cause) });
+    return { kind: "INVALID_SCHEDULE" };
+  }
   let update = admin.from("automations").update({ next_run_at: plan.next.toISOString() }).eq("id", automation.id).eq("status", "ACTIVE");
   update = automation.next_run_at === null ? update.is("next_run_at", null) : update.eq("next_run_at", automation.next_run_at);
   const { data, error } = await update.select("id");

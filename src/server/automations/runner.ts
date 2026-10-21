@@ -521,6 +521,7 @@ export async function runAutomationNow(
   return executeAutomation(automationId, "MANUAL", options);
 }
 
+const INVALID_SCHEDULE_MESSAGE = "실행 일정을 계산할 수 없어 자동 만들기를 멈췄어요. 일정을 다시 저장한 뒤 켜주세요.";
 const MISSED_SLOT_MESSAGE = "예약한 시간이 한참 지나서(서비스 점검 등) 이번 제작은 건너뛰었어요. 다음 예약 시간에 정상적으로 만들어요.";
 
 /**
@@ -535,6 +536,7 @@ export async function runDueAutomation(automationId: string, due?: Pick<Automati
     logger.info("automation_due_slot_taken", { automationId });
     return { runId: "", status: "SKIPPED" };
   }
+  if (claim.kind === "INVALID_SCHEDULE") return { runId: "", status: "FAILED", errorMessage: INVALID_SCHEDULE_MESSAGE };
   if (claim.overdueMs > MAX_CATCH_UP_MS) {
     logger.warn("automation_due_slot_missed", { automationId, overdueMinutes: Math.round(claim.overdueMs / 60_000) });
     return executeAutomation(automationId, "SCHEDULED", { skipReason: MISSED_SLOT_MESSAGE });

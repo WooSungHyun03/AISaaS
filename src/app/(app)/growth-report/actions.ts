@@ -1,6 +1,6 @@
 "use server";
 
-import { getAuthUser, createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { isGrowthPeriod } from "@/lib/growth/select";
 import { getChannelGrowthSeries, getOrCreateGrowthNarrative } from "@/server/channels";
 import { logger } from "@/lib/logger";
@@ -18,11 +18,13 @@ export interface GrowthNarrativeResult {
  */
 export async function loadGrowthNarrative(channelId: string, days: number): Promise<GrowthNarrativeResult> {
   if (!isGrowthPeriod(days) || typeof channelId !== "string" || channelId.length > 64) return { error: "기간을 확인해주세요." };
-  const user = await getAuthUser();
+  // getUser(), not the cached JWT check: this may start a paid AI call and write the cache, so a session that was signed
+  // out or deleted a moment ago must not pass (see getAuthUser in lib/supabase/server.ts).
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "로그인이 필요합니다." };
 
   try {
-    const supabase = await createClient();
     const { data: channel } = await supabase.from("tracked_channels").select("id, business_id").eq("id", channelId).maybeSingle();
     if (!channel) return { error: "채널을 찾을 수 없습니다." };
     const [{ data: business }, series] = await Promise.all([

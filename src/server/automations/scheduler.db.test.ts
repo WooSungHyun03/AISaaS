@@ -87,6 +87,21 @@ suite("scheduler: slot claim and tick log (migration 0076)", () => {
     expect(row.data?.next_run_at).toBe("2026-10-19T00:00:00+00:00"); // Monday: Friday's slot (10-16 00:00 UTC) was already past
   });
 
+  it("parks a due automation whose schedule has no next slot instead of leaving it first in the due queue", async () => {
+    const { claimDueSlot, findDueAutomations } = await import("./scheduler");
+    const id = await newAutomation("2026-10-19T00:00:00.000Z");
+    const broken = { frequency: "WEEKLY", daysOfWeek: [], timeOfDay: "09:00", timezone: "Asia/Seoul" };
+    await admin.from("automations").update({ schedule: broken }).eq("id", id);
+    const now = new Date("2026-10-19T00:05:00.000Z");
+
+    const results = await Promise.all([claimDueSlot({ id, schedule: broken as never, next_run_at: "2026-10-19T00:00:00.000Z" }, now), claimDueSlot({ id, schedule: broken as never, next_run_at: "2026-10-19T00:00:00.000Z" }, now)]);
+
+    expect(results.map((result) => result.kind).sort()).toEqual(["INVALID_SCHEDULE", "LOST"]);
+    const row = await admin.from("automations").select("status, next_run_at").eq("id", id).single();
+    expect(row.data).toEqual({ status: "ERROR", next_run_at: null });
+    expect((await findDueAutomations(100, now)).some((due) => due.id === id)).toBe(false);
+  });
+
   it("counts consecutive failures, defaulting to 0 and refusing a negative count", async () => {
     const row = await admin.from("automations").select("consecutive_failures").eq("id", automationId).single();
     expect(row.data?.consecutive_failures).toBe(0);
