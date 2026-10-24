@@ -28,7 +28,7 @@ import { resolvePromotionType } from "@/server/promotion/strategy";
 import {
   buildAdPlanPrompt,
   buildWanPrompt,
-  makeAdPlanSchema,
+  makeAdPlanDraftSchema,
   normalizeAdPlan,
   adPlanSchema,
   type AdPlan,
@@ -209,7 +209,7 @@ async function makePlan(ctx: AutomationRunContext, settings: ShortsSettings, ass
       audios: audios.map((asset) => ({ label: asset.label, durationSec: asset.durationSec ?? 0 })),
       hasLogo: assetsOfKind(assets, "logo").length > 0,
     }),
-    schema: makeAdPlanSchema(bounds),
+    schema: makeAdPlanDraftSchema(bounds),
     maxTokens: 10_000,
     role: "planner" as const,
     purpose: rejectedTopic ? "video.plan.retry" : "video.plan",

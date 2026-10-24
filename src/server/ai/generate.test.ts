@@ -65,6 +65,23 @@ describe("generateStructured", () => {
     expect(generateText).toHaveBeenCalledTimes(2);
   });
 
+  it("tells the model which rule its answer broke on the retry, and names it in the final error", async () => {
+    const strict = z.object({ title: z.string(), cta: z.object({ text: z.string().max(5) }) });
+    const prompts: string[] = [];
+    const generateText = vi.fn().mockImplementation(async (prompt: string) => {
+      prompts.push(prompt);
+      return { text: '{"title": "x", "cta": {"text": "far too long"}}' };
+    });
+    getAIProviderMock.mockReturnValue(fakeProvider(generateText));
+
+    const error = await generateStructured({ prompt: "write something", schema: strict }).catch((e) => e);
+
+    expect(prompts[0]).not.toContain("rejected");
+    expect(prompts[1]).toContain("cta.text");
+    expect((error as AIProviderError).message).toContain("cta.text");
+    expect(generateText).toHaveBeenCalledTimes(2);
+  });
+
   it("propagates a transient AIProviderError from the underlying provider without swallowing it", async () => {
     const generateText = vi.fn().mockRejectedValue(new AIProviderError("RATE_LIMITED", "fake", "slow down"));
     getAIProviderMock.mockReturnValue(fakeProvider(generateText));

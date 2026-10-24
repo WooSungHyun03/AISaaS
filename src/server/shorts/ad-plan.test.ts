@@ -5,6 +5,7 @@ import {
   WAN_PROMPT_MAX_CHARS,
   buildAdPlanPrompt,
   buildWanPrompt,
+  makeAdPlanDraftSchema,
   makeAdPlanSchema,
   missingProhibitions,
   normalizeAdPlan,
@@ -46,6 +47,35 @@ describe("ad plan schema", () => {
     expect(mutate((plan) => { plan.inserts = [{ imageIndex: 2, startSec: 23, endSec: 22 }]; }).success).toBe(false);
     expect(mutate((plan) => { plan.narration = "가".repeat(400); }).success).toBe(false);
     expect(mutate((plan) => { plan.cta.startSec = 24.5; }).success).toBe(false);
+  });
+
+  it("draft schema: drops an insert or reference the owner cannot have instead of failing the whole plan", () => {
+    const noExact = { durationSec: 25, imageCount: 1, videoCount: 0, audioCount: 0, exactImages: [] as number[] };
+    // The planner prompt's own JSON example shows an insert for image 2; a model that copies it for a plan with no
+    // 'exact' image, or names a video/audio/image that does not exist, used to be rejected twice (a failed run).
+    const raw = JSON.parse(mockAdPlan("DURATION=25\nIMAGE_COUNT=1\nVIDEO_COUNT=0\nAUDIO_COUNT=0", "상호: 빵집"));
+    raw.inserts = [{ imageIndex: 2, startSec: 21, endSec: 24 }];
+    raw.references = [{ type: "image", index: 1, role: "the product" }, { type: "video", index: 1, role: "none exists" }, { type: "image", index: 4, role: "none exists" }];
+    expect(makeAdPlanSchema(noExact).safeParse(raw).success).toBe(false);
+    const draft = makeAdPlanDraftSchema(noExact).safeParse(raw);
+    expect(draft.success).toBe(true);
+    if (draft.success) {
+      expect(draft.data.inserts).toEqual([]);
+      expect(draft.data.references).toEqual([{ type: "image", index: 1, role: "the product" }]);
+    }
+  });
+
+  it("draft schema: keeps a valid insert, and still rejects what is not optional", () => {
+    const withExact = bounds(25);
+    const raw = JSON.parse(mockAdPlan("DURATION=25\nIMAGE_COUNT=2\nVIDEO_COUNT=1\nAUDIO_COUNT=0\nImages 2 are 'exact' images", "상호: 빵집"));
+    raw.inserts = [{ imageIndex: 2, startSec: 21, endSec: 24 }, { imageIndex: 1, startSec: 5, endSec: 8 }];
+    const kept = makeAdPlanDraftSchema(withExact).parse(raw);
+    expect(kept.inserts).toEqual([{ imageIndex: 2, startSec: 21, endSec: 24 }]);
+    raw.storyboard = raw.storyboard.slice(0, 2);
+    expect(makeAdPlanDraftSchema(withExact).safeParse(raw).success).toBe(false);
+    raw.storyboard = undefined;
+    expect(makeAdPlanDraftSchema(withExact).safeParse(raw).success).toBe(false);
+    expect(makeAdPlanDraftSchema(withExact).safeParse("not an object").success).toBe(false);
   });
 
   it("snaps the storyboard to exact, contiguous seconds", () => {

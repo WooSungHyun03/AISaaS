@@ -100,10 +100,13 @@ export async function generateStructured<T>({
     "Respond with ONLY valid JSON matching the requested shape. No markdown fences, no commentary.";
   const providerName = getAIProvider().name;
 
+  // What was wrong with the previous attempt: sent back to the model on the retry and kept in the final error, so a
+  // rejected plan names the rule it broke instead of only a truncated copy of the answer.
+  let problem = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const text = await generateText({
       system: system ? `${system}\n\n${jsonInstruction}` : jsonInstruction,
-      prompt: attempt === 0 ? prompt : `${prompt}\n\nYour previous response was not valid JSON. Try again.`,
+      prompt: attempt === 0 ? prompt : `${prompt}\n\nYour previous response was rejected: ${problem}. Return the complete JSON again with every problem fixed.`,
       maxTokens,
       ...(temperature !== undefined ? { temperature } : {}),
       ...(tier ? { tier } : {}),
@@ -117,15 +120,16 @@ export async function generateStructured<T>({
       const parsed = JSON.parse(extractJson(text));
       const result = schema.safeParse(parsed);
       if (result.success) return result.data;
+      problem = `it did not match the required structure: ${result.error.issues.slice(0, 6).map((issue) => `${issue.path.join(".") || "(root)"} ${issue.message}`).join("; ")}`;
     } catch {
-      // fall through to retry / final error below
+      problem = "it was not valid JSON";
     }
 
     if (attempt === 1) {
       throw new AIProviderError(
         "INVALID_STRUCTURED_RESPONSE",
         providerName,
-        `AI response did not match the expected structure after 2 attempts. Raw: ${text.slice(0, 300)}`,
+        `AI response did not match the expected structure after 2 attempts (${problem}). Raw: ${text.slice(0, 300)}`,
       );
     }
   }

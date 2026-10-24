@@ -85,6 +85,27 @@ export function makeAdPlanSchema(bounds: AdPlanBounds) {
   });
 }
 
+/**
+ * What the planner's answer is checked with. `references` and `inserts` are optional extras, and the prompt's own JSON
+ * example shows an insert, so a model often copies one for a photo that is not 'exact' or names a file the owner does not
+ * have. Those entries are dropped (the plan is still complete without them) instead of failing the whole plan, which
+ * cost a second paid planner call and then a failed run. Everything else is still checked by `makeAdPlanSchema`.
+ */
+export function makeAdPlanDraftSchema(bounds: AdPlanBounds) {
+  const max = { image: bounds.imageCount, video: bounds.videoCount, audio: bounds.audioCount } as const;
+  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+  const keepReference = (item: unknown) => !isRecord(item) || !(typeof item.type === "string" && item.type in max) || typeof item.index !== "number" || (item.index >= 1 && item.index <= max[item.type as keyof typeof max]);
+  const keepInsert = (item: unknown) => !isRecord(item) || (typeof item.imageIndex === "number" && bounds.exactImages.includes(item.imageIndex) && typeof item.startSec === "number" && typeof item.endSec === "number" && item.endSec > item.startSec && item.endSec <= bounds.durationSec + 0.5);
+  return z.preprocess((raw) => {
+    if (!isRecord(raw)) return raw;
+    return {
+      ...raw,
+      ...(Array.isArray(raw.references) ? { references: raw.references.filter(keepReference) } : {}),
+      ...(Array.isArray(raw.inserts) ? { inserts: raw.inserts.filter(keepInsert) } : {}),
+    };
+  }, makeAdPlanSchema(bounds));
+}
+
 /** Makes the storyboard exactly contiguous from 0 to the requested length (the AI's timings are close, not exact). */
 export function normalizeAdPlan(plan: AdPlan, durationSec: number): AdPlan {
   const scenes = plan.storyboard.map((scene) => ({ ...scene }));
