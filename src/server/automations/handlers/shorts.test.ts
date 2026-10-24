@@ -86,6 +86,7 @@ vi.mock("@/server/shorts/assets", async (importOriginal) => ({
   loadImageBytes: async () => new Uint8Array([1, 2, 3]),
   signAsset: async (_admin: unknown, bucket: string, path: string) => `https://project.supabase.co/sign/${bucket}/${path}?t=1`,
   resolveAssetUrls: async (_admin: unknown, assets: Array<{ source: string }>) => assets.map((asset) => `https://project.supabase.co/sign/${asset.source}?t=1`),
+  resolveImageUrls: async (_admin: unknown, assets: Array<{ source: string }>) => assets.map((asset) => `https://project.supabase.co/sign/${asset.source}?t=1`),
 }));
 vi.mock("@/server/shorts/image-analysis", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/shorts/image-analysis")>()),
@@ -299,7 +300,7 @@ describe("ad Shorts pipeline", () => {
 
     it("releases (does not book) the reservation when the request cannot even be prepared, e.g. a file address cannot be signed", async () => {
       const assets = await import("@/server/shorts/assets");
-      const spy = vi.spyOn(assets, "resolveAssetUrls").mockRejectedValueOnce(new Error("storage unreachable"));
+      const spy = vi.spyOn(assets, "resolveImageUrls").mockRejectedValueOnce(new Error("storage unreachable"));
       try {
         await expect(drive(context())).rejects.toThrow("storage unreachable");
       } finally {

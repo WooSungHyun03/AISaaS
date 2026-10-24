@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import sharp from "sharp";
 import { clientEnv } from "@/lib/env/client";
 import { logger } from "@/lib/logger";
 import { ConnectorError } from "@/server/shared/errors";
@@ -209,6 +210,52 @@ export async function resolveAssetUrls(admin: AdminClient, assets: ShortsAsset[]
     urls.push(await signAsset(admin, REFERENCE_BUCKET, asset.source));
   }
   return urls;
+}
+
+/** The video model refuses a reference image whose shorter side is smaller than this ("Minimum dimensions are 240x240 pixels"). */
+export const MIN_REFERENCE_IMAGE_SIDE = 240;
+/** A photo smaller than this cannot be enlarged into anything useful: it is refused with a plain sentence instead. */
+const MIN_ENLARGEABLE_SIDE = 64;
+
+/**
+ * Makes sure a reference photo is big enough for the video model. A slightly small photo (a 225x225 product shot was
+ * refused by the model, twice, after the credit was taken) is enlarged to the minimum instead of failing the video;
+ * a big enough one is returned untouched.
+ */
+export async function ensureMinimumImageSize(bytes: Uint8Array, minSide = MIN_REFERENCE_IMAGE_SIDE): Promise<{ bytes: Uint8Array; width: number; height: number; enlarged: boolean }> {
+  const meta = await sharp(bytes, { failOn: "error" }).metadata();
+  const turned = (meta.orientation ?? 1) >= 5;
+  const width = (turned ? meta.height : meta.width) ?? 0;
+  const height = (turned ? meta.width : meta.height) ?? 0;
+  if (width <= 0 || height <= 0) throw new ConnectorError("video-assets", "INVALID_TARGET", "사진의 크기를 읽지 못했어요. 다른 사진으로 다시 올려주세요.");
+  const shorter = Math.min(width, height);
+  if (shorter >= minSide) return { bytes, width, height, enlarged: false };
+  if (shorter < MIN_ENLARGEABLE_SIDE) throw new ConnectorError("video-assets", "INVALID_TARGET", `사진이 너무 작아요. 가로·세로 ${minSide}픽셀 이상인 사진으로 바꿔 올려주세요.`);
+  const scale = minSide / shorter;
+  const targetWidth = Math.max(minSide, Math.round(width * scale));
+  const targetHeight = Math.max(minSide, Math.round(height * scale));
+  const enlarged = await sharp(bytes, { failOn: "error" }).rotate().resize({ width: targetWidth, height: targetHeight, fit: "fill", kernel: "lanczos3" }).png().toBuffer();
+  return { bytes: new Uint8Array(enlarged), width: targetWidth, height: targetHeight, enlarged: true };
+}
+
+/**
+ * Like `resolveAssetUrls`, for the reference PHOTOS the video model receives: one that is too small is enlarged to the
+ * model's minimum and stored next to the original (a fixed name per photo, so a repeat run reuses it); the original is
+ * never changed.
+ */
+export async function resolveImageUrls(admin: AdminClient, images: ShortsAsset[], owner: { userId: string; automationId: string }): Promise<string[]> {
+  return Promise.all(
+    images.map(async (asset) => {
+      const original = async () => (await resolveAssetUrls(admin, [asset], owner))[0];
+      if (asset.origin === "mascot") return original();
+      const fixed = await ensureMinimumImageSize(await loadImageBytes(admin, asset, owner));
+      if (!fixed.enlarged) return original();
+      const path = `${owner.userId}/${owner.automationId}/assets/${asset.id}-min${MIN_REFERENCE_IMAGE_SIDE}.png`;
+      const { error } = await admin.storage.from(REFERENCE_BUCKET).upload(path, fixed.bytes, { contentType: "image/png", upsert: true });
+      if (error) throw new ConnectorError("video-assets", "INVALID_TARGET", "작은 사진을 키우지 못했어요. 더 큰 사진으로 다시 올려주세요.", { cause: error });
+      return signAsset(admin, REFERENCE_BUCKET, path);
+    }),
+  );
 }
 
 /** Raw bytes of an image (a private upload, or a mascot pose from our own site) for the AI to look at. */

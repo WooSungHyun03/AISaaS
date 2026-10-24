@@ -36,6 +36,7 @@ import {
 import {
   ensureShortsBuckets,
   resolveAssetUrls,
+  resolveImageUrls,
   signAsset,
   VIDEO_BUCKET,
   VIDEO_URL_TTL_SEC,
@@ -357,7 +358,7 @@ async function submit(ctx: AutomationRunContext, state: JobState): Promise<Autom
       prompt: state.retryNote ? buildWanPrompt({ plan: state.plan, durationSec: state.durationSec, voiceMode: state.voiceMode, retryNote: state.retryNote }) : state.wanPrompt,
       durationSec: state.durationSec,
       resolution: WAN_RESOLUTION,
-      imageUrls: await resolveAssetUrls(admin, refs.images, owner(ctx)),
+      imageUrls: await resolveImageUrls(admin, refs.images, owner(ctx)),
       videoUrls: await resolveAssetUrls(admin, refs.videos, owner(ctx)),
       audioUrls: await resolveAssetUrls(admin, refs.audios, owner(ctx)),
       thinking: serverEnv.WAN_ENABLE_THINKING === "true",
