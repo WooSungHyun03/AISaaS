@@ -154,6 +154,7 @@ suite("ad Shorts pipeline (real worker, real Storage, real ledger)", () => {
     fs.writeFileSync(file, new Uint8Array(await (await fetch(signed.data!.signedUrl)).arrayBuffer()));
     return JSON.parse(execFileSync("ffprobe", ["-v", "error", "-print_format", "json", "-show_streams", "-show_format", file]).toString());
   };
+  let lastVideo: { path: string; durationSec: number | null; bytes: number | null } | undefined;
   const driveRun = async (id: string, extra: Record<string, unknown> = {}) => {
     const [{ shortsAutomationHandler: handler }, { claimBudgetItem, withBudgetScope }] = await Promise.all([import("./shorts"), import("@/server/budget")]);
     const ctx = contextFor(id, extra);
@@ -169,6 +170,7 @@ suite("ad Shorts pipeline (real worker, real Storage, real ledger)", () => {
       throw new Error(`did not finish: ${JSON.stringify(outcome)}`.slice(0, 400));
     });
     if (!("output" in result)) throw new Error("no result");
+    lastVideo = result.video;
     return result.output as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   };
 
@@ -206,6 +208,11 @@ suite("ad Shorts pipeline (real worker, real Storage, real ledger)", () => {
     expect(audio).toMatchObject({ codec_name: "aac" });
     expect(Number(probe.format.duration)).toBeGreaterThan(24);
     expect(Number(probe.format.duration)).toBeLessThan(26);
+    // What the library records for the item: the path of this very file, its real size and its measured length.
+    const { data: stored } = await admin.storage.from("shorts-videos").info(output.videoPath);
+    expect(lastVideo).toEqual({ path: output.videoPath, durationSec: expect.any(Number), bytes: stored?.size });
+    expect(lastVideo?.bytes).toBeGreaterThan(10_000);
+    expect(lastVideo?.durationSec).toBeGreaterThan(24);
     // A private bucket: the bare object address is not readable without the signature.
     const anonymous = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/shorts-videos/${output.videoPath}`);
     expect(anonymous.status).not.toBe(200);

@@ -12,6 +12,7 @@
     "test:credits-db": "node scripts/test-credit-ledger.mjs",
     "check:providers": "node scripts/check-providers.mjs",
     "e2e:photos": "node scripts/e2e/reference-photos.e2e.mjs",
+    "e2e:library": "node scripts/e2e/shorts-library.e2e.mjs",
     "e2e:collection": "node scripts/e2e/channel-collection.e2e.mjs",
     "e2e:schedule": "node scripts/e2e/scheduled-content.e2e.mjs",
     "perf:measure": "node scripts/perf/measure.mjs",

@@ -182,6 +182,16 @@ function looksLikeText(bytes: Uint8Array): boolean {
   return /^\s*</.test(new TextDecoder().decode(bytes.slice(start, start + 64)));
 }
 
+/**
+ * The size of a finished video that is really in the video bucket, or null when it is not there (or empty). A Short is
+ * only reported finished, and only listed as playable, after this answers: a worker that said "done" is not proof.
+ */
+export async function storedVideoSize(admin: AdminClient, path: string): Promise<number | null> {
+  const { data, error } = await admin.storage.from(VIDEO_BUCKET).info(path);
+  if (error || !data) return null;
+  return typeof data.size === "number" && data.size > 0 ? data.size : null;
+}
+
 export async function removeAssets(admin: AdminClient, paths: string[], bucket: string = REFERENCE_BUCKET): Promise<void> {
   if (paths.length === 0) return;
   await admin.storage.from(bucket).remove(paths);

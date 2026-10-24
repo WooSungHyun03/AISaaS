@@ -3,7 +3,7 @@
 //   node scripts/e2e/page-sweep.mjs            (local stack on :3100, seeded accounts)
 import { BASE_URL, launch, login, newContext } from "./lib.mjs";
 
-const ROUTES = ["/dashboard", "/diagnosis", "/calendar", "/blog", "/shorts", "/growth-report", "/growth-report?days=7&view=week", "/growth-report?days=90&view=month", "/automations", "/automations/history", "/usage", "/billing", "/settings", "/business", "/guide", "/guide/blog", "/guide/growth-report", "/support"];
+const ROUTES = ["/dashboard", "/diagnosis", "/calendar", "/blog", "/shorts", "/shorts/library", "/growth-report", "/growth-report?days=7&view=week", "/growth-report?days=90&view=month", "/automations", "/automations/history", "/usage", "/billing", "/settings", "/business", "/guide", "/guide/blog", "/guide/growth-report", "/support"];
 const ADMIN_ROUTES = ["/admin", "/admin/users", "/admin/payments", "/admin/inquiries", "/admin/usage", "/admin/errors", "/admin/collection", "/admin/scheduler"];
 let failed = 0;
 const browser = await launch();

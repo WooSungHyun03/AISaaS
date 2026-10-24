@@ -12,7 +12,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { VIDEO_BUCKET, isOwnedAssetPath, signAsset } from "@/server/shorts/assets";
 import { parseShortsSettings } from "@/types/shorts-reference";
 import { Button } from "@/components/ui/button";
+import { Film } from "lucide-react";
 import { EmptyState } from "@/components/ui/page-state";
+import { RecentShorts } from "@/components/shorts/recent-shorts";
+import { listShortsLibrary } from "@/server/shorts/library";
 import { toSafeAutomationRunOutput } from "@/server/automations/run-output";
 import { readDeferredJob } from "@/server/automations/runner";
 import { CreditNotice } from "@/components/billing/credit-notice";
@@ -66,19 +69,22 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
   const generatedPublishing = shortsPublishingSchema.safeParse(previewRun?.safe?.shortsPublishing);
   // Signing the preview video, signing the reference files and reading the working copy of the posting text do not
   // depend on each other: one round of requests instead of three in a row.
-  const [previewVideoUrl, assetViews, { data: workingCopy }] = await Promise.all([
+  const [previewVideoUrl, assetViews, { data: workingCopy }, library] = await Promise.all([
     previewRun?.safe
       ? previewRun.safe.videoPath && isOwnedAssetPath(previewRun.safe.videoPath, user.id, automation.id)
         ? signAsset(createAdminClient(), VIDEO_BUCKET, previewRun.safe.videoPath, 60 * 60).catch(() => null)
         : Promise.resolve(previewRun.safe.videoUrl)
       : Promise.resolve(null),
     assetViewsFor(settings.assets, user.id, automation.id),
-    previewRun && generatedPublishing.success
+    previewRun
       ? supabase.from("content_history").select("id,publishing").eq("run_id", previewRun.id).maybeSingle()
       : Promise.resolve({ data: null }),
+    listShortsLibrary(supabase, user.id, 1).catch(() => null),
   ]);
   const latestPreview = previewRun?.safe && previewVideoUrl ? {
     runId: previewRun.id,
+    // The library item this video was saved as (null for a run from before the library existed).
+    contentId: workingCopy?.id ?? null,
     createdAt: previewRun.created_at,
     videoUrl: previewVideoUrl,
     hook: previewRun.safe.hook,
@@ -106,11 +112,14 @@ export default async function ShortsPage({ searchParams }: { searchParams: Promi
     />
   ) : null;
 
-  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio publishingSlot={publishingSlot} referencesSlot={<ShortsAssetsCard automationId={automation.id} assets={assetViews} brief={settings.brief} durationSec={settings.durationSec} voiceMode={settings.voiceMode} disabled={Boolean(inFlightResult.data)} />} hasImages={assetViews.some((asset) => asset.kind === "image" || asset.kind === "video")} automationId={automation.id} automationStatus={automation.status} schedule={schedule} latestPreview={latestPreview} hasInFlightRun={Boolean(inFlightResult.data)} progress={jobState?.progress ?? null} job={job} nextRunAt={automation.next_run_at} /></div>;
+  const recent = library?.items.slice(0, 4) ?? [];
+  const recentSlot = recent.length > 0 ? <RecentShorts items={recent} total={library?.total ?? recent.length} /> : null;
+
+  return <div className="mx-auto max-w-6xl space-y-8"><PageHeading /><PromotionTargetCard business={selectedBusiness} /><CreditNotice kind="SHORTS" remaining={credits.remaining} nextExpiry={credits.nextExpiry} />{businessPicker}<ShortsStudio publishingSlot={publishingSlot} referencesSlot={<ShortsAssetsCard automationId={automation.id} assets={assetViews} brief={settings.brief} durationSec={settings.durationSec} voiceMode={settings.voiceMode} disabled={Boolean(inFlightResult.data)} />} hasImages={assetViews.some((asset) => asset.kind === "image" || asset.kind === "video")} automationId={automation.id} automationStatus={automation.status} schedule={schedule} latestPreview={latestPreview} hasInFlightRun={Boolean(inFlightResult.data)} progress={jobState?.progress ?? null} job={job} nextRunAt={automation.next_run_at} recentSlot={recentSlot} /></div>;
 }
 
 function PageHeading() {
-  return <PageHeader title="숏폼 스튜디오" description="사진을 올려 20~30초 AI 광고 영상을 만들고, 미리보기·게시 문구·예약까지 한곳에서 관리해요. 게시는 영상을 내려받아 직접 해요." />;
+  return <PageHeader title="숏폼 스튜디오" description="사진을 올려 20~30초 AI 광고 영상을 만들고, 미리보기·게시 문구·예약까지 한곳에서 관리해요. 게시는 영상을 내려받아 직접 해요." actions={<Button asChild variant="outline"><Link href="/shorts/library"><Film aria-hidden="true" /> 제작한 영상 보기</Link></Button>} />;
 }
 
 

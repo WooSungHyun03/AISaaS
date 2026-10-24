@@ -139,6 +139,50 @@ interface RunFinishContext {
   budgetKind?: AutomationBudgetKind;
 }
 
+/**
+ * Writes the finished run as one content item. A run has at most one (unique run_id): if this step is repeated (a retried
+ * finish, a second "finished" event), the existing row is kept and only brought up to date, so a Short is never stored twice.
+ */
+async function storeContentItem(admin: AdminClient, ctx: RunFinishContext, result: AutomationHandlerResult): Promise<string> {
+  const { automation, runId, templateSlug } = ctx;
+  const video = result.video
+    ? { video_path: result.video.path, video_duration_sec: result.video.durationSec, video_bytes: result.video.bytes, video_checked_at: new Date().toISOString() }
+    : {};
+  const { data: inserted, error: insertError } = await admin
+    .from("content_history")
+    .insert({
+      business_id: automation.business_id,
+      automation_id: automation.id,
+      // Lets a content_history row link back to the full generation
+      // result (hook/seoKeywords/imageSuggestion etc. live only in
+      // automation_runs.output) — see src/app/(app)/blog/page.tsx.
+      // Nullable: rows from before this column existed just have null,
+      // and the UI falls back to this row's own plain-text fields.
+      run_id: runId,
+      content_type: result.contentType ?? templateSlug,
+      title: result.title ?? null,
+      topic: result.topic ?? null,
+      content: result.content ?? null,
+      external_url: result.externalUrl ?? null,
+      ...video,
+    })
+    .select("id")
+    .single();
+  if (insertError?.code === "23505") {
+    // Another finish of the same run won the race (unique run_id): that row is the content item.
+    const { data: winner } = await admin.from("content_history").select("id").eq("run_id", runId).order("created_at").limit(1).maybeSingle();
+    if (winner) {
+      if (result.video) {
+        const { error: updateError } = await admin.from("content_history").update(video).eq("id", winner.id);
+        if (updateError) throw updateError;
+      }
+      return winner.id;
+    }
+  }
+  if (insertError || !inserted) throw insertError ?? new Error("Failed to persist generated content");
+  return inserted.id;
+}
+
 /** Marks a finished run SUCCESS and does the bookkeeping that follows (history row, last_run_at, usage). */
 async function persistSuccess(admin: AdminClient, ctx: RunFinishContext, result: AutomationHandlerResult): Promise<RunAutomationResult> {
   const { automation, runId: runIdValue, source, startedAtMs } = ctx;
@@ -147,29 +191,7 @@ async function persistSuccess(admin: AdminClient, ctx: RunFinishContext, result:
   const template = { slug: ctx.templateSlug };
   let contentHistoryId: string | undefined;
   if (result.content) {
-    const { data: contentHistory, error: contentHistoryError } = await admin
-      .from("content_history")
-      .insert({
-        business_id: automation.business_id,
-        automation_id: automationId,
-        // Lets a content_history row link back to the full generation
-        // result (hook/seoKeywords/imageSuggestion etc. live only in
-        // automation_runs.output) — see src/app/(app)/blog/page.tsx.
-        // Nullable: rows from before this column existed just have null,
-        // and the UI falls back to this row's own plain-text fields.
-        run_id: run.id,
-        content_type: result.contentType ?? template.slug,
-        title: result.title ?? null,
-        topic: result.topic ?? null,
-        content: result.content,
-        external_url: result.externalUrl ?? null,
-      })
-      .select("id")
-      .single();
-    if (contentHistoryError || !contentHistory) {
-      throw contentHistoryError ?? new Error("Failed to persist generated content");
-    }
-    contentHistoryId = contentHistory.id;
+    contentHistoryId = await storeContentItem(admin, ctx, result);
   }
 
   const { error: lastRunAtError } = await admin

@@ -26,7 +26,7 @@ async function fixture() {
   }
   await writeFile(path.join(root, "CLAUDE.md"), "@AGENTS.md\n@docs/HARNESS.md\n");
   await writeFile(path.join(root, ".github/workflows/ci.yml"), "run: npm run harness:audit\n");
-  await writeFile(path.join(root, "package.json"), JSON.stringify({ scripts: Object.fromEntries(["lint", "typecheck", "test", "build", "e2e:schedule", "e2e:photos", "e2e:collection", "e2e:admin", "e2e:guide", "perf:measure"].map(s => [s, "echo fixture"])) }));
+  await writeFile(path.join(root, "package.json"), JSON.stringify({ scripts: Object.fromEntries(["lint", "typecheck", "test", "build", "e2e:schedule", "e2e:photos", "e2e:library", "e2e:collection", "e2e:admin", "e2e:guide", "e2e:journey", "perf:measure"].map(s => [s, "echo fixture"])) }));
   await mkdir(path.join(root, "scripts/harness"), { recursive: true });
   await writeFile(path.join(root, "scripts/harness/scopes.json"), JSON.stringify(config));
   await writeFile(path.join(root, "scripts/harness/run.mjs"), await readFile(path.join(dirname, "run.mjs")));

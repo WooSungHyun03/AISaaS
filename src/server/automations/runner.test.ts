@@ -193,6 +193,49 @@ describe("runDueAutomation / runAutomationNow — happy path", () => {
     expect(incrementUsageMock).toHaveBeenCalledWith(admin, "user-1", { automationRuns: 1, aiGenerations: 1 });
   });
 
+  it("records a stored video on the content row, so a finished Short shows up in the library", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-v" }, error: null }, { data: null, error: null }],
+      content_history: [{ data: [], error: null }, { data: { id: "content-v" }, error: null }],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    okHandler({ output: { ok: true }, content: "script", contentType: "shorts", title: "Hook", video: { path: "user-1/auto-1/run-v/final.mp4", durationSec: 25, bytes: 4_000_000 } });
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result.contentHistoryId).toBe("content-v");
+    expect(admin.inserts.content_history[0]).toMatchObject({ run_id: "run-v", content_type: "shorts", video_path: "user-1/auto-1/run-v/final.mp4", video_duration_sec: 25, video_bytes: 4_000_000, video_checked_at: expect.any(String) });
+  });
+
+  it("does not store a Short twice when the run's content row already exists (unique run_id): the existing row is kept and updated", async () => {
+    const admin = makeAdmin({
+      automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }],
+      businesses: [{ data: BUSINESS, error: null }],
+      automation_templates: [{ data: TEMPLATE, error: null }],
+      automation_runs: [noInFlight(), { data: { id: "run-d" }, error: null }, { data: null, error: null }],
+      content_history: [
+        { data: [], error: null },
+        { data: null, error: { code: "23505", message: "duplicate key value violates unique constraint" } },
+        { data: { id: "content-first" }, error: null },
+        { data: null, error: null },
+      ],
+    });
+    createAdminClientMock.mockReturnValue(admin);
+    canExecuteAutomationMock.mockResolvedValueOnce({ allowed: true });
+    okHandler({ output: { ok: true }, content: "script", contentType: "shorts", video: { path: "user-1/auto-1/run-d/final.mp4", durationSec: 25, bytes: 1 } });
+
+    const result = await runAutomationNow("auto-1");
+
+    expect(result.status).toBe("SUCCESS");
+    expect(result.contentHistoryId).toBe("content-first");
+    expect(admin.inserts.content_history).toHaveLength(1);
+    expect(admin.updates.content_history[0]).toMatchObject({ video_path: "user-1/auto-1/run-d/final.mp4" });
+  });
+
   it("does not advance next_run_at for a manual Run Now, and tags source MANUAL", async () => {
     const admin = makeAdmin({
       automations: [{ data: AUTOMATION, error: null }, { data: null, error: null }],

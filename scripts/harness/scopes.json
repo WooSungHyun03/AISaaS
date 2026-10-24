@@ -9,7 +9,7 @@
     "priority": "P0",
     "objective": "블로그·광고 참고 사진 업로드→소유권 검증→AI 입력 반영→생성 이력까지 연결",
     "paths": ["src/app/(app)/shorts/actions.test.ts", "src/app/(app)/blog/actions.test.ts", "src/server/shorts"],
-    "tests": ["src/app/(app)/shorts/actions.test.ts", "src/app/(app)/blog/actions.test.ts"]
+    "tests": ["src/app/(app)/shorts/actions.test.ts", "src/app/(app)/shorts/library-actions.test.ts", "src/app/(app)/blog/actions.test.ts", "src/server/shorts/library.test.ts"]
   },
   "growth": {
     "priority": "P0",

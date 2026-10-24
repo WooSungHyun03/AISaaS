@@ -4,7 +4,7 @@
 import { BASE_URL, launch, login, newContext } from "./lib.mjs";
 
 const mobile = process.argv.includes("--mobile");
-const ROUTES = ["/dashboard", "/diagnosis", "/calendar", "/blog", "/shorts", "/growth-report", "/automations", "/usage", "/billing", "/settings", "/business", "/guide", "/support"];
+const ROUTES = ["/dashboard", "/diagnosis", "/calendar", "/blog", "/shorts", "/shorts/library", "/growth-report", "/automations", "/usage", "/billing", "/settings", "/business", "/guide", "/support"];
 const SKIP = /삭제|로그아웃|구매|결제|환불|탈퇴|해지|취소|제출|보내기|전송|초기화|지금 만들기|영상 만들기|미리보기 만들기|바로 만들기|지금 수집|등록|저장|확인|계정/;
 const browser = await launch();
 const context = await newContext(browser, { mobile });

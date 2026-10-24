@@ -85,7 +85,7 @@ export function describeAutomationRunError(message: string | null | undefined): 
   // see runner.ts#recordRefusedRun) are already a complete, secret-free
   // Korean sentence meant for direct display; passing them through beats
   // flattening them into the generic fallback below.
-  if (/일시정지 상태|오류 상태|요금제에서는|요금제의 이번 달|요금제는 |이용권이 없거나|홍보 대상|제작 예산|제작 가능한 편수|제작이 일시 중지|운영 기간|AI 제작 서비스|예산이 아직 설정|영상을 만들지 못했어요|품질 점검|영상 마무리 작업|영상 제작 서비스|사진이나 참고 영상|한국어 음성 서비스|너무 오래 걸려/.test(message)) {
+  if (/일시정지 상태|오류 상태|요금제에서는|요금제의 이번 달|요금제는 |이용권이 없거나|홍보 대상|제작 예산|제작 가능한 편수|제작이 일시 중지|운영 기간|AI 제작 서비스|예산이 아직 설정|영상을 만들지 못했어요|품질 점검|영상 마무리 작업|완성된 영상을 저장|영상 제작 서비스|사진이나 참고 영상|한국어 음성 서비스|너무 오래 걸려/.test(message)) {
     return message;
   }
 

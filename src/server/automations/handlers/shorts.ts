@@ -40,6 +40,7 @@ import {
   signAsset,
   VIDEO_BUCKET,
   VIDEO_URL_TTL_SEC,
+  storedVideoSize,
   videoStoragePath,
 } from "@/server/shorts/assets";
 import { type ShortsContent } from "@/server/shorts/content";
@@ -596,7 +597,16 @@ async function finish(ctx: AutomationRunContext, state: JobState): Promise<Autom
     return deferred({ ...state, composeJob: undefined, workerTries: tries }, "FINISH");
   }
 
-  return complete(ctx, state, finalPath);
+  // "done" from the worker is not enough: the owner's library lists this file, so it has to be in Storage.
+  const storedBytes = getWanProvider().name === "mock" ? null : await storedVideoSize(admin, finalPath).catch(() => null);
+  if (getWanProvider().name !== "mock" && storedBytes === null) {
+    const tries = state.workerTries + 1;
+    logger.warn("shorts_stored_file_missing", { runId: ctx.runId, tries, path: finalPath });
+    if (tries >= MAX_WORKER_TRIES) throw new Error("완성된 영상을 저장하지 못했어요. 잠시 후 다시 시도해주세요.");
+    return deferred({ ...state, composeJob: undefined, workerTries: tries }, "FINISH");
+  }
+
+  return complete(ctx, state, finalPath, { bytes: storedBytes, durationSec: polled.result.probe.durationSec });
 }
 
 function sceneTextOf(scene: AdPlan["storyboard"][number], hook: string): string {
@@ -610,7 +620,7 @@ function captionFor(plan: AdPlan, publishing: ShortsPublishing | undefined, busi
   return `${plan.message.slice(0, 200)}\n${all.join(" ")}`.slice(0, 1_000);
 }
 
-async function complete(ctx: AutomationRunContext, state: JobState, finalPath: string): Promise<AutomationHandlerResult> {
+async function complete(ctx: AutomationRunContext, state: JobState, finalPath: string, stored: { bytes: number | null; durationSec: number | null }): Promise<AutomationHandlerResult> {
   const admin = createAdminClient();
   const sample = getWanProvider().name === "mock";
   const videoUrl = sample ? state.generated!.videoUrl : await signAsset(admin, VIDEO_BUCKET, finalPath, VIDEO_URL_TTL_SEC);
@@ -654,6 +664,7 @@ async function complete(ctx: AutomationRunContext, state: JobState, finalPath: s
     topic: state.topic,
     content: content.script,
     contentType: "shorts",
+    ...(sample ? {} : { video: { path: finalPath, durationSec: stored.durationSec !== null ? Math.round(stored.durationSec * 10) / 10 : state.durationSec, bytes: stored.bytes } }),
     aiGenerationCount: Math.max(1, state.aiCalls),
     externalApiCallCount: wanAttempts + (state.voice ? 1 : 0),
   };

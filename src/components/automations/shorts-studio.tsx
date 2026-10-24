@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarClock, Check, CircleAlert, CircleCheck, Film, LoaderCircle } from "lucide-react";
+import { CalendarClock, Check, CircleAlert, CircleCheck, Eye, Film, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 import { AutoRunToggle } from "@/components/automations/auto-run-toggle";
 import type { AutomationStatus } from "@/types/domain";
@@ -16,6 +17,8 @@ import type { AutomationSchedule } from "@/types/automation";
 
 interface Preview {
   runId: string;
+  /** The library item this video was saved as; null for a video from before the library existed. */
+  contentId: string | null;
   createdAt: string;
   videoUrl: string;
   hook: string | null;
@@ -93,6 +96,7 @@ export function ShortsStudio({
   referencesSlot,
   publishingSlot,
   hasImages,
+  recentSlot,
 }: {
   automationId: string;
   automationStatus: string;
@@ -109,6 +113,8 @@ export function ShortsStudio({
   publishingSlot?: ReactNode;
   /** Without a photo or a clip there is nothing to build a video from yet. */
   hasImages: boolean;
+  /** The latest saved videos of the library (a few cards and a link to all of them). */
+  recentSlot?: ReactNode;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -217,7 +223,16 @@ export function ShortsStudio({
             {latestPreview.scenes.length ? <details className="group"><summary className="cursor-pointer text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring">장면 구성 {latestPreview.scenes.length}개 보기</summary><ol className="mt-3 space-y-2">{latestPreview.scenes.map((scene, index) => <li key={`${index}-${scene.text}`} className="flex gap-3 rounded-xl bg-muted px-3 py-2 text-sm"><span className="font-bold text-primary">{index + 1}</span><span className="flex-1">{scene.text}</span><span className="text-muted-foreground">{scene.durationSec}초</span></li>)}</ol></details> : null}
           </div> : null}
 
-          {latestPreview && !latestPreview.sample ? <p><a href={latestPreview.videoUrl} download target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-primary underline underline-offset-2">영상 파일 다운로드</a></p> : null}
+          {latestPreview && !latestPreview.sample ? (
+            <div className="space-y-3 rounded-2xl bg-brand-soft px-5 py-4">
+              {latestPreview.contentId ? <p className="flex items-center gap-2 text-sm font-bold"><CircleCheck className="size-4 text-success" aria-hidden="true" />이 영상은 ‘내 영상’에 저장돼 있어요. 새 영상을 만들어도 지워지지 않아요.</p> : null}
+              <div className="flex flex-wrap gap-2">
+                {latestPreview.contentId ? <Button asChild size="sm"><Link href={`/shorts/${latestPreview.contentId}`}><Eye aria-hidden="true" /> 영상 상세 보기</Link></Button> : null}
+                <Button asChild size="sm" variant="outline"><a href={latestPreview.contentId ? `/shorts/${latestPreview.contentId}/download` : latestPreview.videoUrl} download>영상 다운로드</a></Button>
+                <Button asChild size="sm" variant="outline"><Link href="/shorts/library">제작한 영상 보기</Link></Button>
+              </div>
+            </div>
+          ) : null}
 
           {publishingSlot}
 
@@ -227,6 +242,8 @@ export function ShortsStudio({
           </div>
         </div>
       </section>
+
+      {recentSlot}
 
       {referencesSlot}
 

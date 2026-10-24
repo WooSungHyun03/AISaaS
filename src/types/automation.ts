@@ -72,6 +72,8 @@ export interface AutomationHandlerResult {
   title?: string;
   topic?: string;
   content?: string;
+  /** A finished video the run stored in Storage: recorded on the content row so it shows up in the library. */
+  video?: { path: string; durationSec: number | null; bytes: number | null };
   /** Defaults to 1; publish-only operations can report 0. */
   aiGenerationCount?: number;
   /** Successful third-party rendering, publishing, or media calls made by this run. */

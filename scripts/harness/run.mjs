@@ -66,7 +66,7 @@ async function audit() {
   }
 
   const pkg = JSON.parse(await readFile(path.join(ROOT, "package.json"), "utf8"));
-  const requiredScripts = ["lint", "typecheck", "test", "build", "e2e:schedule", "e2e:photos", "e2e:collection", "e2e:admin", "e2e:guide", "e2e:journey", "perf:measure"];
+  const requiredScripts = ["lint", "typecheck", "test", "build", "e2e:schedule", "e2e:photos", "e2e:library", "e2e:collection", "e2e:admin", "e2e:guide", "e2e:journey", "perf:measure"];
   add("package scripts", requiredScripts.every((key) => typeof pkg.scripts?.[key] === "string"), requiredScripts.filter((key) => !pkg.scripts?.[key]).join(", ") || "present");
 
   const claude = await readFile(path.join(ROOT, "CLAUDE.md"), "utf8");
@@ -136,7 +136,7 @@ try {
     if (await guardLocalDemo()) {
       if (profile === "demo") {
         for (const [label, npmScript] of [
-          ["scheduled blog/Shorts", "e2e:schedule"], ["reference photos", "e2e:photos"],
+          ["scheduled blog/Shorts", "e2e:schedule"], ["reference photos", "e2e:photos"], ["shorts library", "e2e:library"],
           ["channel collection", "e2e:collection"], ["admin access", "e2e:admin"],
           ["guide pages", "e2e:guide"], ["new-user journey", "e2e:journey"]
         ]) await command(label, "npm", ["run", npmScript], { env: { AI_PROVIDER: "mock", BILLING_PROVIDER: "mock", CHANNEL_DATA_PROVIDER: "mock", ALLOW_MOCK_AI: "true" } });

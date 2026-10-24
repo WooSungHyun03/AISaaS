@@ -396,6 +396,11 @@ export interface Database {
           edited_at: string | null;
           /** The owner's edited posting text for a Short (see migration 0072). */
           publishing: Json | null;
+          /** A Short's finished MP4 in the private shorts-videos bucket (migration 0077); null for other content and for videos not (yet) stored. */
+          video_path: string | null;
+          video_duration_sec: number | null;
+          video_bytes: number | null;
+          video_checked_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -410,6 +415,10 @@ export interface Database {
           external_url?: string | null;
           edited_at?: string | null;
           publishing?: Json | null;
+          video_path?: string | null;
+          video_duration_sec?: number | null;
+          video_bytes?: number | null;
+          video_checked_at?: string | null;
           created_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["content_history"]["Insert"]>;

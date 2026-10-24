@@ -21,6 +21,7 @@ const m = vi.hoisted(() => ({
   getAnalysis: vi.fn(),
   startCompose: vi.fn(),
   getCompose: vi.fn(),
+  storedSize: vi.fn(),
   tts: vi.fn(),
   uploads: [] as Array<{ bucket: string; path: string }>,
   aiRequests: [] as Array<{ purpose?: string; role?: string; prompt: string }>,
@@ -84,6 +85,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 vi.mock("@/server/shorts/assets", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/server/shorts/assets")>()),
   ensureShortsBuckets: async () => undefined,
+  storedVideoSize: async (...args: unknown[]) => m.storedSize(...args),
   loadImageBytes: async () => new Uint8Array([1, 2, 3]),
   signAsset: async (_admin: unknown, bucket: string, path: string) => `https://project.supabase.co/sign/${bucket}/${path}?t=1`,
   resolveAssetUrls: async (_admin: unknown, assets: Array<{ source: string }>) => assets.map((asset) => `https://project.supabase.co/sign/${asset.source}?t=1`),
@@ -170,6 +172,8 @@ beforeEach(() => {
   m.getAnalysis.mockResolvedValue({ state: "done", result: analysisOf() });
   m.startCompose.mockResolvedValue({ jobId: "co-1" });
   m.getCompose.mockResolvedValue({ state: "done", result: { probe } });
+  m.storedSize.mockReset();
+  m.storedSize.mockResolvedValue(4_000_000);
   m.tts.mockResolvedValue({ audio: new Uint8Array(5_000), characters: 90 });
 });
 
@@ -189,6 +193,8 @@ describe("ad Shorts pipeline", () => {
 
     const output = result.output as Record<string, unknown>;
     expect(result.contentType).toBe("shorts");
+    // The library item records where the stored file is and what was measured, never a temporary address.
+    expect(result.video).toEqual({ path: "user-1/auto-1/run-1/final.mp4", durationSec: probe.durationSec, bytes: 4_000_000 });
     expect(output).toMatchObject({ format: "ad", durationSec: 25, videoPath: "user-1/auto-1/run-1/final.mp4", qa: { status: "NEEDS_HUMAN_CHECK" } });
     expect(String(output.videoUrl)).toContain("/sign/shorts-videos/user-1/auto-1/run-1/final.mp4");
     expect(JSON.stringify(output)).not.toContain("APPROVED");
@@ -492,6 +498,21 @@ describe("ad Shorts pipeline", () => {
       expect(warn).toHaveBeenCalledWith("shorts_compose_failed", expect.objectContaining({ message: "upload failed with status 400", tries: 3, lost: false }));
       warn.mockRestore();
     });
+  });
+
+  it("does not report a Short finished while its file is not in Storage: it finishes again, and fails after three tries without a library item", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    m.storedSize.mockResolvedValueOnce(null).mockResolvedValue(4_000_000);
+    const result = await drive(context());
+    expect(m.startCompose).toHaveBeenCalledTimes(2);
+    expect(result.video?.bytes).toBe(4_000_000);
+
+    m.startCompose.mockClear();
+    m.storedSize.mockResolvedValue(null);
+    await expect(drive(context())).rejects.toThrow("완성된 영상을 저장하지 못했어요");
+    expect(m.startCompose).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledWith("shorts_stored_file_missing", expect.objectContaining({ runId: "run-1" }));
+    warn.mockRestore();
   });
 
   it("gives up on a run that has been going too long", async () => {

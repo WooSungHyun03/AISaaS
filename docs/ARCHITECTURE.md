@@ -509,6 +509,7 @@ Two paid pipelines, both **deferred runs** (one quick step per call; the open pa
 
 - **Blog posts** (`handlers/blog.ts`, `docs/BLOG_QUALITY.md`): PLAN (Opus 5.5) → DRAFT (Fable 5.1, the whole post in one call) → quality gate (`blog-quality.ts`) → targeted FIX (Fable) → REVIEW fact check (Sonnet 5.5) → GUIDE (Sonnet) → save/preview/copy/edit as before.
 - **Ad Shorts** (`handlers/shorts.ts`, `docs/AD_SHORTS.md`): vision + ad plan → Wan 3.0 one-pass generation (fal queue) → FFmpeg measurements + vision QA → one regeneration at most → Korean voice if needed → FFmpeg worker finish (`worker/ffmpeg`) → private Storage.
+- **Shorts library** (`src/server/shorts/library*.ts`, `/shorts/library`, `/shorts/[contentId]`): a finished video is one `content_history` row (`content_type = 'shorts'`, unique `run_id`) that owns `video_path` in the private `shorts-videos` bucket. The runner writes it when the run succeeds, after `finish()` checked the file in Storage. `/shorts/[contentId]/video|download` check the owner under RLS and redirect to a fresh signed URL (no server proxying, no credits touched). Delete removes the files, then the row, and keeps the `automation_runs` row (credits/usage/budget refer to it). Older rows are STORED, EXTERNAL (hosted link; copied on demand) or UNAVAILABLE.
 
 Model choice is data (`src/server/ai/models.ts`: ids, prices, per-model request rules); `AnthropicProvider` builds each request from it (no sampling parameters for the 5.x models, `output_config.effort`, `max_tokens` that covers thinking) and reports tokens and cost.
 
