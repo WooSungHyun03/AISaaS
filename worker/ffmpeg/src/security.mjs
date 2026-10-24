@@ -65,6 +65,19 @@ export async function resolveSafeUrl(rawUrl, config) {
   return { url, address: records[0].address, family: records[0].family };
 }
 
+/**
+ * A `lookup` for net.connect that always answers with the one address that passed the safety check. Node 20+ connects
+ * with `autoSelectFamily` and calls lookup with `{ all: true }`, which wants an ARRAY of addresses: answering with a plain
+ * string fails with "Invalid IP address: undefined", so every https download and upload failed on a hosted worker (a
+ * local http test never reaches this path). Both call styles are answered.
+ */
+export function pinnedLookup(address, family) {
+  return (_host, options, callback) => {
+    if (options && typeof options === "object" && options.all) callback(null, [{ address, family }]);
+    else callback(null, address, family);
+  };
+}
+
 function requestOptions(target, method, extraHeaders = {}) {
   const lib = target.url.protocol === "https:" ? https : http;
   return {
@@ -76,7 +89,7 @@ function requestOptions(target, method, extraHeaders = {}) {
       path: `${target.url.pathname}${target.url.search}`,
       headers: extraHeaders,
       // Pin the connection to the address that passed the check.
-      lookup: (_host, _options, callback) => callback(null, target.address, target.family),
+      lookup: pinnedLookup(target.address, target.family),
       servername: net.isIP(target.url.hostname) ? undefined : target.url.hostname,
     },
   };

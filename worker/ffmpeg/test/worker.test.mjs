@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.mjs";
 import { buildComposeArgs, probeFile } from "../src/ffmpeg.mjs";
 import { validateJob } from "../src/jobs.mjs";
-import { hostAllowed, isPrivateAddress, resolveSafeUrl, tokenMatches } from "../src/security.mjs";
+import { hostAllowed, isPrivateAddress, pinnedLookup, resolveSafeUrl, tokenMatches } from "../src/security.mjs";
 import { createServer } from "../src/server.mjs";
 
 const hasFfmpeg = (() => {
@@ -288,6 +288,30 @@ suite("worker end to end (real ffmpeg)", () => {
       expect(JSON.parse(line)).toMatchObject({ level: "error", message: "job_failed", jobId: body.jobId, type: "analyze", error: expect.stringContaining("not allowed") });
     } finally {
       errors.mockRestore();
+    }
+  });
+
+  it("pins the connection with a lookup that works for Node's autoSelectFamily (all: true) as well as the plain form", async () => {
+    // Regression: the plain-string answer made every https download/upload fail on Node 20+ with "Invalid IP address: undefined".
+    const lookup = pinnedLookup("127.0.0.1", 4);
+    expect(await new Promise((resolve) => lookup("example.com", { all: true }, (error, addresses) => resolve([error, addresses])))).toEqual([null, [{ address: "127.0.0.1", family: 4 }]]);
+    expect(await new Promise((resolve) => lookup("example.com", {}, (error, address, family) => resolve([error, address, family])))).toEqual([null, "127.0.0.1", 4]);
+
+    // And end to end with a real socket: the hostname is not an IP, so Node really calls our lookup (as it does for https hosts).
+    const net = await import("node:net");
+    const server = net.createServer((socket) => socket.end("ok"));
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const reply = await new Promise((resolve, reject) => {
+        const socket = net.connect({ host: "pinned.invalid", port: server.address().port, lookup: pinnedLookup("127.0.0.1", 4) });
+        let data = "";
+        socket.on("data", (chunk) => { data += chunk; });
+        socket.on("end", () => resolve(data));
+        socket.on("error", reject);
+      });
+      expect(reply).toBe("ok");
+    } finally {
+      server.close();
     }
   });
 
