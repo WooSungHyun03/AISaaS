@@ -136,7 +136,12 @@ export class JobTable {
       const work = job.spec.type === "analyze" ? runAnalyze(job.spec, dir, this.config) : runCompose(job.spec, dir, this.config);
       work
         .then((result) => { job.result = result; job.state = "done"; })
-        .catch((error) => { job.error = String(error?.message ?? error).slice(0, 300); job.state = "failed"; })
+        .catch((error) => {
+          job.error = String(error?.message ?? error).slice(0, 300);
+          job.state = "failed";
+          // The app only sees this once and turns it into a plain sentence: the reason has to be in the worker's own log too.
+          console.error(JSON.stringify({ level: "error", message: "job_failed", jobId: job.id, type: job.spec.type, error: job.error }));
+        })
         .finally(() => {
           fs.rmSync(dir, { recursive: true, force: true });
           job.finishedAt = Date.now();

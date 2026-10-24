@@ -3,6 +3,7 @@ import type { Automation, Business } from "@/types/domain";
 import type { AutomationHandlerResult, AutomationRunContext } from "@/types/automation";
 import type { VideoAnalysis } from "@/server/connectors/postprocess/types";
 import type { WanRequest, WanStatus } from "@/server/connectors/wan/types";
+import { logger } from "@/lib/logger";
 import { BudgetError } from "@/server/budget/errors";
 import { ConnectorError } from "@/server/shared/errors";
 
@@ -483,9 +484,13 @@ describe("ad Shorts pipeline", () => {
       expect(m.startCompose).toHaveBeenCalledTimes(2);
 
       m.startCompose.mockClear();
-      m.getCompose.mockResolvedValue({ state: "failed", message: "ffmpeg exited with 1" });
+      const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      m.getCompose.mockResolvedValue({ state: "failed", message: "upload failed with status 400" });
       await expect(drive(context())).rejects.toThrow("영상 마무리 작업에 실패했어요");
       expect(m.startCompose).toHaveBeenCalledTimes(3);
+      // The worker's own reason is in the log (the owner only sees the plain sentence).
+      expect(warn).toHaveBeenCalledWith("shorts_compose_failed", expect.objectContaining({ message: "upload failed with status 400", tries: 3, lost: false }));
+      warn.mockRestore();
     });
   });
 

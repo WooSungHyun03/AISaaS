@@ -590,6 +590,8 @@ async function finish(ctx: AutomationRunContext, state: JobState): Promise<Autom
   if (polled.state === "pending") return deferred(state, "FINISH");
   if (polled.state === "failed") {
     const tries = state.workerTries + 1;
+    // The worker's own reason (a failed download or upload, an ffmpeg error) is for the log; the owner gets a plain sentence.
+    logger.warn("shorts_compose_failed", { runId: ctx.runId, tries, lost: polled.lost === true, message: polled.message.slice(0, 300) });
     if (tries >= MAX_WORKER_TRIES) throw new Error("영상 마무리 작업에 실패했어요. 잠시 후 다시 시도해주세요.");
     return deferred({ ...state, composeJob: undefined, workerTries: tries }, "FINISH");
   }

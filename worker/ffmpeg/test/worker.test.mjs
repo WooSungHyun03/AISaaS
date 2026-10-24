@@ -3,7 +3,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.mjs";
 import { buildComposeArgs, probeFile } from "../src/ffmpeg.mjs";
 import { validateJob } from "../src/jobs.mjs";
@@ -276,6 +276,19 @@ suite("worker end to end (real ffmpeg)", () => {
     expect(done.error).toContain("not allowed");
     const internal = await finish((await call("POST", "/v1/jobs", { type: "analyze", videoUrl: "https://169.254.169.254/x.mp4" })).body.jobId);
     expect(internal.state).toBe("failed");
+  });
+
+  it("writes the reason of a failed job to its own log (the app turns it into a plain sentence and the reason was otherwise lost)", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const { body } = await call("POST", "/v1/jobs", { type: "analyze", videoUrl: "https://evil.example.org/v.mp4" });
+      await finish(body.jobId);
+      const line = errors.mock.calls.map((args) => String(args[0])).find((text) => text.includes("job_failed"));
+      expect(line).toBeDefined();
+      expect(JSON.parse(line)).toMatchObject({ level: "error", message: "job_failed", jobId: body.jobId, type: "analyze", error: expect.stringContaining("not allowed") });
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it("rejects bad requests and unknown jobs", async () => {
