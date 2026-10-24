@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { removeShortsFiles } from "@/server/account/delete-account";
 import { validateSnsLink, type SnsLinkKey } from "@/lib/sns-links";
 import type { BusinessSnsLinks, Json } from "@/types/domain";
 import { isPromotionType, PROMOTION_DETAIL_LIMITS, type PromotionDetails, type PromotionType } from "@/types/promotion";
@@ -149,9 +151,26 @@ export async function deleteBusiness(businessId: string): Promise<BusinessAction
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "로그인이 필요합니다." };
 
+  // Deleting the business cascades its automations and their runs. A run still in flight holds a credit reservation
+  // that only the run row leads back to (the stale-run reaper releases it by run id), so deleting it mid-run would
+  // strand that credit for good — and an open reservation also blocks a refund of its order. Same rule as deleteAutomation.
+  const { data: automations, error: automationsError } = await supabase.from("automations").select("id").eq("business_id", businessId).eq("user_id", user.id);
+  if (automationsError) return { error: "연결된 만들기 설정을 확인하지 못했습니다. 잠시 후 다시 시도해주세요." };
+  const automationIds = (automations ?? []).map((automation) => automation.id);
+  if (automationIds.length > 0) {
+    const { data: inFlight, error: inFlightError } = await supabase.from("automation_runs").select("id")
+      .in("automation_id", automationIds).in("status", ["QUEUED", "RUNNING"]).limit(1).maybeSingle();
+    if (inFlightError) return { error: "실행 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요." };
+    if (inFlight) return { error: "이 사업체의 콘텐츠를 만드는 중이에요. 완료된 뒤 삭제할 수 있어요." };
+  }
+
   const { data, error } = await supabase.from("businesses").delete().eq("id", businessId).eq("owner_id", user.id).select("id").maybeSingle();
   if (error || !data) return { error: "사업체를 삭제하지 못했습니다. 연결된 자동화 상태를 확인해주세요." };
+  // The rows cascade; the photos and videos stored under each of its automations do not.
+  const admin = createAdminClient();
+  for (const automationId of automationIds) await removeShortsFiles(admin, `${user.id}/${automationId}`);
   revalidatePath("/business");
+  revalidatePath("/shorts", "layout");
   revalidatePath("/dashboard");
   return { success: true };
 }

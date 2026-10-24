@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { removeShortsFiles } from "@/server/account/delete-account";
 import { describeAutomationRunError } from "@/server/shared/errors";
 import { canCreateAutomation, canExecuteAutomation } from "@/server/billing/entitlements";
 import { advanceDeferredRun, runAutomationNow } from "@/server/automations/runner";
@@ -155,7 +157,10 @@ export async function deleteAutomation(automationId: string): Promise<Management
   const { data, error } = await supabase.from("automations").delete()
     .eq("id", automationId).eq("user_id", user.id).select("id").maybeSingle();
   if (error || !data) return { error: "자동화를 삭제하지 못했습니다." };
+  // The rows cascade (runs, library items); the photos and videos stored under this automation do not.
+  await removeShortsFiles(createAdminClient(), `${user.id}/${automationId}`);
   revalidatePath("/automations");
+  revalidatePath("/shorts", "layout");
   revalidatePath("/dashboard");
   return { success: true };
 }

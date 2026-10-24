@@ -1,14 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { createClientMock, revalidatePathMock } = vi.hoisted(() => ({
+const { createClientMock, revalidatePathMock, removeShortsFilesMock } = vi.hoisted(() => ({
   createClientMock: vi.fn(),
   revalidatePathMock: vi.fn(),
+  removeShortsFilesMock: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: createClientMock }));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ admin: true }) }));
+vi.mock("@/server/account/delete-account", () => ({ removeShortsFiles: removeShortsFilesMock }));
 
-const { createBusiness, updateBusiness } = await import("./actions");
+const { createBusiness, deleteBusiness, updateBusiness } = await import("./actions");
 
 function formData(fields: Record<string, string>) {
   const data = new FormData();
@@ -209,5 +212,51 @@ describe("updateBusiness", () => {
 
     expect((await updateBusiness("biz-1", {}, formData(BASE_FIELDS))).error).toBe("로그인이 필요합니다.");
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteBusiness", () => {
+  /** A chainable query stub: every filter returns itself, awaiting it (or .maybeSingle()) yields `result`. */
+  function query(result: { data: unknown; error: unknown }) {
+    const chain: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "in", "limit", "delete"]) chain[method] = vi.fn(() => chain);
+    chain.maybeSingle = vi.fn(() => Promise.resolve(result));
+    chain.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve);
+    return chain;
+  }
+
+  function client({ automations, inFlight }: { automations: Array<{ id: string }>; inFlight: { id: string } | null }) {
+    const deleted = query({ data: { id: "biz-1" }, error: null });
+    const tables: Record<string, Array<Record<string, unknown>>> = {
+      automations: [query({ data: automations, error: null })],
+      automation_runs: [query({ data: inFlight, error: null })],
+      businesses: [deleted],
+    };
+    return {
+      client: { auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) }, from: vi.fn((table: string) => tables[table].shift()) },
+      deleted,
+    };
+  }
+
+  it("refuses while one of the business's automations has a run in flight (its credit reservation would be stranded)", async () => {
+    const { client: supabase, deleted } = client({ automations: [{ id: "auto-1" }], inFlight: { id: "run-1" } });
+    createClientMock.mockResolvedValue(supabase);
+
+    const result = await deleteBusiness("biz-1");
+
+    expect(result.error).toContain("만드는 중");
+    expect(deleted.delete).not.toHaveBeenCalled();
+    expect(removeShortsFilesMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes an idle business and removes the stored Shorts files of each of its automations", async () => {
+    const { client: supabase, deleted } = client({ automations: [{ id: "auto-1" }, { id: "auto-2" }], inFlight: null });
+    createClientMock.mockResolvedValue(supabase);
+
+    const result = await deleteBusiness("biz-1");
+
+    expect(result).toEqual({ success: true });
+    expect(deleted.delete).toHaveBeenCalled();
+    expect(removeShortsFilesMock.mock.calls.map((call) => call[1])).toEqual(["user-1/auto-1", "user-1/auto-2"]);
   });
 });

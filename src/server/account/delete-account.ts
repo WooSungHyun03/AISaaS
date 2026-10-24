@@ -28,6 +28,25 @@ async function listObjectPaths(admin: AdminClient, bucket: string, prefix: strin
 }
 
 /**
+ * Removes every uploaded Shorts file and finished video under `prefix` — `{userId}` for a deleted account,
+ * `{userId}/{automationId}` for a deleted automation or business (the DB rows cascade, Storage does not). Best effort:
+ * orphaned files are private and unreachable, so a failure is logged and never blocks the deletion that called it.
+ */
+export async function removeShortsFiles(admin: AdminClient, prefix: string): Promise<void> {
+  for (const bucket of [REFERENCE_BUCKET, VIDEO_BUCKET]) {
+    try {
+      const paths = await listObjectPaths(admin, bucket, prefix);
+      if (paths.length > 0) {
+        const { error } = await admin.storage.from(bucket).remove(paths);
+        if (error) throw error;
+      }
+    } catch (cause) {
+      logger.warn("shorts_storage_cleanup_failed", { bucket, prefix, message: cause instanceof Error ? cause.message : String(cause) });
+    }
+  }
+}
+
+/**
  * Permanently deletes a user's account (privacy policy: deletion on
  * request). The caller must already have re-authenticated the user.
  *
@@ -47,18 +66,7 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   }
 
   // Uploaded photos, clips and logos, and the videos made from them.
-  for (const bucket of [REFERENCE_BUCKET, VIDEO_BUCKET]) {
-    try {
-      const paths = await listObjectPaths(admin, bucket, userId);
-      if (paths.length > 0) {
-        const { error } = await admin.storage.from(bucket).remove(paths);
-        if (error) throw error;
-      }
-    } catch (cause) {
-      // Orphaned files are private and unreachable once the user is gone; never block the deletion on them.
-      logger.warn("account_delete_storage_cleanup_failed", { bucket, message: cause instanceof Error ? cause.message : String(cause) });
-    }
-  }
+  await removeShortsFiles(admin, userId);
 
   const { error } = await admin.auth.admin.deleteUser(userId);
   if (error) throw new Error("계정을 삭제하지 못했습니다.", { cause: error });

@@ -6,7 +6,7 @@ vi.mock("@/server/connectors/integrations", () => ({ disconnectConnection: disco
 vi.mock("@/server/shorts/assets", () => ({ REFERENCE_BUCKET: "shorts-references", VIDEO_BUCKET: "shorts-videos" }));
 vi.mock("@/lib/logger", () => ({ logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
-const { deleteUserAccount } = await import("./delete-account");
+const { deleteUserAccount, removeShortsFiles } = await import("./delete-account");
 
 type Entry = { name: string; id: string | null };
 
@@ -54,5 +54,29 @@ describe("deleteUserAccount", () => {
   it("throws when the auth user cannot be deleted", async () => {
     makeAdmin({ folders: {}, deleteUserError: { message: "boom" } });
     await expect(deleteUserAccount("user-1")).rejects.toThrow("계정을 삭제하지 못했습니다.");
+  });
+});
+
+describe("removeShortsFiles", () => {
+  it("removes only what is under one automation's folder, in both buckets", async () => {
+    const { admin, remove } = makeAdmin({
+      folders: {
+        "user-1/auto-1": [{ name: "assets", id: null }, { name: "run-1", id: null }],
+        "user-1/auto-1/assets": [{ name: "photo.png", id: "f1" }],
+        "user-1/auto-1/run-1": [{ name: "final.mp4", id: "f2" }],
+        "user-1/auto-2": [{ name: "other.png", id: "f3" }],
+      },
+    });
+
+    await removeShortsFiles(admin as never, "user-1/auto-1");
+
+    expect(admin.storage.from).toHaveBeenCalledWith("shorts-videos");
+    expect(remove).toHaveBeenCalledWith(["user-1/auto-1/assets/photo.png", "user-1/auto-1/run-1/final.mp4"]);
+    expect(remove.mock.calls.flat(2)).not.toContain("user-1/auto-2/other.png");
+  });
+
+  it("never throws: a storage error is logged and the caller's deletion goes on", async () => {
+    const { admin } = makeAdmin({ folders: {}, listError: { message: "storage down" } });
+    await expect(removeShortsFiles(admin as never, "user-1/auto-1")).resolves.toBeUndefined();
   });
 });

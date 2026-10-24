@@ -4,7 +4,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 `main`, fixes what it finds, verifies, and pushes. The next run starts its
 "new changes" review from the **last reviewed SHA** below.
 
-**Last reviewed SHA:** `025eba2` (2026-10-24 run — update the line on every run)
+**Last reviewed SHA:** `67149aa` (2026-10-25 run — update the line on every run)
 
 ## Open findings (carry over until fixed)
 
@@ -40,8 +40,24 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 | F-028 | P1 | automations scheduler | A due ACTIVE automation whose schedule has no next slot (WEEKLY with no weekday, a broken `timeOfDay`; `automations.schedule` is owner-writable through RLS, and older rows predate the form validation) made `claimDueSlot` → `computeNextRunAt` throw on **every** tick. The row stayed ACTIVE with a past `next_run_at`, so it was read first (`order by next_run_at`, limit 20) forever; 20 such rows would have stopped every other user's scheduled content. | **fixed 2026-10-22** (the claim parks it — `status ERROR`, `next_run_at null` by compare-and-set — and the tick reports it FAILED; re-activating asks for a valid schedule) |
 | F-029 | P2 | growth report | `loadGrowthNarrative` (Server Action that can start a paid AI call and write the narrative cache) authorised with `getAuthUser()` = local JWT check, so a session signed out / deleted within the last hour still passed — against the rule written next to `getAuthUser` ("a Server Action that changes anything still calls getUser"). | **fixed 2026-10-22** (`supabase.auth.getUser()`) |
 | F-030 | P1 | calendar / run page time limits | A page's `maxDuration` is the limit of every Server Action called from it (Next 16 route segment config). `/calendar` declared 60 s, but its "바로 만들기" (`triggerCalendarItemNow` → `triggerRunNow`) runs the blog plan step inline: a vision call plus one Opus planner call that can take minutes (`AI_LONG_REQUEST_TIMEOUT_MS` 240 s). Past 60 s the function is killed mid-call: the paid call is wasted, the dialog shows a generic error, and the run stays RUNNING, so every retry answers "이미 실행 중" until the stale-run reaper fails it and releases the credit ~10 min later. `/automations/[id]/runs/[runId]` (RunProgress → `advanceAutomationRun`, one long Fable step per call) declared no limit at all and depended on the platform default. | **fixed 2026-10-24** (both 300 s like `/blog`, `/shorts`, `/automations/[id]`; `/growth-report` 60 s like `/diagnosis`; `src/app/route-durations.test.ts` walks page → component imports and fails for any page hosting a run-starting action below 300 s) |
+| F-031 | P1 | business delete / billing | `deleteBusiness` did not check for in-flight runs (`deleteAutomation` does). Deleting a business mid-generation cascaded the QUEUED/RUNNING run; its credit reservation is only reachable through that run row (the reaper releases by run id), so the credit stayed reserved for good, and migration 0070 then refuses a refund of that order forever. | **fixed 2026-10-25** (refused while any automation of the business has a run in flight; H-015) |
+| F-032 | P2 | storage | Deleting an automation or business removed its rows (runs, Shorts library items) but left the reference photos and finished videos in Storage under `<user>/<automation>/` — unreachable, and counted against Supabase Free storage. | **fixed 2026-10-25** (`removeShortsFiles` after a successful delete; H-016) |
+| F-033 | P2 | automations delete | `deleteAutomation`/`deleteBusiness` check "no run in flight" and then delete in a second statement; a run claimed by the scheduler tick in between would still be cascaded (same stranded-credit result as F-031, a sub-second window). A proper fix is a DB-side check (trigger or RPC) — not done in an unattended run. | open |
 
 ## Run log
+
+### 2026-10-25
+
+- **Start SHA:** `67149aa` (7 commits since `025eba2`, all from the user's interactive sessions: ad-plan retry, reference-photo upscaling, null provider values, worker job logging + https `lookup` fix (H-011…H-013), Shorts library + migration `0077` (H-014)).
+- **Working tree:** clean except the never-committed `mascot/` and `*-marketing.md`.
+- **Local env:** `bash scripts/dev-db.sh start` — local DB at 0077; `RUN_DB_TESTS=1` on all 14 DB test files ✅ 65/65 before any change; `harness:verify` ✅ baseline.
+- **Reviewed (new code):** migration 0077 (path shape check, backfill, conditional unique `run_id`), `storeContentItem` (23505 → existing row), `finish()` stored-file check, `library.ts` (RLS reads, UUID check, classification), video/download routes (owner via RLS + `ownsVideoPath` against the session user, fresh signing, 302, no-store), library actions (rename/delete/archive: `getUser`, RLS read, scoped service-role write; delete removes files first and keeps the row on failure), `archiveExternalVideo` (https named host only, 100 MB cap, MP4 sniffing; URL comes from server-written run output only — runs/content_history have no customer write policy), library pages/cards (lazy thumbnails, retry once on expired link), worker `pinnedLookup`. No defect found in the new code.
+- **Reviewed (whole project):** everything that deletes rows owning Storage files or credit reservations: account deletion, `deleteAutomation`, `deleteBusiness`, FKs to `content_history` (calendar items `set null`, usage history left join — OK) → F-031, F-032, F-033.
+- **Tests added:** `business/actions.test.ts` › deleteBusiness (2, fail pre-fix), `automations/actions.test.ts` › deleteAutomation (2), `delete-account.test.ts` › removeShortsFiles (2).
+- **Verification:** `npm run harness:verify` ✅ (audit, lint, typecheck, Vitest 1383 passed / 67 skipped, build, diff check). EVIDENCE: UNIT. **Not run:** `harness:demo` / `harness:perf` / browser smoke — dev servers cannot be started from an unattended run and `.env.local` points at the hosted project. Hosted Storage cleanup NOT_VERIFIED.
+- **User-only actions:** none new (no migration). Still open: Vercel Production `AI_PROVIDER=anthropic` and no `ALLOW_MOCK_AI` (H-003).
+- **Next run priorities (2026-10-26 is the last run):** F-033 decision (DB-side guard), F-011 decision, F-022 cleanup by owners, `harness:demo` incl. `shorts-library.e2e.mjs` in an interactive session.
+- **Commit:** see git log (fix(business,automations): no business delete mid-run; deleting an automation or business removes its stored Shorts files)
 
 ### 2026-10-24
 

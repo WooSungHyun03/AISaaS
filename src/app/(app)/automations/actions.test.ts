@@ -6,7 +6,9 @@ const {
   canExecuteAutomationMock,
   runAutomationNowMock,
   revalidatePathMock,
+  removeShortsFilesMock,
 } = vi.hoisted(() => ({
+  removeShortsFilesMock: vi.fn(),
   createClientMock: vi.fn(),
   canCreateAutomationMock: vi.fn(),
   canExecuteAutomationMock: vi.fn(),
@@ -22,8 +24,10 @@ vi.mock("@/server/billing/entitlements", () => ({
   canExecuteAutomation: canExecuteAutomationMock,
 }));
 vi.mock("@/server/automations/runner", () => ({ runAutomationNow: runAutomationNowMock }));
+vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ admin: true }) }));
+vi.mock("@/server/account/delete-account", () => ({ removeShortsFiles: removeShortsFilesMock }));
 
-const { createAutomation, triggerRunNow } = await import("./actions");
+const { createAutomation, deleteAutomation, triggerRunNow } = await import("./actions");
 
 type QueryResult = { data: unknown; error: unknown };
 
@@ -278,5 +282,30 @@ describe("triggerRunNow with a Shorts calendar item", () => {
       "automation-1",
       expect.objectContaining({ shorts: { previewOnly: true } }),
     );
+  });
+});
+
+describe("deleteAutomation", () => {
+  function chain(result: QueryResult) {
+    const query: Record<string, unknown> = {};
+    for (const method of ["select", "eq", "in", "limit", "delete"]) query[method] = vi.fn(() => query);
+    query.maybeSingle = vi.fn(() => Promise.resolve(result));
+    return query;
+  }
+
+  it("removes the photos and videos stored under the deleted automation (the rows cascade, Storage does not)", async () => {
+    const tables: Record<string, Record<string, unknown>> = { automation_runs: chain({ data: null, error: null }), automations: chain({ data: { id: "auto-1" }, error: null }) };
+    createClientMock.mockResolvedValue({ auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) }, from: vi.fn((table: string) => tables[table]) });
+
+    expect(await deleteAutomation("auto-1")).toEqual({ success: true });
+    expect(removeShortsFilesMock).toHaveBeenCalledWith({ admin: true }, "user-1/auto-1");
+  });
+
+  it("keeps the files when the row was not deleted", async () => {
+    const tables: Record<string, Record<string, unknown>> = { automation_runs: chain({ data: null, error: null }), automations: chain({ data: null, error: null }) };
+    createClientMock.mockResolvedValue({ auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) }, from: vi.fn((table: string) => tables[table]) });
+
+    expect((await deleteAutomation("auto-x")).error).toBeTruthy();
+    expect(removeShortsFilesMock).not.toHaveBeenCalled();
   });
 });
