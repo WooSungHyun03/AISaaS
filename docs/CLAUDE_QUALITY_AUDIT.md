@@ -4,7 +4,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 `main`, fixes what it finds, verifies, and pushes. The next run starts its
 "new changes" review from the **last reviewed SHA** below.
 
-**Last reviewed SHA:** `46a703e` (2026-10-22 run — update the line on every run)
+**Last reviewed SHA:** `025eba2` (2026-10-24 run — update the line on every run)
 
 ## Open findings (carry over until fixed)
 
@@ -39,8 +39,22 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 | F-027 | P2 | error boundaries | Every `error.tsx` wired "다시 시도" to `reset()`, which in Next 16.3 only clears the boundary state without re-fetching server data — after a transient Server Component error (DB timeout on /usage, /dashboard …) the button re-rendered the same error. No root `global-error.tsx`, so errors in the root layout and in `(admin)`/`(auth)` (no own boundary) fell to Next's unstyled default. | **fixed 2026-10-17** (all 7 boundaries use the stable `retry()` = router refresh + reset; `src/app/global-error.tsx` added) |
 | F-028 | P1 | automations scheduler | A due ACTIVE automation whose schedule has no next slot (WEEKLY with no weekday, a broken `timeOfDay`; `automations.schedule` is owner-writable through RLS, and older rows predate the form validation) made `claimDueSlot` → `computeNextRunAt` throw on **every** tick. The row stayed ACTIVE with a past `next_run_at`, so it was read first (`order by next_run_at`, limit 20) forever; 20 such rows would have stopped every other user's scheduled content. | **fixed 2026-10-22** (the claim parks it — `status ERROR`, `next_run_at null` by compare-and-set — and the tick reports it FAILED; re-activating asks for a valid schedule) |
 | F-029 | P2 | growth report | `loadGrowthNarrative` (Server Action that can start a paid AI call and write the narrative cache) authorised with `getAuthUser()` = local JWT check, so a session signed out / deleted within the last hour still passed — against the rule written next to `getAuthUser` ("a Server Action that changes anything still calls getUser"). | **fixed 2026-10-22** (`supabase.auth.getUser()`) |
+| F-030 | P1 | calendar / run page time limits | A page's `maxDuration` is the limit of every Server Action called from it (Next 16 route segment config). `/calendar` declared 60 s, but its "바로 만들기" (`triggerCalendarItemNow` → `triggerRunNow`) runs the blog plan step inline: a vision call plus one Opus planner call that can take minutes (`AI_LONG_REQUEST_TIMEOUT_MS` 240 s). Past 60 s the function is killed mid-call: the paid call is wasted, the dialog shows a generic error, and the run stays RUNNING, so every retry answers "이미 실행 중" until the stale-run reaper fails it and releases the credit ~10 min later. `/automations/[id]/runs/[runId]` (RunProgress → `advanceAutomationRun`, one long Fable step per call) declared no limit at all and depended on the platform default. | **fixed 2026-10-24** (both 300 s like `/blog`, `/shorts`, `/automations/[id]`; `/growth-report` 60 s like `/diagnosis`; `src/app/route-durations.test.ts` walks page → component imports and fails for any page hosting a run-starting action below 300 s) |
 
 ## Run log
+
+### 2026-10-24
+
+- **Start SHA:** `025eba2` (no commits since the 2026-10-22 run; whole-project review day).
+- **Working tree:** clean except the never-committed `mascot/` and `*-marketing.md`.
+- **Local env:** `bash scripts/dev-db.sh start` — local DB at 0076; `RUN_DB_TESTS=1` on all 13 DB test files ✅ 59/59 before any change.
+- **Reviewed:** reference-photo / Shorts asset upload flow (ticket → byte sniffing → limits → config write; ownership via `ownedShortsAutomation` + path prefix; reuse copies only the owner's own paths; uploads are sequential in both UIs — OK), `withImageAnalysis` config write-back (short read-modify-write window, P2 at most — not changed), onboarding + `createBusiness` validation, `/setup-request` action, health endpoints (no data beyond a timestamp), every `(admin)` page/action + layout (`requireAdmin` everywhere — OK), calendar event actions + search (`cleanQuery` strips PostgREST filter syntax — OK), AI fetch wrapper (paid calls never retried on timeout — OK), `advanceAutomationRun` (owner check, lease), `get_usage_history` (security invoker + `auth.uid()` — OK), **route `maxDuration` vs. the Server Actions each page hosts (F-030)**.
+- **Findings & fixes:** F-030 (P1).
+- **Tests added:** `src/app/route-durations.test.ts` — fails before the fix on `/calendar` (60) and the run page (none).
+- **Verification:** see the commit; `harness:verify` re-run after the change. **Not run:** `harness:demo` / `harness:perf` / browser smoke — dev servers cannot be started from an unattended run (preview tool refuses), and `.env.local` points at the hosted project. EVIDENCE for F-030: STATIC (Next 16 docs `route-segment-config/maxDuration.md` › Server Actions) + UNIT; the production timeout itself is NOT_VERIFIED (no live calendar generation was started).
+- **User-only actions:** none new (no migration). Still open: Vercel Production `AI_PROVIDER=anthropic` and no `ALLOW_MOCK_AI` (H-003).
+- **Next run priorities (last run is 2026-10-26):** `harness:demo` + `harness:perf` in an interactive session; F-011 decision; F-022 cleanup by owners; review any teammate commits.
+- **Commit:** see git log (fix(calendar,runs): give pages that start a generation run the 300 s time limit)
 
 ### 2026-10-22
 

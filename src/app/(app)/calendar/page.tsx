@@ -6,8 +6,8 @@ import { CalendarWorkspaceLoader } from "@/components/calendar/calendar-loader";
 import { currentKstDate } from "./kst-date";
 import { PageHeader } from "@/components/layout/page-header";
 
-/** Server Actions on this page call the AI / render provider; give them room beyond the 10s default. */
-export const maxDuration = 60;
+/** "바로 만들기" starts a blog/Shorts run here: its first step is one long model call (minutes), like on /blog. */
+export const maxDuration = 300;
 
 function monthRange(today: string) {
   const [year, month] = today.split("-").map(Number);

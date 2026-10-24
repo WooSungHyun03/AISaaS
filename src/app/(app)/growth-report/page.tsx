@@ -10,6 +10,9 @@ import { buildGrowthReport, type GrowthReport } from "@/server/marketing/growth-
 import { getGrowthBundle, type GrowthGranularity } from "@/server/channels";
 import { isMissingSchemaError } from "@/server/shared/db-errors";
 
+/** loadGrowthNarrative (a short AI call, with retries) runs from this page, like the narratives on /diagnosis. */
+export const maxDuration = 60;
+
 const DAY_MS = 86_400_000;
 const ROW_LIMIT = 500;
 const GRANULARITIES: readonly GrowthGranularity[] = ["day", "week", "month"];

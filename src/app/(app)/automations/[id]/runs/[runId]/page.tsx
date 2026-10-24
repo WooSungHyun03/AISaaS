@@ -24,6 +24,9 @@ import { usedReferenceViews } from "@/server/shorts/asset-views";
 import { UsedReferences } from "@/components/automations/used-references";
 import { promotionFieldValue } from "@/lib/promotion";
 
+/** RunProgress advances an unfinished run from here, one step per call: a step can be one long model call (minutes). */
+export const maxDuration = 300;
+
 const formatter = new Intl.DateTimeFormat("ko-KR", {
   dateStyle: "medium",
   timeStyle: "short",
