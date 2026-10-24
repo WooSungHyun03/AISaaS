@@ -298,6 +298,25 @@ describe("ad Shorts pipeline", () => {
       expect(m.wanSubmit).toHaveBeenCalledTimes(1);
     });
 
+    it("goes on to the quality check when the saved state holds nulls (fal sent seed/actual_prompt as null): a finished video is not thrown away", async () => {
+      // The saved state is JSON: an explicit null stays a null, unlike undefined which disappears.
+      m.wanStatus.mockResolvedValue(done({ seed: null as never, actualPrompt: null as never, durationSec: null as never }));
+      let outcome: Outcome = await handler.run(context());
+      const stages: string[] = [];
+      for (let step = 0; step < 60 && isDeferred(outcome); step++) {
+        stages.push(String(outcome.deferred.state.stage));
+        outcome = await handler.resume!(context(), JSON.parse(JSON.stringify(outcome.deferred.state)) as never);
+      }
+      expect(isDeferred(outcome)).toBe(false);
+      expect(stages).toContain("CHECK");
+      expect((outcome as AutomationHandlerResult).contentType).toBe("shorts");
+    });
+
+    it("withoutNulls drops null values at any depth and changes nothing else", async () => {
+      const { withoutNulls } = await import("./shorts");
+      expect(withoutNulls({ a: null, b: 0, c: "", d: false, e: { f: null, g: [1, null, { h: null, i: 2 }] } })).toEqual({ b: 0, c: "", d: false, e: { g: [1, null, { i: 2 }] } });
+    });
+
     it("releases (does not book) the reservation when the request cannot even be prepared, e.g. a file address cannot be signed", async () => {
       const assets = await import("@/server/shorts/assets");
       const spy = vi.spyOn(assets, "resolveImageUrls").mockRejectedValueOnce(new Error("storage unreachable"));

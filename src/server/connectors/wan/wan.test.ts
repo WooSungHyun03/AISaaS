@@ -74,6 +74,16 @@ describe("fal queue", () => {
     expect(await provider.status(handle)).toEqual({ state: "done", videoUrl: "https://v3.fal.media/out.mp4", durationSec: 25, width: 720, height: 1280, seed: 5, actualPrompt: "expanded" });
   });
 
+  it("reads a value fal sends as null (seed, actual_prompt, duration) as not given, never as null", async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(json({ status: "COMPLETED" }))
+      .mockResolvedValueOnce(json({ video: { url: "https://v3.fal.media/out.mp4", width: null, height: 1280, duration: null }, seed: null, duration: null, actual_prompt: null }));
+    const status = await new FalWanProvider({ apiKey: "k", fetchFn }).status(handle);
+    expect(status).toMatchObject({ state: "done", videoUrl: "https://v3.fal.media/out.mp4", height: 1280 });
+    expect(status).toEqual({ state: "done", videoUrl: "https://v3.fal.media/out.mp4", height: 1280 });
+    for (const key of ["seed", "actualPrompt", "durationSec", "width"]) expect(status).not.toHaveProperty(key, null);
+  });
+
   it("turns failed and malformed jobs into a failed status, and transport problems into retryable errors", async () => {
     const failed = new FalWanProvider({ apiKey: "k", fetchFn: vi.fn().mockResolvedValueOnce(json({ status: "COMPLETED", error: "content policy" })) });
     expect(await failed.status(handle)).toEqual({ state: "failed", message: "content policy" });

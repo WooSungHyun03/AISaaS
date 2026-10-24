@@ -657,9 +657,25 @@ async function complete(ctx: AutomationRunContext, state: JobState, finalPath: s
   };
 }
 
+/**
+ * The saved job state is JSON, and a provider answer such as `seed: null` is kept as an explicit null, which the schema's
+ * optional fields do not accept (only a missing value): a finished, already-billed video then failed the run on the very
+ * next step. A null is read as "not given". No field of the state means anything by null.
+ */
+export function withoutNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNulls);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== null).map(([key, entry]) => [key, withoutNulls(entry)]));
+  }
+  return value;
+}
+
 async function resumeRun(ctx: AutomationRunContext, raw: Json): Promise<AutomationHandlerOutcome> {
-  const parsed = jobStateSchema.safeParse(raw);
-  if (!parsed.success) throw new Error("진행 중인 숏폼 작업 정보를 읽지 못했어요. 영상을 다시 만들어주세요.");
+  const parsed = jobStateSchema.safeParse(withoutNulls(raw));
+  if (!parsed.success) {
+    logger.error("shorts_job_state_unreadable", { runId: ctx.runId, issues: parsed.error.issues.slice(0, 6).map((issue) => `${issue.path.join(".")}: ${issue.message}`) });
+    throw new Error("진행 중인 숏폼 작업 정보를 읽지 못했어요. 영상을 다시 만들어주세요.");
+  }
   const state = parsed.data;
   if (Date.now() - Date.parse(state.startedAt) > MAX_JOB_MINUTES * 60_000) {
     // Money already booked stays booked; the run ends and the credit is returned.

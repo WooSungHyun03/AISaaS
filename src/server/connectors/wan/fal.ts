@@ -50,6 +50,11 @@ interface FalResultResponse {
   error?: string;
 }
 
+/** fal sends `null` for a value it has none for; the rest of the pipeline only knows "given" or "missing". */
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function describeFailure(body: { detail?: unknown; error?: string } | null, fallback: string): string {
   const raw = typeof body?.error === "string" ? body.error : typeof body?.detail === "string" ? body.detail : Array.isArray(body?.detail) ? JSON.stringify(body?.detail) : "";
   return (raw || fallback).replace(/\s+/g, " ").trim().slice(0, 300);
@@ -121,11 +126,11 @@ export class FalWanProvider implements WanProvider {
     return {
       state: "done",
       videoUrl,
-      durationSec: result?.duration ?? result?.video?.duration,
-      width: result?.video?.width,
-      height: result?.video?.height,
-      seed: result?.seed,
-      actualPrompt: result?.actual_prompt,
+      durationSec: numberOrUndefined(result?.duration) ?? numberOrUndefined(result?.video?.duration),
+      width: numberOrUndefined(result?.video?.width),
+      height: numberOrUndefined(result?.video?.height),
+      seed: numberOrUndefined(result?.seed),
+      actualPrompt: typeof result?.actual_prompt === "string" ? result.actual_prompt : undefined,
     };
   }
 }
