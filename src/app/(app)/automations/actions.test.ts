@@ -308,4 +308,12 @@ describe("deleteAutomation", () => {
     expect((await deleteAutomation("auto-x")).error).toBeTruthy();
     expect(removeShortsFilesMock).not.toHaveBeenCalled();
   });
+
+  it("says a run is in flight when the database refuses the delete (a run started after the check, migration 0078)", async () => {
+    const tables: Record<string, Record<string, unknown>> = { automation_runs: chain({ data: null, error: null }), automations: chain({ data: null, error: { code: "55006" } }) };
+    createClientMock.mockResolvedValue({ auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: "user-1" } } }) }, from: vi.fn((table: string) => tables[table]) });
+
+    expect((await deleteAutomation("auto-1")).error).toContain("실행 중");
+    expect(removeShortsFilesMock).not.toHaveBeenCalled();
+  });
 });

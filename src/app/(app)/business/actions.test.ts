@@ -225,8 +225,8 @@ describe("deleteBusiness", () => {
     return chain;
   }
 
-  function client({ automations, inFlight }: { automations: Array<{ id: string }>; inFlight: { id: string } | null }) {
-    const deleted = query({ data: { id: "biz-1" }, error: null });
+  function client({ automations, inFlight, deleteError = null }: { automations: Array<{ id: string }>; inFlight: { id: string } | null; deleteError?: unknown }) {
+    const deleted = query(deleteError ? { data: null, error: deleteError } : { data: { id: "biz-1" }, error: null });
     const tables: Record<string, Array<Record<string, unknown>>> = {
       automations: [query({ data: automations, error: null })],
       automation_runs: [query({ data: inFlight, error: null })],
@@ -246,6 +246,14 @@ describe("deleteBusiness", () => {
 
     expect(result.error).toContain("만드는 중");
     expect(deleted.delete).not.toHaveBeenCalled();
+    expect(removeShortsFilesMock).not.toHaveBeenCalled();
+  });
+
+  it("says a run is in flight when the database refuses the delete (a run started after the check, migration 0078)", async () => {
+    const { client: supabase } = client({ automations: [{ id: "auto-1" }], inFlight: null, deleteError: { code: "55006" } });
+    createClientMock.mockResolvedValue(supabase);
+
+    expect((await deleteBusiness("biz-1")).error).toContain("만드는 중");
     expect(removeShortsFilesMock).not.toHaveBeenCalled();
   });
 

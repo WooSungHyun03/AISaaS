@@ -165,6 +165,8 @@ export async function deleteBusiness(businessId: string): Promise<BusinessAction
   }
 
   const { data, error } = await supabase.from("businesses").delete().eq("id", businessId).eq("owner_id", user.id).select("id").maybeSingle();
+  // 55006: a run started after the check above (migration 0078 refuses the delete in the database).
+  if (error?.code === "55006") return { error: "이 사업체의 콘텐츠를 만드는 중이에요. 완료된 뒤 삭제할 수 있어요." };
   if (error || !data) return { error: "사업체를 삭제하지 못했습니다. 연결된 자동화 상태를 확인해주세요." };
   // The rows cascade; the photos and videos stored under each of its automations do not.
   const admin = createAdminClient();

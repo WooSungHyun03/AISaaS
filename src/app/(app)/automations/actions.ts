@@ -156,6 +156,8 @@ export async function deleteAutomation(automationId: string): Promise<Management
   if (inFlight) return { error: "실행 중인 자동화는 완료 후 삭제할 수 있습니다." };
   const { data, error } = await supabase.from("automations").delete()
     .eq("id", automationId).eq("user_id", user.id).select("id").maybeSingle();
+  // 55006: a run started after the check above (migration 0078 refuses the delete in the database).
+  if (error?.code === "55006") return { error: "실행 중인 자동화는 완료 후 삭제할 수 있습니다." };
   if (error || !data) return { error: "자동화를 삭제하지 못했습니다." };
   // The rows cascade (runs, library items); the photos and videos stored under this automation do not.
   await removeShortsFiles(createAdminClient(), `${user.id}/${automationId}`);

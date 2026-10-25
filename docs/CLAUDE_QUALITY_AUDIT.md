@@ -4,7 +4,7 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 `main`, fixes what it finds, verifies, and pushes. The next run starts its
 "new changes" review from the **last reviewed SHA** below.
 
-**Last reviewed SHA:** `67149aa` (2026-10-25 run — update the line on every run)
+**Last reviewed SHA:** `2ef5338` (2026-10-26 run, the last scheduled run — update the line on every run)
 
 ## Open findings (carry over until fixed)
 
@@ -42,9 +42,23 @@ Scheduled routine (2026-10-10 ~ 2026-10-26 KST). Each run reviews the latest
 | F-030 | P1 | calendar / run page time limits | A page's `maxDuration` is the limit of every Server Action called from it (Next 16 route segment config). `/calendar` declared 60 s, but its "바로 만들기" (`triggerCalendarItemNow` → `triggerRunNow`) runs the blog plan step inline: a vision call plus one Opus planner call that can take minutes (`AI_LONG_REQUEST_TIMEOUT_MS` 240 s). Past 60 s the function is killed mid-call: the paid call is wasted, the dialog shows a generic error, and the run stays RUNNING, so every retry answers "이미 실행 중" until the stale-run reaper fails it and releases the credit ~10 min later. `/automations/[id]/runs/[runId]` (RunProgress → `advanceAutomationRun`, one long Fable step per call) declared no limit at all and depended on the platform default. | **fixed 2026-10-24** (both 300 s like `/blog`, `/shorts`, `/automations/[id]`; `/growth-report` 60 s like `/diagnosis`; `src/app/route-durations.test.ts` walks page → component imports and fails for any page hosting a run-starting action below 300 s) |
 | F-031 | P1 | business delete / billing | `deleteBusiness` did not check for in-flight runs (`deleteAutomation` does). Deleting a business mid-generation cascaded the QUEUED/RUNNING run; its credit reservation is only reachable through that run row (the reaper releases by run id), so the credit stayed reserved for good, and migration 0070 then refuses a refund of that order forever. | **fixed 2026-10-25** (refused while any automation of the business has a run in flight; H-015) |
 | F-032 | P2 | storage | Deleting an automation or business removed its rows (runs, Shorts library items) but left the reference photos and finished videos in Storage under `<user>/<automation>/` — unreachable, and counted against Supabase Free storage. | **fixed 2026-10-25** (`removeShortsFiles` after a successful delete; H-016) |
-| F-033 | P2 | automations delete | `deleteAutomation`/`deleteBusiness` check "no run in flight" and then delete in a second statement; a run claimed by the scheduler tick in between would still be cascaded (same stranded-credit result as F-031, a sub-second window). A proper fix is a DB-side check (trigger or RPC) — not done in an unattended run. | open |
+| F-033 | P2 | automations delete | `deleteAutomation`/`deleteBusiness` check "no run in flight" and then delete in a second statement; a run claimed by the scheduler tick in between would still be cascaded (same stranded-credit result as F-031, a sub-second window). | **fixed 2026-10-26** (migration `0078` `BEFORE DELETE` trigger, errcode 55006 → "실행 중" message; H-017) — **needs prod `db push`**. The code works with or without 0078 (without it only the app-level check runs). |
 
 ## Run log
+
+### 2026-10-26 (last scheduled run)
+
+- **Start SHA:** `2ef5338` (no commits since the 2026-10-25 run; whole-project review day).
+- **Working tree:** clean except the never-committed `mascot/` and `*-marketing.md`.
+- **Local env:** `bash scripts/dev-db.sh start` — local DB migrated 0077 → 0078.
+- **Reviewed:** every path that deletes `automations` (customer actions only; account deletion cascades through `profiles`), run creation order in `runAutomation` (run row inserted RUNNING before `reserve_credit`, so a delete either sees the run or the insert fails on the FK), stale-run reaper covers QUEUED + RUNNING (a stuck run cannot block deletion for good), auth actions + `/auth/callback` (recovery cookie scoped to `/reset-password`, re-authentication before password change / account deletion, no account enumeration on reset) — no new defect there.
+- **Fixed:** F-033 (H-017) with migration `0078_no_automation_delete_mid_run.sql` + 55006 mapping in `deleteAutomation`/`deleteBusiness`.
+- **Tests added:** `src/server/automations/delete-guard.db.test.ts` (3; the two refusal cases fail with the trigger dropped, account deletion passes either way), one unit test per action for the 55006 message.
+- **Verification:** see below in this entry. EVIDENCE: UNIT + local DB. **Not run:** `harness:demo` / `harness:perf` / browser smoke (no dev server in an unattended run; `.env.local` points at the hosted project).
+- **User-only actions:** `npx supabase db push --linked` to apply **0078** to production (additive trigger + function; rollback in the file header). Still open: Vercel Production `AI_PROVIDER=anthropic` and no `ALLOW_MOCK_AI` (H-003).
+- **Still open after the routine ends:** F-011 (refund after a REJECTED request — policy decision), F-022 (dead customer-support/directory code — owners), `harness:demo` incl. `shorts-library.e2e.mjs` in an interactive session.
+- **Routine:** this was the 17th and last run; the scheduled task is disabled at the end of the run.
+- **Commit:** see git log (fix(automations): the database refuses deleting an automation while a run is in flight)
 
 ### 2026-10-25
 
